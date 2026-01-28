@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '@/services/api';
 import AdminLayout from '@/components/admin/AdminLayout';
 import {
@@ -10,26 +10,36 @@ import {
   HiUser,
   HiCheckCircle,
   HiXCircle,
+  HiClock,
 } from 'react-icons/hi';
 
 interface Professional {
   id: string;
+  userId: string;
+  country: string | null;
+  nationality: string | null;
+  dateOfBirth: string | null;
+  identityVerified: boolean;
+  identityStatus: string;
+  setupCompleted: boolean;
+  profileCompleteness: number;
+  createdAt: string;
+  updatedAt: string;
   user: {
     id: string;
     email: string;
     firstName: string;
     lastName: string;
+    status: string;
   };
   identityVerification: {
     status: string;
   } | null;
-  identityStatus: string;
-  profileCompleteness: number;
-  createdAt: string;
 }
 
 export default function ProfessionalsList() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,6 +51,34 @@ export default function ProfessionalsList() {
 
   useEffect(() => {
     fetchProfessionals();
+  }, [page, statusFilter]);
+
+  // Refresh when location changes (e.g., when returning from detail page)
+  useEffect(() => {
+    if (location.pathname === '/admin/professionals') {
+      fetchProfessionals();
+    }
+  }, [location.pathname]);
+
+  // Refresh when page becomes visible or focused (e.g., when returning from detail page)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchProfessionals();
+      }
+    };
+    
+    const handleFocus = () => {
+      fetchProfessionals();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [page, statusFilter]);
 
   const fetchProfessionals = async () => {
@@ -65,8 +103,8 @@ export default function ProfessionalsList() {
     
     const matchesStatus =
       statusFilter === 'all' ||
-      (statusFilter === 'verified' && prof.identityStatus === 'verified') ||
-      (statusFilter === 'pending' && prof.identityStatus !== 'verified');
+      (statusFilter === 'verified' && (prof.user?.status === 'ACTIVE' || prof.user?.status === 'VERIFIED')) ||
+      (statusFilter === 'pending' && prof.user?.status !== 'ACTIVE' && prof.user?.status !== 'VERIFIED');
 
     return matchesSearch && matchesStatus;
   });
@@ -93,7 +131,7 @@ export default function ProfessionalsList() {
               placeholder="Search by name or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -101,7 +139,7 @@ export default function ProfessionalsList() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="all">All Status</option>
               <option value="verified">Verified</option>
@@ -139,7 +177,7 @@ export default function ProfessionalsList() {
                 setSearchTerm('');
                 setStatusFilter('all');
               }}
-              className="text-teal-600 hover:text-teal-700 text-sm font-medium"
+              className="text-brand-600 hover:text-brand-700 text-sm font-medium"
             >
               Clear Filters
             </button>
@@ -176,8 +214,8 @@ export default function ProfessionalsList() {
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mr-3">
-                              <HiUser className="w-5 h-5 text-teal-600" />
+                            <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3">
+                              <HiUser className="w-5 h-5 text-brand-600" />
                             </div>
                             <div>
                               <div className="text-sm font-medium text-gray-900">
@@ -190,23 +228,47 @@ export default function ProfessionalsList() {
                           <div className="text-sm text-gray-500">{prof.user.email}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {prof.identityStatus === 'verified' ? (
+                          {(() => {
+                            // Use user.status from the user object
+                            const userStatus = prof.user?.status || 'UNVERIFIED';
+                            
+                            if (userStatus === 'ACTIVE' || userStatus === 'VERIFIED') {
+                              return (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                               <HiCheckCircle className="w-4 h-4 mr-1" />
-                              Verified
+                                  {userStatus === 'VERIFIED' ? 'Verified' : 'Active'}
+                                </span>
+                              );
+                            } else if (userStatus === 'SUSPENDED') {
+                              return (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  <HiXCircle className="w-4 h-4 mr-1" />
+                                  Suspended
                             </span>
-                          ) : (
+                              );
+                            } else if (userStatus === 'PENDING_INVITATION') {
+                              return (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  <HiClock className="w-4 h-4 mr-1" />
+                                  Pending Invitation
+                                </span>
+                              );
+                            } else {
+                              // UNVERIFIED or any other status
+                              return (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                               <HiXCircle className="w-4 h-4 mr-1" />
-                              Pending
+                                  Unverified
                             </span>
-                          )}
+                              );
+                            }
+                          })()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
                               <div
-                                className="bg-teal-500 h-2 rounded-full"
+                                className="bg-brand-500 h-2 rounded-full"
                                 style={{ width: `${prof.profileCompleteness || 0}%` }}
                               ></div>
                             </div>

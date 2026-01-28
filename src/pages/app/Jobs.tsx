@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 
@@ -41,9 +42,9 @@ export default function Jobs() {
   const handleApply = async (jobId: string) => {
     try {
       await api.post(`/v1/jobs/${jobId}/apply`, {});
-      alert('Application submitted successfully!');
+      toast.success('Application submitted successfully!');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to apply');
+      toast.error(err.response?.data?.message || 'Failed to apply');
     }
   };
 

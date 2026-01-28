@@ -55,7 +55,7 @@ export default function TransactionDetail() {
       <div className="p-6">
       <button
         onClick={() => navigate('/admin/transactions')}
-        className="mb-6 flex items-center text-teal-600 hover:text-teal-700"
+        className="mb-6 flex items-center text-brand-600 hover:text-brand-700"
       >
         <HiArrowLeft className="w-5 h-5 mr-2" />
         Back to Transactions
@@ -64,8 +64,8 @@ export default function TransactionDetail() {
       <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center">
-            <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mr-4">
-              <HiCurrencyDollar className="w-8 h-8 text-teal-600" />
+            <div className="w-16 h-16 bg-brand-100 rounded-full flex items-center justify-center mr-4">
+              <HiCurrencyDollar className="w-8 h-8 text-brand-600" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Transaction {transaction.id}</h1>

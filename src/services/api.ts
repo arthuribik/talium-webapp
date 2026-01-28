@@ -1,7 +1,16 @@
 import axios from 'axios';
 
+// Type assertion for Vite's import.meta.env
+const getEnvVar = (key: string, defaultValue: string): string => {
+  try {
+    return (import.meta as any).env?.[key] || defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5103',
+  baseURL: getEnvVar('VITE_API_URL', 'http://localhost:5103'),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -17,18 +26,67 @@ const getToken = () => {
   }
 };
 
-// Add token to requests if available on initialization
-const token = getToken();
-if (token) {
-  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-}
+// Helper function to get refresh token from localStorage
+// Reserved for future token refresh implementation
+// @ts-ignore - Intentionally unused, reserved for future token refresh
+const getRefreshToken = () => {
+  try {
+    return localStorage.getItem('refreshToken');
+  } catch (error) {
+    console.error('Error reading refreshToken from localStorage:', error);
+    return null;
+  }
+};
 
-// Request interceptor to add token to every request
+// Add token to requests if available on initialization
+// This ensures token is set BEFORE any route guards check
+const initializeToken = () => {
+  try {
+    const token = localStorage.getItem('token');
+    if (token && token.trim()) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token.trim()}`;
+    }
+  } catch (e) {
+    console.error('Error initializing token:', e);
+  }
+};
+
+// Initialize immediately - this is critical for route guards
+initializeToken();
+
+// List of public endpoints that don't require authentication
+const publicEndpoints = [
+  '/v1/jobs',
+  '/v1/auth/',
+  '/v1/admin/professionals', // Public landing page endpoint
+  '/v1/admin/organisations', // Public landing page endpoint
+  '/v1/admin/jobs', // Public landing page endpoint (if used)
+];
+
+// Check if an endpoint is public
+const isPublicEndpoint = (url: string | undefined): boolean => {
+  if (!url) return false;
+  return publicEndpoints.some(endpoint => url.includes(endpoint));
+};
+
+// Request interceptor to add token to every request (except public endpoints)
 api.interceptors.request.use(
   (config) => {
     // Ensure headers object exists
     if (!config.headers) {
       config.headers = {} as any;
+    }
+    
+    // Skip adding auth header for public endpoints
+    if (isPublicEndpoint(config.url)) {
+      // Remove authorization header for public endpoints
+      delete config.headers['Authorization'];
+      delete (config.headers as any).Authorization;
+      
+      if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
+        console.log(`[API] Public endpoint - skipping auth for ${config.method?.toUpperCase()} ${config.url}`);
+      }
+      return config;
     }
     
     // Get token from localStorage on every request to ensure it's up to date
@@ -44,7 +102,7 @@ api.interceptors.request.use(
       api.defaults.headers.common['Authorization'] = authValue;
       
       // Debug in development
-      if (import.meta.env.DEV) {
+      if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
         console.log(`[API] Adding token to ${config.method?.toUpperCase()} ${config.url}`);
       }
     } else {
@@ -53,7 +111,7 @@ api.interceptors.request.use(
       delete (config.headers as any).Authorization;
       delete api.defaults.headers.common['Authorization'];
       
-      if (import.meta.env.DEV) {
+      if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
         console.warn(`[API] No token found for ${config.method?.toUpperCase()} ${config.url}`);
       }
     }
@@ -66,40 +124,99 @@ api.interceptors.request.use(
 );
 
 // Response interceptor to handle 401 errors
+let redirectInProgress = false;
+let last401Time = 0;
+let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
+let appInitialized = false;
+let initializationTime = Date.now();
+
+// Mark app as initialized after 2 seconds (give time for route guards to check)
+setTimeout(() => {
+  appInitialized = true;
+}, 2000);
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Clear any pending redirect on successful response
+    if (redirectTimeout) {
+      clearTimeout(redirectTimeout);
+      redirectTimeout = null;
+    }
+    redirectInProgress = false;
+    return response;
+  },
   (error) => {
+    // Only handle 401 Unauthorized errors
     if (error.response?.status === 401) {
+      const requestUrl = error.config?.url || '';
+      
+      // Skip redirect for public endpoints - they don't require auth
+      if (isPublicEndpoint(requestUrl)) {
+        return Promise.reject(error);
+      }
+      
       const currentPath = window.location.pathname;
       const isAdminRoute = currentPath.startsWith('/admin');
+      const now = Date.now();
+      const timeSinceInit = now - initializationTime;
       
-      // Only clear and redirect if this is a real 401 (not a token expiration during initial load)
-      // Check if we have a token - if we do, this is a real auth failure
+      // NEVER redirect during initial app load (first 3 seconds)
+      // This prevents redirects before route guards can check auth
+      if (!appInitialized || timeSinceInit < 3000) {
+        return Promise.reject(error);
+      }
+      
+      // Skip redirect if already on login pages or home
+      if (currentPath === '/login' || currentPath === '/admin/login' || currentPath === '/') {
+        return Promise.reject(error);
+      }
+      
+      // Prevent multiple redirects within 5 seconds
+      if (redirectInProgress || (now - last401Time < 5000)) {
+        return Promise.reject(error);
+      }
+      
       const token = getToken();
       
-      if (token) {
+      // Only redirect if we have a token (meaning it was sent but rejected)
+      // AND the request was NOT made during initial load
+      // This indicates the token is invalid/expired, not just missing
+      if (token && token.trim() && appInitialized && timeSinceInit > 3000) {
+        // Cancel any pending redirect
+        if (redirectTimeout) {
+          clearTimeout(redirectTimeout);
+        }
+        
+        redirectInProgress = true;
+        last401Time = now;
+        
         // Clear auth data on unauthorized
         try {
           localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
         } catch (e) {
           console.error('Error clearing localStorage:', e);
         }
         delete api.defaults.headers.common['Authorization'];
         
-        // Redirect to appropriate login page based on route
-        // Only redirect if not already on a login page and not during initial page load
-        if (currentPath !== '/login' && currentPath !== '/admin/login' && currentPath !== '/') {
-          // Use a small delay to avoid redirect loops
-          setTimeout(() => {
+        // Use a delay to avoid redirect loops and allow other requests to complete
+        redirectTimeout = setTimeout(() => {
+          redirectInProgress = false;
+          redirectTimeout = null;
+          // Only redirect if we're still on a protected route
+          const stillOnProtectedRoute = window.location.pathname.startsWith('/admin') || 
+                                        window.location.pathname.startsWith('/dashboard');
+          if (stillOnProtectedRoute) {
             if (isAdminRoute) {
               window.location.href = '/admin/login';
             } else {
-              window.location.href = '/login';
+            window.location.href = '/login';
             }
-          }, 100);
-        }
+          }
+        }, 1000);
       }
+      // If no token, just reject - let the route guard handle it
     }
     return Promise.reject(error);
   }

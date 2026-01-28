@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { login, clearError } from '@/store/authSlice';
+import { HiEye, HiEyeOff } from 'react-icons/hi';
+import logo from '@/assets/logo.svg';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
@@ -15,8 +18,19 @@ export default function Login() {
     dispatch(clearError());
 
     try {
-      await dispatch(login({ email, password })).unwrap();
-      navigate('/dashboard');
+      const result = await dispatch(login({ email, password })).unwrap();
+      const loggedInUser = result?.user;
+      
+      // Redirect based on user type
+      if (loggedInUser?.userType === 'PROFESSIONAL') {
+        navigate('/professional');
+      } else if (loggedInUser?.userType === 'ORGANISATION') {
+        navigate('/organization');
+      } else if (loggedInUser?.userType === 'ADMIN') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       // Error is handled by Redux
     }
@@ -25,8 +39,11 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full space-y-8 p-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+        <div className="text-center">
+          <Link to="/" className="inline-block mb-6">
+            <img src={logo} alt="Taldium" className="h-10 mx-auto" />
+          </Link>
+          <h2 className="text-center text-3xl font-extrabold text-gray-900">
             Sign in to Taldium
           </h2>
         </div>
@@ -48,7 +65,7 @@ export default function Login() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-brand-500 focus:border-brand-500 focus:z-10 sm:text-sm"
                 placeholder="Email address"
               />
             </div>
@@ -56,16 +73,29 @@ export default function Login() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Password
               </label>
+              <div className="relative mt-1">
               <input
                 id="password"
                 name="password"
-                type="password"
+                  type={showPassword ? 'text' : 'password'}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+                  className="appearance-none relative block w-full px-3 py-2 pr-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-brand-500 focus:border-brand-500 focus:z-10 sm:text-sm"
                 placeholder="Password"
               />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? (
+                    <HiEyeOff className="h-5 w-5" />
+                  ) : (
+                    <HiEye className="h-5 w-5" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -73,18 +103,18 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-brand-500 hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 disabled:opacity-50"
             >
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </div>
 
           <div className="text-center space-y-2">
-            <Link to="/register" className="text-sm text-indigo-600 hover:text-indigo-500">
+            <Link to="/join" className="text-sm text-brand-600 hover:text-brand-500">
               Register as Professional
             </Link>
             <br />
-            <Link to="/register-business" className="text-sm text-indigo-600 hover:text-indigo-500">
+            <Link to="/register-business" className="text-sm text-brand-600 hover:text-brand-500">
               Register as Organisation
             </Link>
           </div>

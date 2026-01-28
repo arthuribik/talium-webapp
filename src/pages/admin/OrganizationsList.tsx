@@ -90,7 +90,7 @@ export default function OrganizationsList() {
               placeholder="Search by company name, country, or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -98,7 +98,7 @@ export default function OrganizationsList() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="all">All Status</option>
               <option value="verified">Verified</option>
@@ -136,7 +136,7 @@ export default function OrganizationsList() {
                 setSearchTerm('');
                 setStatusFilter('all');
               }}
-              className="text-teal-600 hover:text-teal-700 text-sm font-medium"
+              className="text-brand-600 hover:text-brand-700 text-sm font-medium"
             >
               Clear Filters
             </button>
@@ -173,8 +173,8 @@ export default function OrganizationsList() {
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mr-3">
-                              <HiOfficeBuilding className="w-5 h-5 text-teal-600" />
+                            <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3">
+                              <HiOfficeBuilding className="w-5 h-5 text-brand-600" />
                             </div>
                             <div>
                               <div className="text-sm font-medium text-gray-900">{org.companyName}</div>

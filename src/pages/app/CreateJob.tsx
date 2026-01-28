@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 
@@ -8,7 +9,7 @@ export default function CreateJob() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [orgId, setOrgId] = useState('');
+  const orgId = user?.organisation?.id || '';
 
   const [formData, setFormData] = useState({
     jobTitle: '',
@@ -53,7 +54,11 @@ export default function CreateJob() {
     setError('');
 
     try {
-      await api.post(`/v1/jobs/draft?organisationId=${orgId || 'temp'}`, {
+      if (!orgId) {
+        toast.error('Organization ID not found. Please complete your organization setup.');
+        return;
+      }
+      await api.post(`/v1/jobs/draft?organisationId=${orgId}`, {
         ...formData,
         experienceYears: formData.experienceYears ? parseInt(formData.experienceYears) : undefined,
         pay: {
@@ -62,10 +67,17 @@ export default function CreateJob() {
         },
         requirements: formData.requirements.filter((r) => r.trim() !== ''),
       });
-      alert('Job created successfully!');
-      navigate('/dashboard');
+      toast.success('Job created successfully!');
+      // Navigate based on current path
+      if (window.location.pathname.includes('/organization')) {
+        navigate('/organization/jobs');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create job');
+      const errorMsg = err.response?.data?.message || 'Failed to create job';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

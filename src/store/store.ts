@@ -7,7 +7,7 @@ import { api } from '@/services/api';
 const authPersistConfig = {
   key: 'auth',
   storage,
-  whitelist: ['user', 'token', 'isAuthenticated'],
+  whitelist: ['user', 'token', 'refreshToken', 'isAuthenticated'],
 };
 
 const persistedAuthReducer = persistReducer(authPersistConfig, authReducer);
@@ -33,15 +33,21 @@ persistor.subscribe(() => {
   if (!isRehydrated && state.auth._persist?.rehydrated) {
     isRehydrated = true;
     // Set token immediately after rehydration
-    if (state.auth.token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${state.auth.token}`;
-      // Also ensure it's in localStorage (should already be there, but double-check)
+    const token = state.auth.token || localStorage.getItem('token');
+    const refreshToken = state.auth.refreshToken || localStorage.getItem('refreshToken');
+    if (token) {
+      const authHeader = `Bearer ${token.trim()}`;
+      api.defaults.headers.common['Authorization'] = authHeader;
+      // Ensure tokens are in localStorage
       try {
         if (!localStorage.getItem('token')) {
-          localStorage.setItem('token', state.auth.token);
+          localStorage.setItem('token', token);
+        }
+        if (refreshToken && !localStorage.getItem('refreshToken')) {
+          localStorage.setItem('refreshToken', refreshToken);
         }
       } catch (e) {
-        console.error('Error syncing token to localStorage:', e);
+        console.error('Error syncing tokens to localStorage:', e);
       }
     } else {
       // Clear token if not in state
@@ -49,13 +55,19 @@ persistor.subscribe(() => {
     }
   } else if (isRehydrated) {
     // Update token if it changes after rehydration
-    if (state.auth.token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${state.auth.token}`;
+    const token = state.auth.token || localStorage.getItem('token');
+    const refreshToken = state.auth.refreshToken || localStorage.getItem('refreshToken');
+    if (token) {
+      const authHeader = `Bearer ${token.trim()}`;
+      api.defaults.headers.common['Authorization'] = authHeader;
       // Sync to localStorage
       try {
-        localStorage.setItem('token', state.auth.token);
+        localStorage.setItem('token', token);
+        if (refreshToken) {
+          localStorage.setItem('refreshToken', refreshToken);
+        }
       } catch (e) {
-        console.error('Error syncing token to localStorage:', e);
+        console.error('Error syncing tokens to localStorage:', e);
       }
     } else {
       delete api.defaults.headers.common['Authorization'];

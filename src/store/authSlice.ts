@@ -15,6 +15,7 @@ export interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
+  refreshToken: string | null;
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
@@ -23,6 +24,7 @@ interface AuthState {
 const initialState: AuthState = {
   user: null,
   token: null,
+  refreshToken: null,
   isAuthenticated: false,
   loading: false,
   error: null,
@@ -31,6 +33,7 @@ const initialState: AuthState = {
 // Initialize auth from localStorage
 const initializeAuth = (): Partial<AuthState> => {
   const token = localStorage.getItem('token');
+  const refreshToken = localStorage.getItem('refreshToken');
   const userStr = localStorage.getItem('user');
   
   if (token && userStr) {
@@ -40,12 +43,14 @@ const initializeAuth = (): Partial<AuthState> => {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       return {
         token,
+        refreshToken: refreshToken || null,
         user,
         isAuthenticated: true,
       };
     } catch (error) {
       // If parsing fails, clear invalid data
       localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       return {};
     }
@@ -148,20 +153,26 @@ const authSlice = createSlice({
     logout: (state) => {
       state.user = null;
       state.token = null;
+      state.refreshToken = null;
       state.isAuthenticated = false;
       state.error = null;
       localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
       delete api.defaults.headers.common['Authorization'];
     },
     clearError: (state) => {
       state.error = null;
     },
-    setCredentials: (state, action: PayloadAction<{ token: string; user: User }>) => {
+    setCredentials: (state, action: PayloadAction<{ token: string; refreshToken?: string; user: User }>) => {
       state.token = action.payload.token;
+      state.refreshToken = action.payload.refreshToken || state.refreshToken;
       state.user = action.payload.user;
       state.isAuthenticated = true;
       localStorage.setItem('token', action.payload.token);
+      if (action.payload.refreshToken) {
+        localStorage.setItem('refreshToken', action.payload.refreshToken);
+      }
       localStorage.setItem('user', JSON.stringify(action.payload.user));
       api.defaults.headers.common['Authorization'] = `Bearer ${action.payload.token}`;
     },
@@ -176,9 +187,13 @@ const authSlice = createSlice({
       .addCase(login.fulfilled, (state, action) => {
         state.loading = false;
         state.token = action.payload.token;
+        state.refreshToken = action.payload.refreshToken || null;
         state.user = action.payload.user;
         state.isAuthenticated = true;
         localStorage.setItem('token', action.payload.token);
+        if (action.payload.refreshToken) {
+          localStorage.setItem('refreshToken', action.payload.refreshToken);
+        }
         localStorage.setItem('user', JSON.stringify(action.payload.user));
         api.defaults.headers.common['Authorization'] = `Bearer ${action.payload.token}`;
       })
@@ -197,9 +212,13 @@ const authSlice = createSlice({
       .addCase(adminLogin.fulfilled, (state, action) => {
         state.loading = false;
         state.token = action.payload.token;
+        state.refreshToken = action.payload.refreshToken || null;
         state.user = action.payload.user;
         state.isAuthenticated = true;
         localStorage.setItem('token', action.payload.token);
+        if (action.payload.refreshToken) {
+          localStorage.setItem('refreshToken', action.payload.refreshToken);
+        }
         localStorage.setItem('user', JSON.stringify(action.payload.user));
         api.defaults.headers.common['Authorization'] = `Bearer ${action.payload.token}`;
       })
@@ -247,8 +266,10 @@ const authSlice = createSlice({
         // If profile fetch fails, logout user
         state.user = null;
         state.token = null;
+        state.refreshToken = null;
         state.isAuthenticated = false;
         localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');
         delete api.defaults.headers.common['Authorization'];
       });

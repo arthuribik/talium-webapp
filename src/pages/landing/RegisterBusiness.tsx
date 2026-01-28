@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { registerBusiness } from '@/store/authSlice';
 import { api } from '@/services/api';
@@ -32,6 +33,7 @@ import {
   FaEnvelope,
   FaBookmark
 } from 'react-icons/fa';
+import logo from '@/assets/logo.svg';
 
 interface RegistrationFormData {
   // Step 1: Registration Status
@@ -205,7 +207,7 @@ export default function RegisterBusiness() {
         setFormData((prev) => ({ ...prev, isRegistered }));
         
         try {
-          const response = await api.post('/v1/registration/step/1', { isRegistered });
+          const response = await api.post('/v1/auth/registration/step', { step: 1, isRegistered });
           const newId = response.data?.id;
           if (newId) {
             setRegistrationId(newId);
@@ -241,7 +243,7 @@ export default function RegisterBusiness() {
   // Load registration data from API
   const loadRegistrationData = async (id: string) => {
     try {
-      const response = await api.get(`/v1/registration/${id}`);
+      const response = await api.get(`/v1/auth/registration/${id}`);
       const data = response.data;
       
       // Restore form data from saved registration
@@ -312,15 +314,57 @@ export default function RegisterBusiness() {
     }
   };
 
-  // Save step data to API
+  // Ensure registration ID exists, create one if needed
+  const ensureRegistrationId = async (isRegistered: boolean): Promise<string> => {
+    if (registrationId) {
+      return registrationId;
+    }
+    
+    // Create a new registration by saving step 1
+    try {
+        const step1Data = { step: 1, isRegistered };
+        const response = await api.post(`/v1/auth/registration/step`, step1Data);
+      const newId = response.data.id;
+      
+      if (newId) {
+        setRegistrationId(newId);
+        localStorage.setItem('registrationId', newId);
+        // Also update formData with the registration status
+        setFormData(prev => ({ ...prev, isRegistered }));
+        return newId;
+      }
+      
+      throw new Error('Failed to create registration ID');
+    } catch (error: any) {
+      setLocalError(error.response?.data?.message || 'Failed to create registration. Please try again.');
+      throw error;
+    }
+  };
+
+  // Save step data to API (using unified endpoint)
   const saveStepData = async (step: number, data: any): Promise<string | null> => {
     setSavingStep(true);
     setLocalError('');
     
     try {
-      const endpoint = `/v1/registration/step/${step}`;
-      const params = registrationId ? `?id=${registrationId}` : '';
-      const response = await api.post(`${endpoint}${params}`, data);
+      // Ensure we have a registration ID before saving (except for steps 1 and 7 which create the ID)
+      let idToUse = registrationId;
+      if (!idToUse && step !== 1 && step !== 7) {
+        // Determine if registered based on current step or formData
+        // Steps 2, 3, 4, 5 are for registered flow
+        // Steps 8 is for non-registered flow
+        const isRegistered = step >= 2 && step <= 5;
+        idToUse = await ensureRegistrationId(isRegistered);
+      }
+      
+      // Use unified endpoint
+      const payload = {
+        step,
+        ...(idToUse && { id: idToUse }),
+        ...data,
+      };
+      
+      const response = await api.post(`/v1/auth/registration/step`, payload);
       
       const returnedId = response.data.id;
       if (returnedId && returnedId !== registrationId) {
@@ -328,11 +372,14 @@ export default function RegisterBusiness() {
         localStorage.setItem('registrationId', returnedId);
       }
       
+      toast.success('Step saved successfully!');
       setSavingStep(false);
       return returnedId;
     } catch (error: any) {
       setSavingStep(false);
-      setLocalError(error.response?.data?.message || 'Failed to save step data');
+      const errorMsg = error.response?.data?.message || 'Failed to save step data';
+      setLocalError(errorMsg);
+      toast.error(errorMsg);
       throw error;
     }
   };
@@ -377,14 +424,18 @@ export default function RegisterBusiness() {
     setLocalError('');
 
     try {
-      // TODO: Call backend API to send verification code
-      // In production, this would be: await api.post('/v1/organisations/send-verification-code', { email: formData.organisationEmail });
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call backend API to send verification code
+      const response = await api.post('/v1/auth/send-verification-code', { 
+        email: formData.organisationEmail 
+      });
       
       // Mark that code has been sent
       setFormData({ ...formData, codeSent: true, verificationCode: '' });
+      
+      // In development, log the code if returned
+      if (response.data.code) {
+        console.log('Verification code:', response.data.code);
+      }
     } catch (err: any) {
       setLocalError(err.response?.data?.message || 'Failed to send verification code');
     } finally {
@@ -402,11 +453,11 @@ export default function RegisterBusiness() {
     setLocalError('');
 
     try {
-      // TODO: Call backend API to verify code
-      // In production, this would be: await api.post('/v1/organisations/verify-code', { email: formData.organisationEmail, code: formData.verificationCode });
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call backend API to verify code
+      await api.post('/v1/auth/verify-email', { 
+        email: formData.organisationEmail,
+        code: formData.verificationCode
+      });
       
       // Mark as verified
       setFormData({ ...formData, emailVerified: true });
@@ -508,12 +559,7 @@ export default function RegisterBusiness() {
         setLocalError('Address country is required');
         return;
       }
-      // Save step 7 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 7 data (this will create ID if needed)
       try {
         await saveStepData(7, {
           organisationName: formData.organisationName,
@@ -556,12 +602,7 @@ export default function RegisterBusiness() {
         return;
       }
       
-      // Save step 8 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 8 data (this will create ID if needed)
       try {
         await saveStepData(8, {
           category: formData.category,
@@ -589,12 +630,7 @@ export default function RegisterBusiness() {
         setLocalError('Incorporation number is required');
         return;
       }
-      // Save step 2 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 2 data (this will create ID if needed)
       try {
         await saveStepData(2, {
           legalName: formData.legalName,
@@ -634,12 +670,7 @@ export default function RegisterBusiness() {
         return;
       }
       
-      // Save step 3 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 3 data (this will create ID if needed)
       try {
         await saveStepData(3, {
           category: formData.category,
@@ -691,12 +722,7 @@ export default function RegisterBusiness() {
         setLocalError('Please select country');
         return;
       }
-      // Save step 4 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 4 data (this will create ID if needed)
       try {
         await saveStepData(4, {
           description: formData.description,
@@ -727,12 +753,7 @@ export default function RegisterBusiness() {
         setLocalError('Please verify your email address before continuing');
         return;
       }
-      // Save step 5 data
-      if (!registrationId) {
-        setLocalError('Registration ID is missing. Please start from step 1.');
-        return;
-      }
-      
+      // Save step 5 data (this will create ID if needed)
       try {
         await saveStepData(5, {
           organisationEmail: formData.organisationEmail,
@@ -788,13 +809,13 @@ export default function RegisterBusiness() {
               onClick={() => handleRegistrationStatusSelect(true)}
               className={`p-6 rounded-xl border-2 transition-all text-left ${
                 formData.isRegistered === true
-                  ? 'border-teal-500 bg-teal-50'
+                  ? 'border-brand-500 bg-brand-50'
                   : 'border-gray-200 bg-white hover:border-gray-300'
               }`}
             >
               <div className="flex flex-col items-start">
                 <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center mb-4">
-                  <HiDocumentText className="w-6 h-6 text-teal-500" />
+                  <HiDocumentText className="w-6 h-6 text-brand-500" />
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Yes, It's Registered
@@ -811,7 +832,7 @@ export default function RegisterBusiness() {
               onClick={() => handleRegistrationStatusSelect(false)}
               className={`p-6 rounded-xl border-2 transition-all text-left ${
                 formData.isRegistered === false
-                  ? 'border-teal-500 bg-teal-50'
+                  ? 'border-brand-500 bg-brand-50'
                   : 'border-gray-200 bg-white hover:border-gray-300'
               }`}
             >
@@ -836,7 +857,7 @@ export default function RegisterBusiness() {
             type="button"
             onClick={handleNext}
             disabled={formData.isRegistered === null || loading || savingStep}
-            className="px-6 py-3 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-6 py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {savingStep ? 'Saving...' : 'Continue'}
           </button>
@@ -1712,8 +1733,8 @@ export default function RegisterBusiness() {
           {/* About Section */}
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-start mb-4">
-              <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-4">
-                <FaFileAlt className="w-5 h-5 text-teal-600" />
+              <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-4">
+                <FaFileAlt className="w-5 h-5 text-brand-600" />
               </div>
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">About</h3>
@@ -1725,11 +1746,11 @@ export default function RegisterBusiness() {
                 )}
                 <div className="flex flex-wrap gap-2">
                   {isRegistered && categoryLabel && (
-                    <span className="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-sm font-medium">
+                    <span className="px-3 py-1 bg-brand-100 text-brand-700 rounded-full text-sm font-medium">
                       {categoryLabel}{additionalInfo ? ` - ${additionalInfo}` : ''}
                     </span>
                   )}
-                  <span className="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-sm font-medium">
+                  <span className="px-3 py-1 bg-brand-100 text-brand-700 rounded-full text-sm font-medium">
                     {isRegistered ? 'Registered' : 'Not Registered'}
                   </span>
                 </div>
@@ -1743,8 +1764,8 @@ export default function RegisterBusiness() {
             {isRegistered ? (
               <div className="bg-white border border-gray-200 rounded-lg p-6">
                 <div className="flex items-center mb-4">
-                  <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                    <FaFileAlt className="w-5 h-5 text-teal-600" />
+                  <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                    <FaFileAlt className="w-5 h-5 text-brand-600" />
                   </div>
                   <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">INCORPORATION DETAILS</h3>
                 </div>
@@ -1762,8 +1783,8 @@ export default function RegisterBusiness() {
             ) : (
               <div className="bg-white border border-gray-200 rounded-lg p-6">
                 <div className="flex items-center mb-4">
-                  <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                    <FaFileAlt className="w-5 h-5 text-teal-600" />
+                  <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                    <FaFileAlt className="w-5 h-5 text-brand-600" />
                   </div>
                   <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">ORGANISATION DETAILS</h3>
                 </div>
@@ -1779,8 +1800,8 @@ export default function RegisterBusiness() {
             {/* Industry & Headquarters */}
             <div className="bg-white border border-gray-200 rounded-lg p-6">
               <div className="flex items-center mb-4">
-                <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                  <FaBriefcase className="w-5 h-5 text-teal-600" />
+                <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                  <FaBriefcase className="w-5 h-5 text-brand-600" />
                 </div>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">INDUSTRY & HEADQUARTERS</h3>
               </div>
@@ -1803,8 +1824,8 @@ export default function RegisterBusiness() {
             {/* Founded & Address */}
             <div className="bg-white border border-gray-200 rounded-lg p-6">
               <div className="flex items-center mb-4">
-                <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                  <HiCalendar className="w-5 h-5 text-teal-600" />
+                <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                  <HiCalendar className="w-5 h-5 text-brand-600" />
                 </div>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">FOUNDED & ADDRESS</h3>
               </div>
@@ -1823,8 +1844,8 @@ export default function RegisterBusiness() {
             {/* Contact */}
             <div className="bg-white border border-gray-200 rounded-lg p-6">
               <div className="flex items-center mb-4">
-                <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                  <FaEnvelope className="w-5 h-5 text-teal-600" />
+                <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                  <FaEnvelope className="w-5 h-5 text-brand-600" />
                 </div>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">CONTACT</h3>
               </div>
@@ -1843,8 +1864,8 @@ export default function RegisterBusiness() {
           {/* Description - Full Width */}
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <div className="flex items-center mb-4">
-              <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center mr-3">
-                <FaBookmark className="w-5 h-5 text-teal-600" />
+              <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                <FaBookmark className="w-5 h-5 text-brand-600" />
               </div>
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">DESCRIPTION</h3>
             </div>
@@ -1866,7 +1887,7 @@ export default function RegisterBusiness() {
             type="button"
             onClick={() => setShowPasswordModal(true)}
             disabled={loading}
-            className="flex items-center px-6 py-3 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center px-6 py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Set Your Password
             <HiChevronRight className="w-5 h-5 ml-2" />
@@ -2322,243 +2343,254 @@ export default function RegisterBusiness() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4">
-      <div className="w-full">
-        {(error || localError) && (
-          <div className="max-w-4xl mx-auto mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            {error || localError}
-          </div>
-        )}
-
-        {/* Step Indicator */}
-        <div className="max-w-4xl mx-auto mb-8">
-          <div className="flex items-center justify-center space-x-2 md:space-x-4">
-            {(() => {
-              // Show different steps based on registration status
-              const steps = formData.isRegistered === false
-                ? [
-                    { number: 1, label: 'Details', step: 7 }, // Organisation Details (step 7)
-                    { number: 2, label: 'Category', step: 8 }, // Category (step 8)
-                    { number: 3, label: 'Email Verification', step: 5 }, // Email Verification (step 5)
-                    { number: 4, label: 'Preview', step: 6 }, // Preview (step 6)
-                  ]
-                : formData.isRegistered === true
-                ? [
-                    { number: 1, label: 'Incorporation', step: 2 }, // Incorporation details (step 2)
-                    { number: 2, label: 'Category', step: 3 }, // Category (step 3)
-                    { number: 3, label: 'Description', step: 4 }, // Description (step 4)
-                    { number: 4, label: 'Email Verification', step: 5 }, // Email Verification (step 5)
-                    { number: 5, label: 'Preview', step: 6 }, // Preview (step 6)
-                  ]
-                : []; // No steps shown until registration status is selected
-
-              return steps.map((stepInfo, index) => {
-                // Skip empty steps
-                if (stepInfo.step === 0) {
-                  return <div key={`empty-${index}`} className="w-8" />;
-                }
-
-                const isActive = currentStep === stepInfo.step;
-                const isCompleted = formData.isRegistered === false
-                  ? (stepInfo.step === 7 && currentStep > 7) || (stepInfo.step === 8 && currentStep > 8) || (stepInfo.step === 5 && currentStep > 5) || (stepInfo.step === 6 && currentStep > 6)
-                  : (currentStep > stepInfo.step || (stepInfo.step === 2 && currentStep > 1 && formData.isRegistered));
-              return (
-                <div key={stepInfo.step} className="flex items-center">
-                  <div className={`flex items-center ${
-                    isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'
-                  }`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-medium ${
-                      isActive 
-                        ? 'bg-blue-600 text-white' 
-                        : isCompleted 
-                        ? 'bg-green-500 text-white' 
-                        : 'bg-gray-200 text-gray-500'
-                    }`}>
-                      {isCompleted ? (
-                        <HiCheckCircle className="w-5 h-5" />
-                      ) : (
-                        stepInfo.number
-                      )}
-                    </div>
-                    <span className={`ml-2 text-sm font-medium hidden md:inline ${
-                      isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
-                    }`}>
-                      {stepInfo.label}
-                    </span>
-                  </div>
-                  {index < steps.length - 1 && steps[index + 1]?.step !== 0 && (
-                    <div className={`w-8 h-0.5 mx-1 ${
-                      isCompleted ? 'bg-green-500' : isActive ? 'bg-gray-300' : 'bg-gray-200'
-                    }`} />
-                  )}
-                </div>
-              );
-            });
-            })()}
-          </div>
-        </div>
-
-        {/* Step Content */}
-        <div className="w-full">
-          {currentStep === 1 && renderStep1()}
-          {currentStep === 2 && renderStep2()}
-          {currentStep === 3 && renderStep3()}
-          {currentStep === 4 && renderStep4()}
-          {currentStep === 5 && renderStep5()}
-          {currentStep === 6 && renderStep6()}
-          {currentStep === 7 && renderStep7()}
-          {currentStep === 8 && renderStep8()}
-          {/* Add more step renders as we add more steps */}
-        </div>
-
-        {/* Back to Login Link */}
-        <div className="text-center mt-8">
-          <Link to="/login" className="text-sm text-teal-600 hover:text-teal-700">
-            Already have an account? Sign in
-          </Link>
-        </div>
+    <>
+      {/* Logo at top right */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Link to="/">
+          <img src={logo} alt="Taldium" className="h-10" />
+        </Link>
       </div>
 
-      {/* Password Modal */}
-      {showPasswordModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
-            {/* Close Button */}
-            <button
-              type="button"
-              onClick={() => setShowPasswordModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <HiX className="w-6 h-6" />
-            </button>
-
-            {/* Padlock Icon */}
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                <HiLockClosed className="w-8 h-8 text-blue-600" />
-              </div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 relative">
+        
+        
+        <div className="w-full">
+          {(error || localError) && (
+            <div className="max-w-4xl mx-auto mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              {error || localError}
             </div>
+          )}
 
-            {/* Title */}
-            <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">
-              Set Your Password
-            </h2>
-            <p className="text-sm text-gray-600 text-center mb-6">
-              Create a secure password for your organisation account.
-            </p>
+          {/* Step Indicator */}
+          <div className="max-w-4xl mx-auto mb-8">
+            <div className="flex items-center justify-center space-x-2 md:space-x-4">
+              {(() => {
+                // Show different steps based on registration status
+                const steps = formData.isRegistered === false
+                  ? [
+                      { number: 1, label: 'Details', step: 7 }, // Organisation Details (step 7)
+                      { number: 2, label: 'Category', step: 8 }, // Category (step 8)
+                      { number: 3, label: 'Email Verification', step: 5 }, // Email Verification (step 5)
+                      { number: 4, label: 'Preview', step: 6 }, // Preview (step 6)
+                    ]
+                  : formData.isRegistered === true
+                  ? [
+                      { number: 1, label: 'Incorporation', step: 2 }, // Incorporation details (step 2)
+                      { number: 2, label: 'Category', step: 3 }, // Category (step 3)
+                      { number: 3, label: 'Description', step: 4 }, // Description (step 4)
+                      { number: 4, label: 'Email Verification', step: 5 }, // Email Verification (step 5)
+                      { number: 5, label: 'Preview', step: 6 }, // Preview (step 6)
+                    ]
+                  : []; // No steps shown until registration status is selected
 
-            {/* Password Input */}
-            <div className="mb-4">
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full px-4 py-3 border-2 border-blue-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  {showPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
-                </button>
-              </div>
+                return steps.map((stepInfo, index) => {
+                  // Skip empty steps
+                  if (stepInfo.step === 0) {
+                    return <div key={`empty-${index}`} className="w-8" />;
+                  }
 
-              {/* Password Requirements */}
-              <div className="mt-3 space-y-2">
-                {[
-                  { label: 'At least 8 characters', check: getPasswordRequirements().minLength },
-                  { label: 'Contains uppercase letter', check: getPasswordRequirements().hasUppercase },
-                  { label: 'Contains lowercase letter', check: getPasswordRequirements().hasLowercase },
-                  { label: 'Contains a number', check: getPasswordRequirements().hasNumber },
-                  { label: 'Contains special character', check: getPasswordRequirements().hasSpecialChar },
-                ].map((req, index) => (
-                  <div key={index} className="flex items-center">
-                    <div className={`w-4 h-4 rounded-full border-2 mr-2 flex items-center justify-center ${
-                      req.check 
-                        ? 'bg-green-500 border-green-500' 
-                        : 'border-gray-300'
+                  const isActive = currentStep === stepInfo.step;
+                  const isCompleted = formData.isRegistered === false
+                    ? (stepInfo.step === 7 && currentStep > 7) || (stepInfo.step === 8 && currentStep > 8) || (stepInfo.step === 5 && currentStep > 5) || (stepInfo.step === 6 && currentStep > 6)
+                    : (currentStep > stepInfo.step || (stepInfo.step === 2 && currentStep > 1 && formData.isRegistered));
+                return (
+                  <div key={stepInfo.step} className="flex items-center">
+                    <div className={`flex items-center ${
+                      isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'
                     }`}>
-                      {req.check && <HiCheckCircle className="w-3 h-3 text-white" />}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-medium ${
+                        isActive 
+                          ? 'bg-blue-600 text-white' 
+                          : isCompleted 
+                          ? 'bg-green-500 text-white' 
+                          : 'bg-gray-200 text-gray-500'
+                      }`}>
+                        {isCompleted ? (
+                          <HiCheckCircle className="w-5 h-5" />
+                        ) : (
+                          stepInfo.number
+                        )}
+                      </div>
+                      <span className={`ml-2 text-sm font-medium hidden md:inline ${
+                        isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'
+                      }`}>
+                        {stepInfo.label}
+                      </span>
                     </div>
-                    <span className={`text-sm ${
-                      req.check ? 'text-gray-700' : 'text-gray-500'
-                    }`}>
-                      {req.label}
-                    </span>
+                    {index < steps.length - 1 && steps[index + 1]?.step !== 0 && (
+                      <div className={`w-8 h-0.5 mx-1 ${
+                        isCompleted ? 'bg-green-500' : isActive ? 'bg-gray-300' : 'bg-gray-200'
+                      }`} />
+                    )}
                   </div>
-                ))}
-              </div>
+                );
+              });
+              })()}
             </div>
+          </div>
 
-            {/* Confirm Password Input */}
-            <div className="mb-4">
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
-                Confirm Password <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Confirm your password"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  {showConfirmPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
-                </button>
-              </div>
-              {confirmPassword && password !== confirmPassword && (
-                <p className="mt-1 text-sm text-red-600">Passwords do not match</p>
-              )}
-            </div>
+          {/* Step Content */}
+          <div className="w-full">
+            {currentStep === 1 && renderStep1()}
+            {currentStep === 2 && renderStep2()}
+            {currentStep === 3 && renderStep3()}
+            {currentStep === 4 && renderStep4()}
+            {currentStep === 5 && renderStep5()}
+            {currentStep === 6 && renderStep6()}
+            {currentStep === 7 && renderStep7()}
+            {currentStep === 8 && renderStep8()}
+            {/* Add more step renders as we add more steps */}
+          </div>
 
-            {/* Phone Number Input */}
-            <div className="mb-6">
-              <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="phoneNumber"
-                type="tel"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder="Enter your phone number"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-            </div>
-
-            {/* Error Message */}
-            {localError && (
-              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {localError}
-              </div>
-            )}
-
-            {/* Create Organisation Button */}
-            <button
-              type="button"
-              onClick={handleCreateOrganisation}
-              disabled={loading || !isPasswordValid() || password !== confirmPassword || !phoneNumber.trim()}
-              className="w-full px-6 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? 'Creating...' : 'Create Organisation'}
-            </button>
+          {/* Back to Login Link */}
+          <div className="text-center mt-8">
+            <Link to="/login" className="text-sm text-brand-600 hover:text-brand-700">
+              Already have an account? Sign in
+            </Link>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Password Modal */}
+        {showPasswordModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 relative">
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <HiX className="w-6 h-6" />
+              </button>
+
+              {/* Padlock Icon */}
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                  <HiLockClosed className="w-8 h-8 text-blue-600" />
+                </div>
+              </div>
+
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">
+                Set Your Password
+              </h2>
+              <p className="text-sm text-gray-600 text-center mb-6">
+                Create a secure password for your organisation account.
+              </p>
+
+              {/* Password Input */}
+              <div className="mb-4">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                  Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full px-4 py-3 border-2 border-blue-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {/* Password Requirements */}
+                <div className="mt-3 space-y-2">
+                  {[
+                    { label: 'At least 8 characters', check: getPasswordRequirements().minLength },
+                    { label: 'Contains uppercase letter', check: getPasswordRequirements().hasUppercase },
+                    { label: 'Contains lowercase letter', check: getPasswordRequirements().hasLowercase },
+                    { label: 'Contains a number', check: getPasswordRequirements().hasNumber },
+                    { label: 'Contains special character', check: getPasswordRequirements().hasSpecialChar },
+                  ].map((req, index) => (
+                    <div key={index} className="flex items-center">
+                      <div className={`w-4 h-4 rounded-full border-2 mr-2 flex items-center justify-center ${
+                        req.check 
+                          ? 'bg-green-500 border-green-500' 
+                          : 'border-gray-300'
+                      }`}>
+                        {req.check && <HiCheckCircle className="w-3 h-3 text-white" />}
+                      </div>
+                      <span className={`text-sm ${
+                        req.check ? 'text-gray-700' : 'text-gray-500'
+                      }`}>
+                        {req.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Confirm Password Input */}
+              <div className="mb-4">
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
+                  Confirm Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm your password"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showConfirmPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
+                  </button>
+                </div>
+                {confirmPassword && password !== confirmPassword && (
+                  <p className="mt-1 text-sm text-red-600">Passwords do not match</p>
+                )}
+              </div>
+
+              {/* Phone Number Input */}
+              <div className="mb-6">
+                <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
+                  Phone Number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="phoneNumber"
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="Enter your phone number"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Error Message */}
+              {localError && (
+                <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                  {localError}
+                </div>
+              )}
+
+              {/* Create Organisation Button */}
+              <button
+                type="button"
+                onClick={handleCreateOrganisation}
+                disabled={loading || !isPasswordValid() || password !== confirmPassword || !phoneNumber.trim()}
+                className="w-full px-6 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? 'Creating...' : 'Create Organisation'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

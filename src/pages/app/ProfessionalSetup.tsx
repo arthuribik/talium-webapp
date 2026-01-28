@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
-import { useAppSelector } from '@/store/hooks';
 
 export default function ProfessionalSetup() {
-  const { user } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [profId, setProfId] = useState('');
+  const [profId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -65,11 +64,13 @@ export default function ProfessionalSetup() {
     try {
       // First, get professional ID from user
       // In a real app, this would come from the user profile
-      const response = await api.post(`/v1/professionals/${profId || 'temp'}/identity/verify`, identityData);
-      alert('Identity verified successfully!');
+      await api.post(`/v1/professionals/${profId || 'temp'}/identity/verify`, identityData);
+      toast.success('Identity verified successfully!');
       setStep(2);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Verification failed');
+      const errorMsg = err.response?.data?.message || 'Verification failed';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -82,10 +83,12 @@ export default function ProfessionalSetup() {
 
     try {
       await api.post(`/v1/professionals/${profId || 'temp'}/education`, educationData);
-      alert('Education added successfully!');
+      toast.success('Education added successfully!');
       setStep(3);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to add education');
+      const errorMsg = err.response?.data?.message || 'Failed to add education';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -98,10 +101,12 @@ export default function ProfessionalSetup() {
 
     try {
       await api.post(`/v1/professionals/${profId || 'temp'}/experience`, experienceData);
-      alert('Work experience added successfully!');
+      toast.success('Work experience added successfully!');
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to add experience');
+      const errorMsg = err.response?.data?.message || 'Failed to add experience';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

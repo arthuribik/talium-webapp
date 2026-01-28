@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 
@@ -8,7 +9,6 @@ export default function OrganisationSetup() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [orgId, setOrgId] = useState('');
 
   const [formData, setFormData] = useState({
     incorporationStatus: '',
@@ -47,14 +47,21 @@ export default function OrganisationSetup() {
     setError('');
 
     try {
-      await api.put(`/v1/organisations/${orgId || 'temp'}/setup`, {
+      const orgId = user?.organisation?.id;
+      if (!orgId) {
+        toast.error('Organisation not found. Please complete your registration first.');
+        return;
+      }
+      await api.put(`/v1/organisations/${orgId}/setup`, {
         ...formData,
         yearOfCommencement: parseInt(formData.yearOfCommencement),
       });
-      alert('Organisation setup completed successfully!');
-      navigate('/dashboard');
+      toast.success('Organisation setup completed successfully!');
+      navigate('/organization');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Setup failed');
+      const errorMsg = err.response?.data?.message || 'Setup failed';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
-import { useAppSelector } from '@/store/hooks';
 
 export default function InviteAdmin() {
-  const { user } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     firstName: '',
@@ -27,12 +26,15 @@ export default function InviteAdmin() {
 
     try {
       await api.post('/v1/admin/users/invite', formData);
+      toast.success('Admin invitation sent successfully!');
       setSuccess(true);
       setTimeout(() => {
-        navigate('/admin/dashboard');
+        navigate('/admin');
       }, 2000);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to invite admin');
+      const errorMsg = err.response?.data?.message || 'Failed to invite admin';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,7 @@ export default function InviteAdmin() {
       <div className="max-w-2xl mx-auto px-4">
         <div className="mb-4">
           <button
-            onClick={() => navigate('/admin/dashboard')}
+            onClick={() => navigate('/admin')}
             className="text-indigo-600 hover:text-indigo-500"
           >
             ← Back to Dashboard

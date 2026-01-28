@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 
 export default function CreateSuperAdmin() {
@@ -24,13 +25,17 @@ export default function CreateSuperAdmin() {
     setError('');
     
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+      const errorMsg = 'Passwords do not match';
+      setError(errorMsg);
+      toast.error(errorMsg);
       return;
     }
 
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
     if (formData.password.length < 8 || !passwordRegex.test(formData.password)) {
-      setError('Password must be at least 8 characters and contain one uppercase, one lowercase, one number, and one special character');
+      const errorMsg = 'Password must be at least 8 characters and contain one uppercase, one lowercase, one number, and one special character';
+      setError(errorMsg);
+      toast.error(errorMsg);
       return;
     }
 
@@ -38,12 +43,15 @@ export default function CreateSuperAdmin() {
 
     try {
       await api.post('/v1/admin/create-super-admin', formData);
+      toast.success('Super admin created successfully!');
       setSuccess(true);
       setTimeout(() => {
         navigate('/admin/login');
       }, 2000);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create super admin');
+      const errorMsg = err.response?.data?.message || 'Failed to create super admin';
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

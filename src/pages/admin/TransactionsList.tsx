@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '@/services/api';
 import AdminLayout from '@/components/admin/AdminLayout';
 import {
   HiSearch,
@@ -42,38 +43,26 @@ export default function TransactionsList() {
   const fetchTransactions = async () => {
     setLoading(true);
     try {
-      // Note: This endpoint doesn't exist yet, so we'll use mock data for now
-      // In production, this would be: const response = await api.get(`/v1/admin/transactions?page=${page}&limit=${limit}`);
-      
-      // Mock data for demonstration
-      const mockTransactions: Transaction[] = Array.from({ length: 15 }, (_, i) => ({
-        id: `trans-${i + 1}`,
-        amount: Math.floor(Math.random() * 10000) + 100,
-        currency: 'USD',
-        status: ['completed', 'pending', 'failed'][Math.floor(Math.random() * 3)],
-        type: ['payment', 'refund', 'subscription'][Math.floor(Math.random() * 3)],
-        description: `Transaction ${i + 1}`,
-        createdAt: new Date(Date.now() - i * 86400000).toISOString(),
-        user: {
-          email: `user${i + 1}@example.com`,
-        },
-      }));
-
-      setTransactions(mockTransactions);
-      setTotalPages(1);
-      setTotal(mockTransactions.length);
+      const response = await api.get(`/v1/admin/transactions?page=${page}&limit=${limit}`);
+      setTransactions(response.data.data.transactions || []);
+      setTotalPages(response.data.data.pagination?.totalPages || 1);
+      setTotal(response.data.data.pagination?.total || 0);
     } catch (err) {
       console.error('Failed to fetch transactions:', err);
+      setTransactions([]);
+      setTotalPages(1);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
 
+  // Client-side filtering for search (API handles pagination)
   const filteredTransactions = transactions.filter((trans) => {
     const matchesSearch =
-      trans.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (trans.description?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
       trans.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (trans.user?.email.toLowerCase().includes(searchTerm.toLowerCase()));
+      (trans.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
 
     const matchesStatus =
       statusFilter === 'all' ||
@@ -106,7 +95,7 @@ export default function TransactionsList() {
               placeholder="Search by transaction ID, description, or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -114,7 +103,7 @@ export default function TransactionsList() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="all">All Status</option>
               <option value="completed">Completed</option>
@@ -153,7 +142,7 @@ export default function TransactionsList() {
                 setSearchTerm('');
                 setStatusFilter('all');
               }}
-              className="text-teal-600 hover:text-teal-700 text-sm font-medium"
+              className="text-brand-600 hover:text-brand-700 text-sm font-medium"
             >
               Clear Filters
             </button>
@@ -193,8 +182,8 @@ export default function TransactionsList() {
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mr-3">
-                              <HiCurrencyDollar className="w-5 h-5 text-teal-600" />
+                            <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3">
+                              <HiCurrencyDollar className="w-5 h-5 text-brand-600" />
                             </div>
                             <div className="text-sm font-medium text-gray-900">{trans.id}</div>
                           </div>
