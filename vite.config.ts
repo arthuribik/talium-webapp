@@ -23,6 +23,11 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: parseInt(process.env.PORT || '4173'),
+    allowedHosts: [
+      'talium-webapp.onrender.com',
+      'localhost',
+      '.onrender.com',
+    ],
   },
 })
 

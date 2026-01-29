@@ -9,8 +9,28 @@ const getEnvVar = (key: string, defaultValue: string): string => {
   }
 };
 
+// Determine the API base URL
+// In production, use the Render endpoint, otherwise use localhost or env variable
+const getApiBaseURL = (): string => {
+  const envUrl = getEnvVar('VITE_API_URL', '');
+  if (envUrl) {
+    return envUrl;
+  }
+  
+  // Check if we're in production
+  const isProduction = (import.meta as any).env?.MODE === 'production' || 
+                       (import.meta as any).env?.PROD === true ||
+                       window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+  
+  if (isProduction) {
+    return 'https://talium-engine.onrender.com';
+  }
+  
+  return 'http://localhost:5103';
+};
+
 export const api = axios.create({
-  baseURL: getEnvVar('VITE_API_URL', 'http://localhost:5103'),
+  baseURL: getApiBaseURL(),
   headers: {
     'Content-Type': 'application/json',
   },
