@@ -300,7 +300,7 @@ export default function OrganisationDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        {/* <div className="mt-6 bg-white rounded-xl shadow-sm p-6 border border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Link
@@ -336,7 +336,7 @@ export default function OrganisationDashboard() {
             </Link>
 
             <Link
-              to="/organization/org-profile"
+              to="/organization/settings?tab=profile"
               className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-between"
             >
               <div className="flex items-center">
@@ -351,7 +351,7 @@ export default function OrganisationDashboard() {
               <HiArrowRight className="w-5 h-5 text-gray-400" />
             </Link>
           </div>
-        </div>
+        </div> */}
       </div>
     </OrganisationLayout>
   );

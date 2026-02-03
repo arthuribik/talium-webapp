@@ -20,8 +20,15 @@ interface Transaction {
   type: string;
   description: string;
   createdAt: string;
+  entityType?: string;
+  entityId?: string;
+  entityName?: string;
+  plan?: string;
+  billingCycle?: string;
   user?: {
     email: string;
+    firstName?: string;
+    lastName?: string;
   };
 }
 
@@ -43,7 +50,11 @@ export default function TransactionsList() {
   const fetchTransactions = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`/v1/admin/transactions?page=${page}&limit=${limit}`);
+      const params: any = { page, limit };
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+      const response = await api.get('/v1/admin/transactions', { params });
       setTransactions(response.data.data.transactions || []);
       setTotalPages(response.data.data.pagination?.totalPages || 1);
       setTotal(response.data.data.pagination?.total || 0);
@@ -57,20 +68,15 @@ export default function TransactionsList() {
     }
   };
 
-  // Client-side filtering for search (API handles pagination)
+  // Client-side filtering for search only (status is handled by API)
   const filteredTransactions = transactions.filter((trans) => {
     const matchesSearch =
       (trans.description?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
       trans.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (trans.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
+      (trans.user?.email?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+      (trans.entityName?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
 
-    const matchesStatus =
-      statusFilter === 'all' ||
-      (statusFilter === 'completed' && trans.status === 'completed') ||
-      (statusFilter === 'pending' && trans.status === 'pending') ||
-      (statusFilter === 'failed' && trans.status === 'failed');
-
-    return matchesSearch && matchesStatus;
+    return matchesSearch;
   });
 
   const handleRowClick = (transactionId: string) => {
@@ -82,7 +88,7 @@ export default function TransactionsList() {
       <div className="p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Transactions</h1>
-        <p className="text-gray-600">View and manage all platform transactions</p>
+        <p className="text-gray-600">View all attempted billing and subscription transactions</p>
       </div>
 
       {/* Filters and Search */}
@@ -102,11 +108,14 @@ export default function TransactionsList() {
             <HiFilter className="text-gray-400 w-5 h-5" />
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1); // Reset to first page when filter changes
+              }}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="all">All Status</option>
-              <option value="completed">Completed</option>
+              <option value="success">Success</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
             </select>
@@ -125,7 +134,7 @@ export default function TransactionsList() {
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No Transactions Yet</h3>
             <p className="text-sm text-gray-500 text-center max-w-md mb-6">
-              There are no transactions recorded on the platform. Transactions will appear here once users start making payments or subscriptions.
+              There are no billing or subscription transactions recorded on the platform. Transactions will appear here once users initiate payments or subscriptions.
             </p>
           </div>
         ) : filteredTransactions.length === 0 ? (
@@ -163,6 +172,9 @@ export default function TransactionsList() {
                       Type
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Entity
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -195,12 +207,21 @@ export default function TransactionsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-500 capitalize">{trans.type}</div>
+                          {trans.plan && (
+                            <div className="text-xs text-gray-400 mt-1">
+                              {trans.plan} plan {trans.billingCycle ? `(${trans.billingCycle})` : ''}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {trans.status === 'completed' ? (
+                          <div className="text-sm text-gray-900">{trans.entityName || 'N/A'}</div>
+                          <div className="text-xs text-gray-500 capitalize">{trans.entityType || 'N/A'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {trans.status === 'success' || trans.status === 'completed' ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                               <HiCheckCircle className="w-4 h-4 mr-1" />
-                              Completed
+                              Success
                             </span>
                           ) : trans.status === 'pending' ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">

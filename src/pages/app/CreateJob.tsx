@@ -72,7 +72,7 @@ export default function CreateJob() {
       if (window.location.pathname.includes('/organization')) {
         navigate('/organization/jobs');
       } else {
-        navigate('/dashboard');
+        navigate('/admin/jobs');
       }
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to create job';

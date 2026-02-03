@@ -17,7 +17,6 @@ import LandingJobDetail from '@/pages/landing/JobDetail';
 import Login from '@/pages/landing/Login';
 import Register from '@/pages/landing/Register';
 import RegisterBusiness from '@/pages/landing/RegisterBusiness';
-import Dashboard from '@/pages/app/Dashboard';
 import ProfessionalSetup from '@/pages/app/ProfessionalSetup';
 import OrganisationSetup from '@/pages/app/OrganisationSetup';
 import Jobs from '@/pages/app/Jobs';
@@ -40,16 +39,15 @@ import Settings from '@/pages/admin/Settings';
 import NotFound from '@/pages/NotFound';
 import OrganisationDashboard from '@/pages/organisation/OrganisationDashboard';
 import ViewProfessionals from '@/pages/organisation/ViewProfessionals';
+import OrganisationProfessionalDetail from '@/pages/organisation/ProfessionalDetail';
 import PostJobs from '@/pages/organisation/PostJobs';
 import OrganisationJobDetail from '@/pages/organisation/JobDetail';
-import ManageOrgProfile from '@/pages/organisation/ManageOrgProfile';
-import SystemSettings from '@/pages/organisation/SystemSettings';
+import OrganisationSettings from '@/pages/organisation/Settings';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
-import MyProfile from '@/pages/professional/MyProfile';
-import SharedDataHistory from '@/pages/professional/SharedDataHistory';
+import ProfessionalDashboard from '@/pages/professional/Dashboard';
 import Applications from '@/pages/professional/Applications';
-import PrivacySettings from '@/pages/professional/PrivacySettings';
-import Documents from '@/pages/professional/Documents';
+import ProfessionalSubscription from '@/pages/professional/Subscription';
+import ProfessionalSettings from '@/pages/professional/Settings';
 
 const queryClient = new QueryClient();
 
@@ -183,7 +181,13 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   // Verify user is admin - check both localStorage and Redux
   const userType = currentUser?.userType;
   if (currentUser && userType && userType !== 'ADMIN') {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect based on user type
+    if (userType === 'PROFESSIONAL') {
+      return <Navigate to="/professional" replace />;
+    } else if (userType === 'ORGANISATION') {
+      return <Navigate to="/organization" replace />;
+    }
+    return <Navigate to="/login" replace />;
   }
   
   // If we have token but can't verify user type yet, allow through
@@ -278,7 +282,13 @@ function OrganisationRoute({ children }: { children: React.ReactNode }) {
   
   const userType = currentUser?.userType;
   if (currentUser && userType && userType !== 'ORGANISATION') {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect based on user type
+    if (userType === 'PROFESSIONAL') {
+      return <Navigate to="/professional" replace />;
+    } else if (userType === 'ADMIN') {
+      return <Navigate to="/admin" replace />;
+    }
+    return <Navigate to="/login" replace />;
   }
   
   return <>{children}</>;
@@ -369,7 +379,13 @@ function ProfessionalRoute({ children }: { children: React.ReactNode }) {
   
   const userType = currentUser?.userType;
   if (currentUser && userType && userType !== 'PROFESSIONAL') {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect based on user type
+    if (userType === 'ORGANISATION') {
+      return <Navigate to="/organization" replace />;
+    } else if (userType === 'ADMIN') {
+      return <Navigate to="/admin" replace />;
+    }
+    return <Navigate to="/login" replace />;
   }
   
   return <>{children}</>;
@@ -496,14 +512,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/professional/setup"
         element={
           <ProtectedRoute>
@@ -515,15 +523,7 @@ function AppRoutes() {
         path="/professional"
         element={
           <ProfessionalRoute>
-            <MyProfile />
-          </ProfessionalRoute>
-        }
-      />
-      <Route
-        path="/professional/shared-data"
-        element={
-          <ProfessionalRoute>
-            <SharedDataHistory />
+            <ProfessionalDashboard />
           </ProfessionalRoute>
         }
       />
@@ -536,18 +536,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/professional/privacy"
+        path="/professional/subscription"
         element={
           <ProfessionalRoute>
-            <PrivacySettings />
+            <ProfessionalSubscription />
           </ProfessionalRoute>
         }
       />
       <Route
-        path="/professional/documents"
+        path="/professional/settings"
         element={
           <ProfessionalRoute>
-            <Documents />
+            <ProfessionalSettings />
           </ProfessionalRoute>
         }
       />
@@ -588,6 +588,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/organization/professionals/:id"
+        element={
+          <OrganisationRoute>
+            <OrganisationProfessionalDetail />
+          </OrganisationRoute>
+        }
+      />
+      <Route
         path="/organization/jobs"
         element={
           <OrganisationRoute>
@@ -604,18 +612,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/organization/org-profile"
+        path="/organization/settings"
         element={
           <OrganisationRoute>
-            <ManageOrgProfile />
+            <OrganisationSettings />
           </OrganisationRoute>
         }
       />
       <Route
-        path="/organization/settings"
+        path="/organization/org-profile"
         element={
           <OrganisationRoute>
-            <SystemSettings />
+            <Navigate to="/organization/settings?tab=profile" replace />
           </OrganisationRoute>
         }
       />
@@ -633,7 +641,7 @@ function AppRoutes() {
       <Route path="/organization/dashboard" element={<Navigate to="/organization" replace />} />
       <Route path="/organisation/professionals" element={<Navigate to="/organization/professionals" replace />} />
       <Route path="/organisation/jobs" element={<Navigate to="/organization/jobs" replace />} />
-      <Route path="/organisation/org-profile" element={<Navigate to="/organization/org-profile" replace />} />
+      <Route path="/organisation/org-profile" element={<Navigate to="/organization/settings?tab=profile" replace />} />
       <Route path="/organisation/settings" element={<Navigate to="/organization/settings" replace />} />
       <Route path="/organisation/billing" element={<Navigate to="/organization/billing" replace />} />
       <Route path="*" element={<NotFound />} />

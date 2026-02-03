@@ -60,7 +60,6 @@ export default function PostJobs() {
     },
   });
   const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError] = useState('');
 
   const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -100,7 +99,6 @@ export default function PostJobs() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormLoading(true);
-    setFormError('');
 
     try {
       const payload = {
@@ -119,19 +117,14 @@ export default function PostJobs() {
         closingDate: formData.closingDate || undefined,
         description: formData.description,
         requirements: formData.requirements.filter((r) => r.trim() !== ''),
-        benefits: formData.benefits.filter((b) => b.trim() !== ''),
         applyCTA: formData.applyCTA.requireVerification.length > 0 ? {
           label: formData.applyCTA.label,
           requireVerification: formData.applyCTA.requireVerification,
         } : undefined,
       };
 
-      // Use the jobs/draft endpoint with organisationId
-      const organisationId = user?.organisation?.id;
-      if (!organisationId) {
-        throw new Error('Organization not found. Please complete your organization setup.');
-      }
-      await api.post(`/v1/jobs/draft?organisationId=${organisationId}`, payload);
+      // Submit to the API endpoint - backend will get organisationId from authenticated user
+      await api.post('/v1/organisation/jobs', payload);
       
       // Reset form and close sidebar
       setFormData({
@@ -161,7 +154,6 @@ export default function PostJobs() {
       fetchJobs(); // Refresh the jobs list
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to create job';
-      setFormError(errorMsg);
       toast.error(errorMsg);
     } finally {
       setFormLoading(false);
@@ -279,12 +271,6 @@ export default function PostJobs() {
               </div>
 
               {/* Form */}
-              {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                  {formError}
-                </div>
-              )}
-
               <form onSubmit={handleFormSubmit} className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Job Title *</label>

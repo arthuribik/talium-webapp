@@ -4,11 +4,10 @@ import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import type { RootState } from '@/store/store';
 import { logout } from '@/store/authSlice';
 import {
-  HiUser,
-  HiDocumentText,
+  HiHome,
   HiClipboardList,
-  HiLockClosed,
-  HiFolder,
+  HiCreditCard,
+  HiCog,
   HiSearch,
   HiChevronLeft,
   HiChevronRight,
@@ -32,11 +31,10 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const navItems = [
-    { path: '/professional', label: 'My Profile', icon: HiUser },
-    { path: '/professional/shared-data', label: 'Shared Data History', icon: HiDocumentText },
+    { path: '/professional', label: 'Dashboard', icon: HiHome },
     { path: '/professional/applications', label: 'Applications', icon: HiClipboardList },
-    { path: '/professional/privacy', label: 'Privacy Settings', icon: HiLockClosed },
-    { path: '/professional/documents', label: 'Documents', icon: HiFolder },
+    { path: '/professional/subscription', label: 'Subscription', icon: HiCreditCard },
+    { path: '/professional/settings', label: 'Settings', icon: HiCog },
   ];
 
   const isActive = (path: string) => {
@@ -153,12 +151,12 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
-                      navigate('/professional');
+                      navigate('/professional/settings?tab=profile');
                     }}
                     className="w-full flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   >
                     <MdPerson className="w-4 h-4 mr-3" />
-                    Profile
+                    Settings
                   </button>
                   <button
                     onClick={() => {

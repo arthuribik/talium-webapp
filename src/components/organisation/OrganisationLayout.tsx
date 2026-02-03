@@ -33,11 +33,11 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
 
   const navItems = [
     { path: '/organization', label: 'Dashboard', icon: HiHome },
-    { path: '/organization/professionals', label: 'View Professionals', icon: HiUser },
-    { path: '/organization/jobs', label: 'Post Jobs', icon: HiBriefcase },
+    { path: '/organization/professionals', label: 'Professionals', icon: HiUser },
+    { path: '/organization/jobs', label: 'Jobs', icon: HiBriefcase },
     // { path: '/organization/org-profile', label: 'Manage Org Profile', icon: HiOfficeBuilding },
-    { path: '/organization/settings', label: 'Settings', icon: HiCog },
     { path: '/organization/billing', label: 'Billings', icon: HiCreditCard },
+    { path: '/organization/settings', label: 'Settings', icon: HiCog },
   ];
 
   const isActive = (path: string) => {
@@ -154,7 +154,7 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
-                      navigate('/organization/org-profile');
+                      navigate('/organization/settings?tab=profile');
                     }}
                     className="w-full flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   >

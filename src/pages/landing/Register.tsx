@@ -191,11 +191,11 @@ export default function Register() {
       
       toast.success('Registration successful!');
       
-      // Redirect to the job page if user came from there, otherwise go to dashboard
+      // Redirect to the job page if user came from there, otherwise go to login
       if (redirectUrl) {
         navigate(redirectUrl);
       } else {
-        navigate('/dashboard');
+        navigate('/login');
       }
     } catch (err: any) {
       toast.error(err?.message || 'Registration failed');

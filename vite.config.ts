@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: parseInt(process.env.PORT || '5173'),
+    port: parseInt(process.env.PORT || '5231'),
     proxy: {
       '/v1': {
         target: process.env.VITE_API_URL || 'http://localhost:5103',
@@ -22,7 +22,7 @@ export default defineConfig({
   },
   preview: {
     host: '0.0.0.0',
-    port: parseInt(process.env.PORT || '4173'),
+    port: parseInt(process.env.PORT || '5231'),
     allowedHosts: [
       'talium-webapp.onrender.com',
       'localhost',

@@ -29,7 +29,7 @@ export default function Login() {
       } else if (loggedInUser?.userType === 'ADMIN') {
         navigate('/admin');
       } else {
-        navigate('/dashboard');
+        navigate('/login');
       }
     } catch (err: any) {
       // Error is handled by Redux

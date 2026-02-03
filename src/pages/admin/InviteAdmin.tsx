@@ -45,7 +45,7 @@ export default function InviteAdmin() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="max-w-md w-full space-y-8 p-8 text-center">
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
-            Admin invitation sent successfully! Redirecting to dashboard...
+            Admin invitation sent successfully! Redirecting to admin dashboard...
           </div>
         </div>
       </div>

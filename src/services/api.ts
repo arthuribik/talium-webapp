@@ -75,18 +75,23 @@ const initializeToken = () => {
 initializeToken();
 
 // List of public endpoints that don't require authentication
-const publicEndpoints = [
-  '/v1/jobs',
-  '/v1/auth/',
-  '/v1/admin/professionals', // Public landing page endpoint
-  '/v1/admin/organisations', // Public landing page endpoint
-  '/v1/admin/jobs', // Public landing page endpoint (if used)
+// Note: Only GET requests to these endpoints are public, POST/PUT/DELETE require auth
+const publicGetEndpoints = [
+  '/v1/jobs', // GET only - for landing page
+  '/v1/auth/', // Auth endpoints
+  '/v1/admin/professionals', // GET only - Public landing page endpoint
+  '/v1/admin/organisations', // GET only - Public landing page endpoint
+  '/v1/admin/jobs', // GET only - Public landing page endpoint
 ];
 
-// Check if an endpoint is public
-const isPublicEndpoint = (url: string | undefined): boolean => {
+// Check if an endpoint is public (only for GET requests)
+const isPublicEndpoint = (url: string | undefined, method?: string): boolean => {
   if (!url) return false;
-  return publicEndpoints.some(endpoint => url.includes(endpoint));
+  // Only GET requests are public, all other methods require auth
+  if (method && method.toUpperCase() !== 'GET') {
+    return false;
+  }
+  return publicGetEndpoints.some(endpoint => url.includes(endpoint));
 };
 
 // Request interceptor to add token to every request (except public endpoints)
@@ -97,8 +102,8 @@ api.interceptors.request.use(
       config.headers = {} as any;
     }
     
-    // Skip adding auth header for public endpoints
-    if (isPublicEndpoint(config.url)) {
+    // Skip adding auth header for public GET endpoints only
+    if (isPublicEndpoint(config.url, config.method)) {
       // Remove authorization header for public endpoints
       delete config.headers['Authorization'];
       delete (config.headers as any).Authorization;
@@ -170,8 +175,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       const requestUrl = error.config?.url || '';
       
-      // Skip redirect for public endpoints - they don't require auth
-      if (isPublicEndpoint(requestUrl)) {
+      // Skip redirect for public GET endpoints - they don't require auth
+      if (isPublicEndpoint(requestUrl, error.config?.method)) {
         return Promise.reject(error);
       }
       
@@ -226,7 +231,8 @@ api.interceptors.response.use(
           redirectTimeout = null;
           // Only redirect if we're still on a protected route
           const stillOnProtectedRoute = window.location.pathname.startsWith('/admin') || 
-                                        window.location.pathname.startsWith('/dashboard');
+                                        window.location.pathname.startsWith('/organization') ||
+                                        window.location.pathname.startsWith('/professional');
           if (stillOnProtectedRoute) {
             if (isAdminRoute) {
               window.location.href = '/admin/login';

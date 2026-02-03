@@ -15,7 +15,6 @@ import {
 } from 'react-icons/hi';
 import {
   FaDollarSign,
-  FaGlobe,
   FaUsers,
   FaShoppingCart,
   FaGraduationCap,
@@ -23,7 +22,6 @@ import {
   FaMapMarkerAlt,
   FaBriefcase,
   FaBuilding,
-  FaRocket,
 } from 'react-icons/fa';
 
 interface AnalyticsCard {
@@ -44,6 +42,64 @@ interface DashboardStats {
   verifiedProfessionals: number;
   verifiedOrganisations: number;
   pendingVerifications: number;
+  organisationEntities?: {
+    totalCreated: number;
+    totalActive: number;
+    newOrganisations: {
+      today: number;
+      thisWeek: number;
+      thisMonth: number;
+      yearToDate: number;
+    };
+    pendingActivation: number;
+  };
+  professionalEntities?: {
+    totalCreated: number;
+    totalActivated: number;
+    totalVerifiedGovernmentId: number;
+    totalAddressInfoCreated: number;
+    verifiedAddressInfo: number;
+    graduateCertificatesAdded: number;
+  };
+  jobs?: {
+    totalCreated: number;
+    activeJobRoles: number;
+    totalApplications: number;
+    totalHires: number;
+  };
+  professionalVerifications?: {
+    idVerificationRequests: number;
+    verifiedIds: number;
+    addressVerificationRequests: number;
+    verifiedAddress: number;
+    educationVerificationRequests: number;
+    verifiedEducation: number;
+    workExperienceVerificationRequests: number;
+    verifiedWorkExperience: number;
+  };
+  organisationVerifications?: {
+    idVerificationRequests: number;
+    verifiedIds: number;
+    addressVerificationRequests: number;
+    verifiedAddress: number;
+    educationVerificationRequests: number;
+    verifiedEducation: number;
+    workExperienceVerificationRequests: number;
+    verifiedWorkExperience: number;
+  };
+  professionalBilling?: {
+    totalRevenue: number;
+    taldiumExpress: number;
+    taldiumBloom: number;
+    taldiumPrime: number;
+  };
+  organisationBilling?: {
+    totalRevenue: number;
+    taldiumStarter: number;
+    taldiumStandard: number;
+    taldiumPremium: number;
+    taldiumEnterprise: number;
+  };
 }
 
 type DashboardTab = 'overall' | 'organisations' | 'professionals' | 'jobs' | 'verifications' | 'billing';
@@ -55,8 +111,6 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overall');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [organisations, setOrganisations] = useState<any[]>([]);
-  const [jobs, setJobs] = useState<any[]>([]);
 
   // Load tab from URL on mount
   useEffect(() => {
@@ -68,7 +122,14 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (user?.userType !== 'ADMIN') {
-      navigate('/dashboard');
+      // Redirect based on user type
+      if (user?.userType === 'PROFESSIONAL') {
+        navigate('/professional');
+      } else if (user?.userType === 'ORGANISATION') {
+        navigate('/organization');
+      } else {
+        navigate('/login');
+      }
       return;
     }
     fetchDashboardData();
@@ -86,30 +147,23 @@ export default function AdminDashboard() {
       setStats(response.data.data);
     } catch (err) {
       console.error('Failed to fetch stats:', err);
-    }
-  };
-
-  const fetchOrganisations = async () => {
-    try {
-      const response = await api.get('/v1/admin/organisations');
-      setOrganisations(response.data.data.organisations || []);
-    } catch (err) {
-      console.error('Failed to fetch organisations:', err);
-    }
-  };
-
-  const fetchJobs = async () => {
-    try {
-      const response = await api.get('/v1/admin/jobs');
-      setJobs(response.data.data.jobs || []);
-    } catch (err) {
-      console.error('Failed to fetch jobs:', err);
+      // Set default values on error
+      setStats({
+        totalUsers: 0,
+        totalOrganisations: 0,
+        totalProfessionals: 0,
+        totalJobs: 0,
+        totalApplications: 0,
+        verifiedProfessionals: 0,
+        verifiedOrganisations: 0,
+        pendingVerifications: 0,
+      });
     }
   };
 
   const fetchDashboardData = async () => {
     try {
-      await Promise.all([fetchDashboardStats(), fetchOrganisations(), fetchJobs()]);
+      await fetchDashboardStats();
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
     } finally {
@@ -127,51 +181,61 @@ export default function AdminDashboard() {
     );
   }
 
-  // Calculate metrics for KPI cards
-  const todayMoney = stats ? `$${(stats.totalUsers * 1000).toLocaleString()}` : '$53,000';
-  const todayUsers = stats?.totalUsers || 2300;
-  const newClients = stats?.totalOrganisations || 3020;
-  const totalSales = stats ? `$${(stats.totalJobs * 5000).toLocaleString()}` : '$173,000';
-
-  // Sample data for charts
-  const activeUsersData = [40, 60, 45, 70, 55, 80, 65];
-
-  const projects = organisations.slice(0, 5).map((org, idx) => ({
-    name: org.companyName || `Project ${idx + 1}`,
-    members: 3 + idx,
-    budget: `$${(10000 + idx * 2000).toLocaleString()}`,
-    completion: 60 + idx * 10,
-  }));
-
-  const orders = jobs.slice(0, 5).map((job, idx) => ({
-    icon: <FaRocket className="w-4 h-4" />,
-    description: `$${(2400 + idx * 200).toLocaleString()}, ${job.jobTitle || 'New order'}`,
-    orderId: `#${4219423 + idx}`,
-    date: new Date(Date.now() - idx * 86400000).toLocaleDateString(),
-  }));
+  // Calculate metrics for Overall tab
+  const totalRevenue = (stats?.professionalBilling?.totalRevenue || 0) + (stats?.organisationBilling?.totalRevenue || 0);
+  const totalProfessionals = stats?.totalProfessionals || 0;
+  const totalOrganisations = stats?.totalOrganisations || 0;
+  const totalJobs = stats?.totalJobs || 0;
+  const activeJobs = stats?.jobs?.activeJobRoles || 0;
+  const totalApplications = stats?.totalApplications || 0;
+  const totalHires = stats?.jobs?.totalHires || 0;
+  const verifiedProfessionals = stats?.verifiedProfessionals || 0;
+  const verifiedOrganisations = stats?.verifiedOrganisations || 0;
+  const activeOrganisations = stats?.organisationEntities?.totalActive || 0;
+  const activatedProfessionals = stats?.professionalEntities?.totalActivated || 0;
 
   // Organisation Entities Analytics
   const organisationAnalytics: AnalyticsCard[] = [
     {
       title: 'Total Organisation Entities Created',
-      value: '0',
+      value: String(stats?.organisationEntities?.totalCreated || 0),
       icon: <FaBuilding className="w-6 h-6" />,
       filters: ['Country', 'City', 'Registered', 'Not Registered', 'School', 'Company', 'Religious Organisation', 'Government Agency', 'Date'],
     },
     {
       title: 'Total Active Organisation',
-      value: '0',
+      value: String(stats?.organisationEntities?.totalActive || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
-      title: 'New Organisation',
-      value: '0',
+      title: 'Verified Organisations',
+      value: String(stats?.verifiedOrganisations || 0),
+      icon: <HiCheckCircle className="w-6 h-6" />,
+    },
+    {
+      title: 'New Organisation (Today)',
+      value: String(stats?.organisationEntities?.newOrganisations?.today || 0),
+      icon: <HiCalendar className="w-6 h-6" />,
+    },
+    {
+      title: 'New Organisation (This Week)',
+      value: String(stats?.organisationEntities?.newOrganisations?.thisWeek || 0),
+      icon: <HiCalendar className="w-6 h-6" />,
+    },
+    {
+      title: 'New Organisation (This Month)',
+      value: String(stats?.organisationEntities?.newOrganisations?.thisMonth || 0),
+      icon: <HiCalendar className="w-6 h-6" />,
+    },
+    {
+      title: 'New Organisation (Year to Date)',
+      value: String(stats?.organisationEntities?.newOrganisations?.yearToDate || 0),
       icon: <HiCalendar className="w-6 h-6" />,
       filters: ['Month', 'Week', 'Today', 'Year to Date'],
     },
     {
       title: 'Organisation Pending Activation',
-      value: '0',
+      value: String(stats?.organisationEntities?.pendingActivation || 0),
       icon: <HiClock className="w-6 h-6" />,
     },
   ];
@@ -180,34 +244,34 @@ export default function AdminDashboard() {
   const professionalAnalytics: AnalyticsCard[] = [
     {
       title: 'Total Professional Entity Created',
-      value: '0',
+      value: String(stats?.professionalEntities?.totalCreated || 0),
       icon: <HiUser className="w-6 h-6" />,
       filters: ['Country', 'City', 'Dual Citizenship', 'Job Title', 'Years of Work Experience'],
     },
     {
       title: 'Total Activated Professional Entity',
-      value: '0',
+      value: String(stats?.professionalEntities?.totalActivated || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total Verified Government ID',
-      value: '0',
+      value: String(stats?.professionalEntities?.totalVerifiedGovernmentId || 0),
       icon: <FaIdCard className="w-6 h-6" />,
       filters: ['Country', 'ID Type (Passport, etc.)'],
     },
     {
       title: 'Total Address Information Created',
-      value: '0',
+      value: String(stats?.professionalEntities?.totalAddressInfoCreated || 0),
       icon: <FaMapMarkerAlt className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Address Information',
-      value: '0',
+      value: String(stats?.professionalEntities?.verifiedAddressInfo || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Number of Graduate Certificates Added',
-      value: '0',
+      value: String(stats?.professionalEntities?.graduateCertificatesAdded || 0),
       icon: <FaGraduationCap className="w-6 h-6" />,
     },
   ];
@@ -216,25 +280,25 @@ export default function AdminDashboard() {
   const jobsAnalytics: AnalyticsCard[] = [
     {
       title: 'Total Number of Job Role Created',
-      value: '0',
+      value: String(stats?.jobs?.totalCreated || 0),
       icon: <HiBriefcase className="w-6 h-6" />,
       filters: ['Country', 'Organisation', 'Industry', 'Category', 'Status (Paused, Expired, Under Review)', 'Date'],
     },
     {
       title: 'Active Job Roles',
-      value: '0',
+      value: String(stats?.jobs?.activeJobRoles || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
       filters: ['Organisation', 'Job Title', 'Industry'],
     },
     {
       title: 'Total Number of Job Application (Applicants)',
-      value: '0',
+      value: String(stats?.jobs?.totalApplications || 0),
       icon: <FaUsers className="w-6 h-6" />,
       filters: ['Organisation', 'Country', 'Job Title', 'Date'],
     },
     {
       title: 'Total Number of Hire',
-      value: '0',
+      value: String(stats?.jobs?.totalHires || 0),
       icon: <FaBriefcase className="w-6 h-6" />,
     },
   ];
@@ -243,42 +307,42 @@ export default function AdminDashboard() {
   const professionalVerifications: AnalyticsCard[] = [
     {
       title: 'Total Number of ID Verification Request',
-      value: '0',
+      value: String(stats?.professionalVerifications?.idVerificationRequests || 0),
       icon: <FaIdCard className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified IDs',
-      value: '0',
+      value: String(stats?.professionalVerifications?.verifiedIds || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total of Address Verification Request',
-      value: '0',
+      value: String(stats?.professionalVerifications?.addressVerificationRequests || 0),
       icon: <FaMapMarkerAlt className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Address',
-      value: '0',
+      value: String(stats?.professionalVerifications?.verifiedAddress || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total Number Educational Verification Request',
-      value: '0',
+      value: String(stats?.professionalVerifications?.educationVerificationRequests || 0),
       icon: <FaGraduationCap className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Educational Data',
-      value: '0',
+      value: String(stats?.professionalVerifications?.verifiedEducation || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total Number of Work Experience Verification Request',
-      value: '0',
+      value: String(stats?.professionalVerifications?.workExperienceVerificationRequests || 0),
       icon: <FaBriefcase className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Work Experience',
-      value: '0',
+      value: String(stats?.professionalVerifications?.verifiedWorkExperience || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
   ];
@@ -287,42 +351,42 @@ export default function AdminDashboard() {
   const organisationVerifications: AnalyticsCard[] = [
     {
       title: 'Total Number of ID Verification Request',
-      value: '0',
+      value: String(stats?.organisationVerifications?.idVerificationRequests || 0),
       icon: <FaIdCard className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified IDs',
-      value: '0',
+      value: String(stats?.organisationVerifications?.verifiedIds || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total of Address Verification Request',
-      value: '0',
+      value: String(stats?.organisationVerifications?.addressVerificationRequests || 0),
       icon: <FaMapMarkerAlt className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Address',
-      value: '0',
+      value: String(stats?.organisationVerifications?.verifiedAddress || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total Number Educational Verification Request',
-      value: '0',
+      value: String(stats?.organisationVerifications?.educationVerificationRequests || 0),
       icon: <FaGraduationCap className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Educational Data',
-      value: '0',
+      value: String(stats?.organisationVerifications?.verifiedEducation || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
     {
       title: 'Total Number of Work Experience Verification Request',
-      value: '0',
+      value: String(stats?.organisationVerifications?.workExperienceVerificationRequests || 0),
       icon: <FaBriefcase className="w-6 h-6" />,
     },
     {
       title: 'Number of Verified Work Experience',
-      value: '0',
+      value: String(stats?.organisationVerifications?.verifiedWorkExperience || 0),
       icon: <HiCheckCircle className="w-6 h-6" />,
     },
   ];
@@ -331,23 +395,23 @@ export default function AdminDashboard() {
   const professionalBilling: AnalyticsCard[] = [
     {
       title: 'Total Revenue',
-      value: '$0',
+      value: `$${(stats?.professionalBilling?.totalRevenue || 0).toLocaleString()}`,
       icon: <FaDollarSign className="w-6 h-6" />,
       filters: ['Country', 'City', 'Job Title', 'Company', 'Plan type'],
     },
     {
       title: 'Total Number of Taldium Express',
-      value: '0',
+      value: String(stats?.professionalBilling?.taldiumExpress || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
     {
       title: 'Total number on Taldium Bloom',
-      value: '0',
+      value: String(stats?.professionalBilling?.taldiumBloom || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
     {
       title: 'Total Number on Taldium Prime',
-      value: '0',
+      value: String(stats?.professionalBilling?.taldiumPrime || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
   ];
@@ -356,28 +420,28 @@ export default function AdminDashboard() {
   const organisationBilling: AnalyticsCard[] = [
     {
       title: 'Total Revenue',
-      value: '$0',
+      value: `$${(stats?.organisationBilling?.totalRevenue || 0).toLocaleString()}`,
       icon: <FaDollarSign className="w-6 h-6" />,
       filters: ['Country', 'Industry', 'Plan Type', 'Incorporated', 'Not Registered', 'Category (School, Company, Government Agency)'],
     },
     {
       title: 'Total Number of Taldium Starter Plan',
-      value: '0',
+      value: String(stats?.organisationBilling?.taldiumStarter || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
     {
       title: 'Total number on Taldium Standard Plan',
-      value: '0',
+      value: String(stats?.organisationBilling?.taldiumStandard || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
     {
       title: 'Total Number on Taldium Premium Plan',
-      value: '0',
+      value: String(stats?.organisationBilling?.taldiumPremium || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
     {
       title: 'Total Number on Taldium Enterprise',
-      value: '0',
+      value: String(stats?.organisationBilling?.taldiumEnterprise || 0),
       icon: <FaShoppingCart className="w-6 h-6" />,
     },
   ];
@@ -473,210 +537,302 @@ export default function AdminDashboard() {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Total Revenue */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
-                    <FaDollarSign className="w-6 h-6 text-brand-600" />
+                <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
+                  <FaDollarSign className="w-6 h-6 text-brand-600" />
                 </div>
-                <span className="text-sm font-semibold text-green-600">+55%</span>
               </div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Today's Moneys</h3>
-              <p className="text-3xl font-bold text-gray-900">{todayMoney}</p>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Total Revenue</h3>
+              <p className="text-3xl font-bold text-gray-900">${totalRevenue.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-1">Professional + Organisation</p>
             </div>
 
+            {/* Total Professionals */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
-                    <FaGlobe className="w-6 h-6 text-brand-600" />
+                <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
+                  <HiUser className="w-6 h-6 text-brand-600" />
                 </div>
-                <span className="text-sm font-semibold text-green-600">+5%</span>
               </div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Today's Users</h3>
-              <p className="text-3xl font-bold text-gray-900">{todayUsers.toLocaleString()}</p>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Total Professionals</h3>
+              <p className="text-3xl font-bold text-gray-900">{totalProfessionals.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-1">{activatedProfessionals} activated</p>
             </div>
 
+            {/* Total Organisations */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
-                    <FaUsers className="w-6 h-6 text-brand-600" />
+                <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
+                  <HiOfficeBuilding className="w-6 h-6 text-brand-600" />
                 </div>
-                <span className="text-sm font-semibold text-red-600">-14%</span>
               </div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">New Clients</h3>
-              <p className="text-3xl font-bold text-gray-900">{newClients.toLocaleString()}</p>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Total Organisations</h3>
+              <p className="text-3xl font-bold text-gray-900">{totalOrganisations.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-1">{activeOrganisations} active</p>
             </div>
 
+            {/* Total Jobs */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                  <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
-                    <FaShoppingCart className="w-6 h-6 text-brand-600" />
-                </div>
-                <span className="text-sm font-semibold text-green-600">+8%</span>
-              </div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Total Sales</h3>
-              <p className="text-3xl font-bold text-gray-900">{totalSales}</p>
-            </div>
-          </div>
-
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Active Users Chart */}
-            <div className="bg-gray-800 rounded-xl shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white">Active Users</h3>
-                  <p className="text-sm text-gray-400">+23% than last week</p>
+                <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center">
+                  <HiBriefcase className="w-6 h-6 text-brand-600" />
                 </div>
               </div>
-              <div className="h-64 flex items-end justify-between space-x-2 mt-6">
-                {activeUsersData.map((height, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center">
-                    <div
-                      className="w-full bg-white rounded-t"
-                      style={{ height: `${height}%` }}
-                    ></div>
-                    <span className="text-xs text-gray-400 mt-2">
-                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-700">
-                <div>
-                  <p className="text-xs text-gray-400">Users</p>
-                  <p className="text-sm font-bold text-white">{stats?.totalUsers || 32984}</p>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                      <div className="bg-brand-500 h-1 rounded-full" style={{ width: '75%' }}></div>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Clicks</p>
-                  <p className="text-sm font-bold text-white">2.42m</p>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                      <div className="bg-brand-500 h-1 rounded-full" style={{ width: '60%' }}></div>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Sales</p>
-                  <p className="text-sm font-bold text-white">2,400$</p>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                      <div className="bg-brand-500 h-1 rounded-full" style={{ width: '80%' }}></div>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Items</p>
-                  <p className="text-sm font-bold text-white">320</p>
-                  <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                      <div className="bg-brand-500 h-1 rounded-full" style={{ width: '50%' }}></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Sales Overview Chart */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">Sales Overview</h3>
-                  <p className="text-sm text-gray-500">5% more in 2021</p>
-                </div>
-              </div>
-              <div className="h-64 flex items-end justify-center mt-6 relative">
-                <svg className="w-full h-full" viewBox="0 0 400 200">
-                  <defs>
-                      <linearGradient id="brandGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#2966FF" stopOpacity="0.3" />
-                        <stop offset="100%" stopColor="#2966FF" stopOpacity="0" />
-                    </linearGradient>
-                    <linearGradient id="grayGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#6b7280" stopOpacity="0.3" />
-                      <stop offset="100%" stopColor="#6b7280" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <polyline
-                    points="20,180 60,150 100,120 140,100 180,80 220,70 260,60 300,50 340,40 380,30"
-                      fill="url(#brandGradient)"
-                      stroke="#2966FF"
-                    strokeWidth="3"
-                  />
-                  <polyline
-                    points="20,190 60,170 100,140 140,120 180,100 220,90 260,80 300,70 340,60 380,50"
-                    fill="url(#grayGradient)"
-                    stroke="#6b7280"
-                    strokeWidth="3"
-                  />
-                </svg>
-              </div>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Total Jobs</h3>
+              <p className="text-3xl font-bold text-gray-900">{totalJobs.toLocaleString()}</p>
+              <p className="text-xs text-gray-400 mt-1">{activeJobs} active</p>
             </div>
           </div>
 
-          {/* Tables Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Projects Table */}
+          {/* Statistics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Professionals Stats */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">Projects</h3>
-                  <p className="text-sm text-gray-500">30 done this month</p>
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                  <HiUser className="w-6 h-6 text-blue-600" />
                 </div>
               </div>
-              <div className="space-y-4">
-                {projects.map((project, idx) => (
-                  <div key={idx} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{project.name}</p>
-                      <div className="flex items-center mt-1">
-                        {Array.from({ length: project.members }).map((_, i) => (
-                          <div
-                            key={i}
-                              className="w-6 h-6 rounded-full bg-brand-500 border-2 border-white -ml-2 first:ml-0"
-                            style={{ zIndex: project.members - i }}
-                          ></div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="text-right mr-4">
-                      <p className="text-sm font-medium text-gray-900">{project.budget}</p>
-                    </div>
-                    <div className="text-right min-w-[100px]">
-                      <p className="text-sm font-medium text-gray-900">{project.completion}%</p>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                        <div
-                            className="bg-brand-500 h-1.5 rounded-full"
-                          style={{ width: `${project.completion}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Professionals</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Total</span>
+                  <span className="text-sm font-semibold text-gray-900">{totalProfessionals}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Activated</span>
+                  <span className="text-sm font-semibold text-green-600">{activatedProfessionals}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Verified</span>
+                  <span className="text-sm font-semibold text-blue-600">{verifiedProfessionals}</span>
+                </div>
               </div>
             </div>
 
-            {/* Orders Overview */}
+            {/* Organisations Stats */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                  <HiOfficeBuilding className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Organisations</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Total</span>
+                  <span className="text-sm font-semibold text-gray-900">{totalOrganisations}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Active</span>
+                  <span className="text-sm font-semibold text-green-600">{activeOrganisations}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Verified</span>
+                  <span className="text-sm font-semibold text-purple-600">{verifiedOrganisations}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Jobs Stats */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                  <HiBriefcase className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Jobs</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Total</span>
+                  <span className="text-sm font-semibold text-gray-900">{totalJobs}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Active</span>
+                  <span className="text-sm font-semibold text-green-600">{activeJobs}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Applications</span>
+                  <span className="text-sm font-semibold text-blue-600">{totalApplications}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Billing Stats */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
+                  <FaDollarSign className="w-6 h-6 text-yellow-600" />
+                </div>
+              </div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">Billing</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Total Revenue</span>
+                  <span className="text-sm font-semibold text-gray-900">${totalRevenue.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Prof. Plans</span>
+                  <span className="text-sm font-semibold text-blue-600">
+                    {(stats?.professionalBilling?.taldiumExpress || 0) + 
+                     (stats?.professionalBilling?.taldiumBloom || 0) + 
+                     (stats?.professionalBilling?.taldiumPrime || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-gray-500">Org. Plans</span>
+                  <span className="text-sm font-semibold text-purple-600">
+                    {(stats?.organisationBilling?.taldiumStarter || 0) + 
+                     (stats?.organisationBilling?.taldiumStandard || 0) + 
+                     (stats?.organisationBilling?.taldiumPremium || 0) + 
+                     (stats?.organisationBilling?.taldiumEnterprise || 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Detailed Stats Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Recent Jobs Overview */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">Orders Overview</h3>
-                  <p className="text-sm text-gray-500">30% this month</p>
+                  <h3 className="text-lg font-bold text-gray-900">Jobs Overview</h3>
+                  <p className="text-sm text-gray-500">Job statistics</p>
                 </div>
               </div>
               <div className="space-y-4">
-                {orders.map((order, idx) => (
-                  <div key={idx} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center text-brand-600">
-                        {order.icon}
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">{order.description}</p>
-                        <p className="text-xs text-gray-500">{order.orderId}</p>
-                      </div>
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                      <HiBriefcase className="w-4 h-4 text-green-600" />
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500">{order.date}</p>
+                    <div>
+                      <p className="font-medium text-gray-900">Total Jobs Created</p>
+                      <p className="text-xs text-gray-500">All time</p>
                     </div>
                   </div>
-                ))}
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-gray-900">{totalJobs}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <HiCheckCircle className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Active Jobs</p>
+                      <p className="text-xs text-gray-500">Currently published</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-green-600">{activeJobs}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                      <FaUsers className="w-4 h-4 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Total Applications</p>
+                      <p className="text-xs text-gray-500">All applications</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-purple-600">{totalApplications}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                      <HiCheckCircle className="w-4 h-4 text-yellow-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Total Hires</p>
+                      <p className="text-xs text-gray-500">Successful placements</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-yellow-600">{totalHires}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Verification Status */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">Verification Status</h3>
+                  <p className="text-sm text-gray-500">Verification overview</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <HiUser className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Verified Professionals</p>
+                      <p className="text-xs text-gray-500">Identity verified</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-blue-600">{verifiedProfessionals}</p>
+                    <p className="text-xs text-gray-400">of {totalProfessionals}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
+                      <HiOfficeBuilding className="w-4 h-4 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Verified Organisations</p>
+                      <p className="text-xs text-gray-500">Business verified</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-purple-600">{verifiedOrganisations}</p>
+                    <p className="text-xs text-gray-400">of {totalOrganisations}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                      <HiCheckCircle className="w-4 h-4 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Activated Professionals</p>
+                      <p className="text-xs text-gray-500">Account activated</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-green-600">{activatedProfessionals}</p>
+                    <p className="text-xs text-gray-400">of {totalProfessionals}</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between py-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                      <HiOfficeBuilding className="w-4 h-4 text-yellow-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Active Organisations</p>
+                      <p className="text-xs text-gray-500">Currently active</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-yellow-600">{activeOrganisations}</p>
+                    <p className="text-xs text-gray-400">of {totalOrganisations}</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

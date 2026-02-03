@@ -17,14 +17,21 @@ import logo from '@/assets/logo.svg';
 
 type SettingsTab = 'general' | 'users' | 'verification' | 'billing';
 type UsersSubTab = 'admin-users' | 'role-management';
+type BillingSubTab = 'professional' | 'organisation';
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [usersSubTab, setUsersSubTab] = useState<UsersSubTab>('admin-users');
+  const [billingSubTab, setBillingSubTab] = useState<BillingSubTab>('professional');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isRoleDrawerOpen, setIsRoleDrawerOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<any>(null);
+  const [isPlanDrawerOpen, setIsPlanDrawerOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any>(null);
+  const [professionalPlans, setProfessionalPlans] = useState<any[]>([]);
+  const [organisationPlans, setOrganisationPlans] = useState<any[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
   const [settings, setSettings] = useState({
     // General - About App
     appName: 'Taldium',
@@ -59,7 +66,6 @@ export default function Settings() {
     role: 'admin',
   });
   const [adminFormLoading, setAdminFormLoading] = useState(false);
-  const [adminFormError, setAdminFormError] = useState('');
 
   const [roles, setRoles] = useState([
     {
@@ -189,7 +195,6 @@ export default function Settings() {
     },
   });
   const [roleFormLoading, setRoleFormLoading] = useState(false);
-  const [roleFormError, setRoleFormError] = useState('');
 
   // Load users sub-tab from URL
   useEffect(() => {
@@ -201,13 +206,46 @@ export default function Settings() {
     }
   }, [activeTab, searchParams]);
 
+  // Load billing sub-tab from URL
+  useEffect(() => {
+    if (activeTab === 'billing') {
+      const subTabParam = searchParams.get('subTab') as BillingSubTab;
+      if (subTabParam && ['professional', 'organisation'].includes(subTabParam)) {
+        setBillingSubTab(subTabParam);
+      }
+    }
+  }, [activeTab, searchParams]);
+
+  // Fetch plans when billing tab is active
+  useEffect(() => {
+    if (activeTab === 'billing') {
+      fetchPlans();
+    }
+  }, [activeTab]);
+
+  const fetchPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const [professionalRes, organisationRes] = await Promise.all([
+        api.get('/v1/admin/billing/plans?entityType=professional'),
+        api.get('/v1/admin/billing/plans?entityType=organisation'),
+      ]);
+      setProfessionalPlans(professionalRes.data.data || []);
+      setOrganisationPlans(organisationRes.data.data || []);
+    } catch (err) {
+      console.error('Failed to fetch plans:', err);
+      toast.error('Failed to load subscription plans');
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
   const handleAdminFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setAdminFormData({ ...adminFormData, [e.target.name]: e.target.value });
   };
 
   const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAdminFormError('');
     setAdminFormLoading(true);
 
     try {
@@ -223,7 +261,6 @@ export default function Settings() {
       // Optionally refresh admin users list
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to invite admin';
-      setAdminFormError(errorMsg);
       toast.error(errorMsg);
     } finally {
       setAdminFormLoading(false);
@@ -233,6 +270,11 @@ export default function Settings() {
   const handleUsersSubTabChange = (subTab: UsersSubTab) => {
     setUsersSubTab(subTab);
     setSearchParams({ tab: 'users', subTab });
+  };
+
+  const handleBillingSubTabChange = (subTab: BillingSubTab) => {
+    setBillingSubTab(subTab);
+    setSearchParams({ tab: 'billing', subTab });
   };
 
   const handleOpenRoleDrawer = (role?: any) => {
@@ -271,7 +313,6 @@ export default function Settings() {
       });
     }
     setIsRoleDrawerOpen(true);
-    setRoleFormError('');
   };
 
   const handleRoleFormChange = (field: string, value: any) => {
@@ -291,7 +332,6 @@ export default function Settings() {
 
   const handleRoleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setRoleFormError('');
     setRoleFormLoading(true);
 
     try {
@@ -312,7 +352,6 @@ export default function Settings() {
       setEditingRole(null);
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to save role';
-      setRoleFormError(errorMsg);
       toast.error(errorMsg);
     } finally {
       setRoleFormLoading(false);
@@ -726,37 +765,118 @@ export default function Settings() {
 
             {/* Billing Tab */}
             {activeTab === 'billing' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-xl shadow-sm p-6">
-                  <div className="flex items-center mb-6">
-                    <HiCreditCard className="w-5 h-5 text-brand-600 mr-2" />
-                    <h2 className="text-lg font-semibold text-gray-900">Billing</h2>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="p-6 bg-gray-50 rounded-lg">
-                      <h3 className="font-medium text-gray-900 mb-2">Payment Gateway</h3>
-                      <p className="text-sm text-gray-600 mb-4">Configure payment processing settings</p>
-                      <button className="px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600">
-                        Configure Gateway
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Sidebar Navigation */}
+                <div className="lg:col-span-1">
+                  <div className="bg-white rounded-xl shadow-sm p-4">
+                    <nav className="space-y-2">
+                      <button
+                        onClick={() => handleBillingSubTabChange('professional')}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                          billingSubTab === 'professional'
+                            ? 'bg-brand-500 text-white'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        <HiUsers className="w-5 h-5" />
+                        <span className="font-medium">Professional Entity</span>
                       </button>
-                    </div>
-                    <div className="p-6 bg-gray-50 rounded-lg">
-                      <h3 className="font-medium text-gray-900 mb-2">Subscription Plans</h3>
-                      <p className="text-sm text-gray-600 mb-4">Manage subscription tiers and pricing</p>
-                      <button className="px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600">
-                        Manage Plans
+                      <button
+                        onClick={() => handleBillingSubTabChange('organisation')}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                          billingSubTab === 'organisation'
+                            ? 'bg-brand-500 text-white'
+                            : 'text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        <HiCreditCard className="w-5 h-5" />
+                        <span className="font-medium">Organisation Entity</span>
                       </button>
-                    </div>
-                    <div className="p-6 bg-gray-50 rounded-lg">
-                      <h3 className="font-medium text-gray-900 mb-2">Billing History</h3>
-                      <p className="text-sm text-gray-600 mb-4">View and export billing records</p>
-                      <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
-                        View History
-                      </button>
-                    </div>
+                    </nav>
                   </div>
                 </div>
-            </div>
+
+                {/* Content Area */}
+                <div className="lg:col-span-3">
+                  {billingSubTab === 'professional' && (
+                    <div className="bg-white rounded-xl shadow-sm p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center">
+                          <HiUsers className="w-5 h-5 text-brand-600 mr-2" />
+                          <h2 className="text-lg font-semibold text-gray-900">Subscription Plans (For Professional Entity)</h2>
+                        </div>
+                      </div>
+                      {plansLoading ? (
+                        <div className="text-center text-gray-600 py-8">Loading plans...</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {professionalPlans.map((plan) => (
+                            <div key={plan.id} className="p-4 border border-gray-200 rounded-lg hover:border-brand-300 transition-all">
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <h3 className="font-medium text-gray-900 mb-1">{plan.name}</h3>
+                                  <p className="text-sm text-gray-600">{plan.description}</p>
+                                  <p className="text-sm text-gray-500 mt-1">
+                                    {plan.price === 0 ? 'Free' : `$${plan.price}/month`}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setEditingPlan({ ...plan, entityType: 'professional' });
+                                    setIsPlanDrawerOpen(true);
+                                  }}
+                                  className="text-brand-600 hover:text-brand-700 text-sm font-medium"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {billingSubTab === 'organisation' && (
+                    <div className="bg-white rounded-xl shadow-sm p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center">
+                          <HiCreditCard className="w-5 h-5 text-brand-600 mr-2" />
+                          <h2 className="text-lg font-semibold text-gray-900">Subscription Plans (For Organisation Entity)</h2>
+                        </div>
+                      </div>
+                      {plansLoading ? (
+                        <div className="text-center text-gray-600 py-8">Loading plans...</div>
+                      ) : (
+                        <div className="space-y-4">
+                          {organisationPlans.map((plan) => (
+                            <div key={plan.id} className="p-4 border border-gray-200 rounded-lg hover:border-brand-300 transition-all">
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <h3 className="font-medium text-gray-900 mb-1">{plan.name}</h3>
+                                  <p className="text-sm text-gray-600">{plan.description}</p>
+                                  <p className="text-sm text-gray-500 mt-1">
+                                    {plan.price === 0 ? 'Free' : `$${plan.price}/month`}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setEditingPlan({ ...plan, entityType: 'organisation' });
+                                    setIsPlanDrawerOpen(true);
+                                  }}
+                                  className="text-brand-600 hover:text-brand-700 text-sm font-medium"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
 
           {/* Save Button */}
@@ -795,12 +915,6 @@ export default function Settings() {
                 {/* Form Content */}
                 <div className="flex-1 overflow-y-auto p-6">
                   <form onSubmit={handleAddAdmin} className="space-y-4">
-                    {adminFormError && (
-                      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-                        {adminFormError}
-                      </div>
-                    )}
-
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
                       <input
@@ -905,12 +1019,6 @@ export default function Settings() {
                 {/* Form Content */}
                 <div className="flex-1 overflow-y-auto p-6">
                   <form onSubmit={handleRoleSubmit} className="space-y-6">
-                    {roleFormError && (
-                      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-                        {roleFormError}
-                      </div>
-                    )}
-
                     {/* Title */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
@@ -978,6 +1086,100 @@ export default function Settings() {
                 </div>
         </div>
       </div>
+          </>
+        )}
+
+        {/* Plan Management Side Drawer */}
+        {isPlanDrawerOpen && (
+          <>
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity"
+              onClick={() => {
+                setIsPlanDrawerOpen(false);
+                setEditingPlan(null);
+              }}
+            ></div>
+            {/* Drawer */}
+            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50">
+              <div className="flex flex-col h-full">
+                {/* Header */}
+                <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {editingPlan ? `Edit ${editingPlan.name}` : 'Add Plan'}
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setIsPlanDrawerOpen(false);
+                      setEditingPlan(null);
+                    }}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <HiX className="w-6 h-6" />
+                  </button>
+                </div>
+
+                {/* Form Content */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  {editingPlan && (
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Plan Name</label>
+                        <input
+                          type="text"
+                          value={editingPlan.name}
+                          readOnly
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <textarea
+                          value={editingPlan.description}
+                          readOnly
+                          rows={3}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Price (USD/month)</label>
+                        <input
+                          type="number"
+                          value={editingPlan.price}
+                          readOnly
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type</label>
+                        <input
+                          type="text"
+                          value={editingPlan.entityType === 'professional' ? 'Professional Entity' : 'Organisation Entity'}
+                          readOnly
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        />
+                      </div>
+
+                      <div className="flex gap-3 pt-4 border-t border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPlanDrawerOpen(false);
+                            setEditingPlan(null);
+                          }}
+                          className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         )}
       </div>

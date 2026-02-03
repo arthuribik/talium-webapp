@@ -235,18 +235,35 @@ export default function JobDetail() {
                   </div>
                 </div>
               </div>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={handleApply}
-                  disabled={applying}
-                  className="px-8 py-3 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {applying ? 'Applying...' : 'Apply Now'}
-                </button>
-                <button className="px-8 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors whitespace-nowrap">
-                  Save Job
-                </button>
-              </div>
+              {/* Show buttons only for authenticated professionals or unauthenticated users */}
+              {(isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated ? (
+                <div className="flex flex-col gap-3">
+                  {isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
+                    <>
+                      <button
+                        onClick={handleApply}
+                        disabled={applying}
+                        className="px-8 py-3 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {applying ? 'Applying...' : 'Apply Now'}
+                      </button>
+                      <button className="px-8 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors whitespace-nowrap">
+                        Save Job
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const currentUrl = `/jobs/${id}`;
+                        navigate(`/join?redirect=${encodeURIComponent(currentUrl)}`);
+                      }}
+                      className="px-8 py-3 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors whitespace-nowrap"
+                    >
+                      Apply Now
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -388,21 +405,40 @@ export default function JobDetail() {
                 </div>
               </div>
 
-              {/* Apply Button (Sticky) */}
-              <div className="lg:sticky lg:top-4">
-                <button
-                  onClick={handleApply}
-                  disabled={applying}
-                  className="w-full px-6 py-4 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {applying ? 'Applying...' : 'Apply Now'}
-                </button>
-                <p className="text-xs text-gray-500 text-center mt-2">
-                  {isAuthenticated && user?.userType === 'PROFESSIONAL'
-                    ? 'You\'ll need a verified profile to apply'
-                    : 'Sign up as a professional to apply'}
-                </p>
-              </div>
+              {/* Apply Button (Sticky) - Only show for authenticated professionals or unauthenticated users */}
+              {(isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated ? (
+                <div className="lg:sticky lg:top-4">
+                  {isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
+                    <>
+                      <button
+                        onClick={handleApply}
+                        disabled={applying}
+                        className="w-full px-6 py-4 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {applying ? 'Applying...' : 'Apply Now'}
+                      </button>
+                      <p className="text-xs text-gray-500 text-center mt-2">
+                        You'll need a verified profile to apply
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          const currentUrl = `/jobs/${id}`;
+                          navigate(`/join?redirect=${encodeURIComponent(currentUrl)}`);
+                        }}
+                        className="w-full px-6 py-4 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors text-lg"
+                      >
+                        Apply Now
+                      </button>
+                      <p className="text-xs text-gray-500 text-center mt-2">
+                        Sign up as a professional to apply
+                      </p>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </section>

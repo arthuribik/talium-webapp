@@ -102,7 +102,7 @@ export default function ProfessionalSetup() {
     try {
       await api.post(`/v1/professionals/${profId || 'temp'}/experience`, experienceData);
       toast.success('Work experience added successfully!');
-      navigate('/dashboard');
+      navigate('/professional');
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to add experience';
       setError(errorMsg);

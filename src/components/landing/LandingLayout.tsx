@@ -54,7 +54,8 @@ export default function LandingLayout({ children }: LandingLayoutProps) {
   const getDashboardPath = () => {
     if (user?.userType === 'ADMIN') return '/admin';
     if (user?.userType === 'ORGANISATION') return '/organization';
-    return '/dashboard';
+    if (user?.userType === 'PROFESSIONAL') return '/professional';
+    return '/login';
   };
 
   return (

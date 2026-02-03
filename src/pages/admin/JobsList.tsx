@@ -102,7 +102,6 @@ export default function JobsList() {
     },
   });
   const [formLoading, setFormLoading] = useState(false);
-  const [formError, setFormError] = useState('');
 
   const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -142,7 +141,6 @@ export default function JobsList() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormLoading(true);
-    setFormError('');
 
     try {
       // Use admin endpoint - it will automatically select an organisation if none provided
@@ -199,7 +197,6 @@ export default function JobsList() {
       fetchJobs(); // Refresh the jobs list
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to create job';
-      setFormError(errorMsg);
       toast.error(errorMsg);
     } finally {
       setFormLoading(false);
@@ -427,12 +424,6 @@ export default function JobsList() {
               </div>
 
               {/* Form */}
-              {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                  {formError}
-                </div>
-              )}
-
               <form onSubmit={handleFormSubmit} className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Job Title *</label>
