@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiArrowLeft, HiUser, HiMail, HiLocationMarker, HiBriefcase, HiCheckCircle, HiXCircle, HiClock, HiStar, HiPause, HiPlay } from 'react-icons/hi';
+import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiClock, HiStar, HiPause, HiPlay } from 'react-icons/hi';
 
 export default function OrganisationJobDetail() {
   const { id } = useParams<{ id: string }>();

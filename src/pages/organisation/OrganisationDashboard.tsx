@@ -4,7 +4,6 @@ import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 import {
-  HiUser,
   HiBriefcase,
   HiCheckCircle,
   HiClock,

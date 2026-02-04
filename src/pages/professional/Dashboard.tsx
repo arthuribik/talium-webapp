@@ -4,14 +4,11 @@ import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 import {
-  HiBriefcase,
-  HiCheckCircle,
   HiClock,
   HiArrowRight,
   HiUser,
 } from 'react-icons/hi';
 import {
-  FaBriefcase,
   FaFileAlt,
   FaUserCheck,
 } from 'react-icons/fa';

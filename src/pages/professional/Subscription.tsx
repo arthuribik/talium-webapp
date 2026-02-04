@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
-import { HiCreditCard, HiCheck, HiCalendar } from 'react-icons/hi';
+import { HiCheck, HiCalendar } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 

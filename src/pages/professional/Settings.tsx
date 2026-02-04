@@ -4,10 +4,8 @@ import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import { HiUser, HiLockClosed, HiSave, HiPlus, HiPencil, HiTrash, HiX } from 'react-icons/hi';
-import { useAppSelector } from '@/store/hooks';
 
 export default function ProfessionalSettings() {
-  const { user } = useAppSelector((state) => state.auth);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'profile';
   const [loading, setLoading] = useState(true);

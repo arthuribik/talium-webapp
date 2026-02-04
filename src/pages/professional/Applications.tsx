@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiClipboardList, HiBriefcase, HiLocationMarker, HiCalendar, HiCheckCircle, HiClock, HiXCircle, HiDocumentText, HiEye, HiX, HiDownload } from 'react-icons/hi';
+import { HiClipboardList, HiBriefcase, HiLocationMarker, HiCalendar, HiCheckCircle, HiClock, HiXCircle, HiDocumentText, HiX, HiDownload } from 'react-icons/hi';
 
 export default function Applications() {
   const navigate = useNavigate();

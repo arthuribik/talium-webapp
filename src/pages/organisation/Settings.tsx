@@ -12,8 +12,6 @@ import {
   HiLink,
   HiCalendar,
   HiLocationMarker,
-  HiMail,
-  HiPhone,
   HiDocumentText
 } from 'react-icons/hi';
 import { 

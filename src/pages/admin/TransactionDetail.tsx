@@ -2,14 +2,12 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { api } from '@/services/api';
-import { useAppSelector } from '@/store/hooks';
 import toast from 'react-hot-toast';
 import { HiArrowLeft, HiCurrencyDollar, HiCheckCircle, HiXCircle, HiClock, HiUser, HiDocumentText, HiCalendar } from 'react-icons/hi';
 
 export default function TransactionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAppSelector((state) => state.auth);
   const [transaction, setTransaction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [validating, setValidating] = useState(false);

@@ -5,15 +5,6 @@ import { api } from '@/services/api';
 import { HiSearch, HiUser, HiLocationMarker, HiPlus, HiChevronDown } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
-const COUNTRIES = [
-  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France',
-  'Italy', 'Spain', 'Netherlands', 'Belgium', 'Switzerland', 'Sweden', 'Norway',
-  'Denmark', 'Finland', 'Poland', 'Portugal', 'Ireland', 'Austria', 'Greece',
-  'Japan', 'South Korea', 'Singapore', 'Hong Kong', 'India', 'China', 'Brazil',
-  'Mexico', 'Argentina', 'South Africa', 'Nigeria', 'Kenya', 'Ghana', 'Egypt',
-  'United Arab Emirates', 'Saudi Arabia', 'Israel', 'Turkey', 'Russia', 'New Zealand',
-];
-
 export default function ViewProfessionals() {
   const navigate = useNavigate();
   const [professionals, setProfessionals] = useState<any[]>([]);
