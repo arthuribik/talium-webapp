@@ -21,6 +21,16 @@ export default function Login() {
       const result = await dispatch(login({ email, password })).unwrap();
       const loggedInUser = result?.user;
       
+      // Wait a moment to ensure state is fully persisted and API headers are set
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify token is set before redirecting
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Token not found after login');
+        return;
+      }
+      
       // Redirect based on user type
       if (loggedInUser?.userType === 'PROFESSIONAL') {
         navigate('/professional');

@@ -1,6 +1,13 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { api } from '@/services/api';
 
+// Helper to track login time
+const trackLoginTime = () => {
+  if (typeof window !== 'undefined' && (window as any).setLoginTime) {
+    (window as any).setLoginTime();
+  }
+};
+
 export interface User {
   id: string;
   email: string;
@@ -196,6 +203,8 @@ const authSlice = createSlice({
         }
         localStorage.setItem('user', JSON.stringify(action.payload.user));
         api.defaults.headers.common['Authorization'] = `Bearer ${action.payload.token}`;
+        // Track login time to prevent immediate 401 redirects
+        trackLoginTime();
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
@@ -221,6 +230,8 @@ const authSlice = createSlice({
         }
         localStorage.setItem('user', JSON.stringify(action.payload.user));
         api.defaults.headers.common['Authorization'] = `Bearer ${action.payload.token}`;
+        // Track login time to prevent immediate 401 redirects
+        trackLoginTime();
       })
       .addCase(adminLogin.rejected, (state, action) => {
         state.loading = false;

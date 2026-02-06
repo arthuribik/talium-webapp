@@ -154,11 +154,22 @@ let last401Time = 0;
 let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
 let appInitialized = false;
 let initializationTime = Date.now();
+let lastLoginTime = 0;
 
 // Mark app as initialized after 2 seconds (give time for route guards to check)
 setTimeout(() => {
   appInitialized = true;
 }, 2000);
+
+// Track login time to prevent immediate redirects after login
+export const setLoginTime = () => {
+  lastLoginTime = Date.now();
+};
+
+// Expose setLoginTime globally so authSlice can call it
+if (typeof window !== 'undefined') {
+  (window as any).setLoginTime = setLoginTime;
+}
 
 api.interceptors.response.use(
   (response) => {
@@ -184,10 +195,18 @@ api.interceptors.response.use(
       const isAdminRoute = currentPath.startsWith('/admin');
       const now = Date.now();
       const timeSinceInit = now - initializationTime;
+      const timeSinceLogin = now - lastLoginTime;
       
       // NEVER redirect during initial app load (first 3 seconds)
       // This prevents redirects before route guards can check auth
       if (!appInitialized || timeSinceInit < 3000) {
+        return Promise.reject(error);
+      }
+      
+      // NEVER redirect within 5 seconds after login
+      // This prevents redirects immediately after successful login
+      if (timeSinceLogin > 0 && timeSinceLogin < 5000) {
+        console.log('[API] Ignoring 401 - too soon after login');
         return Promise.reject(error);
       }
       
@@ -204,9 +223,9 @@ api.interceptors.response.use(
       const token = getToken();
       
       // Only redirect if we have a token (meaning it was sent but rejected)
-      // AND the request was NOT made during initial load
+      // AND the request was NOT made during initial load or right after login
       // This indicates the token is invalid/expired, not just missing
-      if (token && token.trim() && appInitialized && timeSinceInit > 3000) {
+      if (token && token.trim() && appInitialized && timeSinceInit > 3000 && timeSinceLogin > 5000) {
         // Cancel any pending redirect
         if (redirectTimeout) {
           clearTimeout(redirectTimeout);

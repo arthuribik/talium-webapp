@@ -26,6 +26,16 @@ export default function AdminLogin() {
         return;
       }
 
+      // Wait a moment to ensure state is fully persisted and API headers are set
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify token is set before redirecting
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Token not found after admin login');
+        return;
+      }
+
       navigate('/admin');
     } catch (err: any) {
       // Error is handled by Redux
