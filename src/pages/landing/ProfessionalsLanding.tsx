@@ -11,6 +11,7 @@ interface Professional {
   identityStatus: string;
   profileCompleteness: number;
   createdAt: string;
+  profileImage?: string;
   user: {
     id: string;
     email: string;
@@ -28,6 +29,7 @@ export default function ProfessionalsLanding() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [locationTerm, setLocationTerm] = useState('');
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchProfessionals();
@@ -72,21 +74,6 @@ export default function ProfessionalsLanding() {
   const getReviewCount = () => {
     // In a real app, this would come from the API
     return Math.floor(Math.random() * 50) + 10;
-  };
-
-  const getProfileImage = (_profId: string, index: number) => {
-    // Use consistent images based on index
-    const images = [
-      'photo-1507003211169-0a1dd7228f2d',
-      'photo-1472099645785-5658abf4ff4e',
-      'photo-1494790108377-be9c29b29330',
-      'photo-1500648767791-00dcc994a43e',
-      'photo-1534528741775-53994a69daeb',
-      'photo-1529626455594-4ff0802cfb7e',
-      'photo-1517841905240-472988babdf9',
-      'photo-1539571696357-5a69c17a67c6',
-    ];
-    return `https://images.unsplash.com/${images[index % images.length]}?w=100&h=100&fit=crop`;
   };
 
   return (
@@ -173,12 +160,19 @@ export default function ProfessionalsLanding() {
                   >
                     {/* Profile Picture and Name */}
                     <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0">
-                        <img
-                          src={getProfileImage('', index)}
-                          alt={`${prof.user.firstName} ${prof.user.lastName}`}
-                          className="w-full h-full object-cover"
-                        />
+                      <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 bg-brand-100 flex items-center justify-center">
+                        {prof.profileImage && !imageErrors.has(prof.id) ? (
+                          <img
+                            src={prof.profileImage}
+                            alt={`${prof.user.firstName} ${prof.user.lastName}`}
+                            className="w-full h-full object-cover"
+                            onError={() => {
+                              setImageErrors((prev) => new Set(prev).add(prof.id));
+                            }}
+                          />
+                        ) : (
+                          <HiUser className="w-8 h-8 text-brand-600" />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">

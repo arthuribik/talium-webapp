@@ -171,6 +171,19 @@ export default function RegisterBusiness() {
   const { loading, error } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
 
+  // Show toast errors when error or localError changes
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+    }
+  }, [error]);
+
+  useEffect(() => {
+    if (localError) {
+      toast.error(localError);
+    }
+  }, [localError]);
+
   // Initialize from URL params and localStorage
   useEffect(() => {
     const initialize = async () => {
@@ -2355,12 +2368,6 @@ export default function RegisterBusiness() {
         
         
         <div className="w-full">
-          {(error || localError) && (
-            <div className="max-w-4xl mx-auto mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              {error || localError}
-            </div>
-          )}
-
           {/* Step Indicator */}
           <div className="max-w-4xl mx-auto mb-8">
             <div className="flex items-center justify-center space-x-2 md:space-x-4">
