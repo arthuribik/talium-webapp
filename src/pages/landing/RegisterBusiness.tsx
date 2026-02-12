@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { registerBusiness } from '@/store/authSlice';
+import { useAppSelector } from '@/store/hooks';
 import { api } from '@/services/api';
 import { 
   HiDocumentText, 
@@ -167,7 +166,6 @@ export default function RegisterBusiness() {
     codeSent: false,
   });
   const [localError, setLocalError] = useState('');
-  const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
 
@@ -190,6 +188,12 @@ export default function RegisterBusiness() {
       const stepParam = searchParams.get('step');
       const idParam = searchParams.get('id');
       
+      // Clear localStorage unless we have step=5 with an id
+      const isStep5WithId = stepParam === '5' && idParam;
+      if (!isStep5WithId) {
+        localStorage.removeItem('registrationId');
+      }
+      
       // Resolve step from URL (defaults to 1)
       let targetStep = 1;
       if (stepParam) {
@@ -200,7 +204,7 @@ export default function RegisterBusiness() {
       }
       
       // Get registration ID from URL or localStorage
-      const storedId = localStorage.getItem('registrationId');
+      const storedId = isStep5WithId ? localStorage.getItem('registrationId') : null;
       const regId = idParam || storedId || null;
       
       // If we already have an ID, set it and load data
@@ -299,6 +303,9 @@ export default function RegisterBusiness() {
           ...prev,
           organisationEmail: data.step5.organisationEmail || '',
         }));
+        if (data.step5.phoneNumber) {
+          setPhoneNumber(data.step5.phoneNumber);
+        }
       }
       if (data.step7) {
         setFormData(prev => ({
@@ -1586,6 +1593,29 @@ export default function RegisterBusiness() {
               </div>
             </div>
           )}
+
+          {/* Phone Number Input Section */}
+          {formData.emailVerified && (
+            <div className="pt-6 border-t border-gray-200">
+              <div>
+                <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
+                  Phone Number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="phoneNumber"
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="Enter your phone number"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+                <p className="mt-2 text-sm text-gray-500">
+                  We'll use this to contact you about your organisation
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Navigation Buttons */}
@@ -1671,31 +1701,34 @@ export default function RegisterBusiness() {
     const firstName = nameParts[0] || orgName;
     const lastName = nameParts.slice(1).join(' ') || orgName;
 
-    if (!phoneNumber.trim()) {
-      setLocalError('Phone number is required');
+    // if (!phoneNumber.trim()) {
+    //   setLocalError('Phone number is required');
+    //   return;
+    // }
+
+    if (!registrationId) {
+      setLocalError('Registration ID is missing. Please start over.');
       return;
     }
 
-    const orgCountry = formData.isRegistered ? formData.countryOfIncorporation : formData.organisationCountry;
-
-    const registrationData = {
-      firstName: firstName,
-      lastName: lastName,
-      email: formData.organisationEmail,
+    const finalizeData = {
+      registrationId: registrationId,
       password: password,
       confirmPassword: confirmPassword,
+      firstName: firstName,
+      lastName: lastName,
       companyName: orgName,
-      country: orgCountry,
-      phoneNumber: phoneNumber.trim(),
-      expectedVolume: '', // Optional field
     };
 
     try {
-      await dispatch(registerBusiness(registrationData)).unwrap();
-      // Registration successful - redirect to login or dashboard
+      await api.post('/v1/auth/registration/finalize', finalizeData);
+      // Registration successful - redirect to login
+      toast.success('Registration completed successfully!');
       navigate('/login');
     } catch (err: any) {
-      setLocalError(err || 'Registration failed. Please try again.');
+      const errorMessage = err.response?.data?.message || err.message || 'Registration failed. Please try again.';
+      setLocalError(errorMessage);
+      toast.error(errorMessage);
     }
   };
 
@@ -2562,34 +2595,11 @@ export default function RegisterBusiness() {
                 )}
               </div>
 
-              {/* Phone Number Input */}
-              <div className="mb-6">
-                <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="phoneNumber"
-                  type="tel"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="Enter your phone number"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              {/* Error Message */}
-              {localError && (
-                <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                  {localError}
-                </div>
-              )}
-
               {/* Create Organisation Button */}
               <button
                 type="button"
                 onClick={handleCreateOrganisation}
-                disabled={loading || !isPasswordValid() || password !== confirmPassword || !phoneNumber.trim()}
+                disabled={loading || !isPasswordValid() || password !== confirmPassword}
                 className="w-full px-6 py-3 bg-green-500 text-white rounded-lg font-medium hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? 'Creating...' : 'Create Organisation'}
