@@ -152,7 +152,7 @@ export default function ProfessionalsLanding() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProfessionals.map((prof, index) => (
+                {filteredProfessionals.map((prof) => (
                   <div
                     key={prof.id}
                     onClick={() => navigate(`/professionals/${prof.id}`)}
