@@ -5,6 +5,8 @@ import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { register, clearError } from '@/store/authSlice';
 import { api } from '@/services/api';
 import { HiCheckCircle, HiArrowRight, HiArrowLeft, HiEye, HiEyeOff } from 'react-icons/hi';
+import { COUNTRIES } from '@/utils/countries';
+import PhoneNumberInput from '@/components/common/PhoneNumberInput';
 import logo from '@/assets/logo.svg';
 
 type Step = 1 | 2 | 3;
@@ -37,7 +39,7 @@ export default function Register() {
   const [searchParams] = useSearchParams();
   const redirectUrl = searchParams.get('redirect');
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -360,28 +362,29 @@ export default function Register() {
                 <label htmlFor="country" className="block text-sm font-medium text-gray-700 mb-2">
                 Country
               </label>
-              <input
+              <select
                 id="country"
                 name="country"
-                type="text"
                 value={formData.country}
                 onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              />
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              >
+                <option value="">Select country</option>
+                {COUNTRIES.map((country) => (
+                  <option key={country} value={country}>
+                    {country}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-                <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number
-              </label>
-              <input
-                id="phoneNumber"
-                name="phoneNumber"
-                type="tel"
+              <PhoneNumberInput
                 value={formData.phoneNumber}
-                onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                />
-              </div>
+                onChange={(value) => setFormData({ ...formData, phoneNumber: value })}
+                label="Phone Number"
+                placeholder="Enter phone number"
+              />
+            </div>
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -408,7 +411,10 @@ export default function Register() {
         {/* Step 3: Password */}
         {currentStep === 3 && (
           <form className="bg-white rounded-lg p-6 shadow-sm" onSubmit={handleSubmit}>
-            <h3 className="text-xl font-semibold text-gray-900 mb-4">Create Password</h3>
+            <div className="text-center mb-6">
+              <h3 className="text-3xl font-bold text-blue-600 mb-2">Set Your Password</h3>
+              <p className="text-sm text-gray-600">Create a secure password for your organisation account.</p>
+            </div>
             
             {(error || localError) && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
@@ -419,7 +425,7 @@ export default function Register() {
             <div className="space-y-4">
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                  Password
+                  Password <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <input
@@ -429,8 +435,8 @@ export default function Register() {
                     minLength={8}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    placeholder="Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char"
+                    className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Enter your password"
                   />
                   <button
                     type="button"
@@ -445,9 +451,54 @@ export default function Register() {
                   </button>
                 </div>
               </div>
-          <div>
+
+              {/* Password Requirements */}
+              <div className="space-y-2">
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                    password.length >= 8 ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {password.length >= 8 && <HiCheckCircle className="w-3 h-3 text-white" />}
+                  </div>
+                  <span className="text-sm text-gray-700">At least 8 characters</span>
+                </div>
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                    /[A-Z]/.test(password) ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {/[A-Z]/.test(password) && <HiCheckCircle className="w-3 h-3 text-white" />}
+                  </div>
+                  <span className="text-sm text-gray-700">Contains uppercase letter</span>
+                </div>
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                    /[a-z]/.test(password) ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {/[a-z]/.test(password) && <HiCheckCircle className="w-3 h-3 text-white" />}
+                  </div>
+                  <span className="text-sm text-gray-700">Contains lowercase letter</span>
+                </div>
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                    /\d/.test(password) ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {/\d/.test(password) && <HiCheckCircle className="w-3 h-3 text-white" />}
+                  </div>
+                  <span className="text-sm text-gray-700">Contains a number</span>
+                </div>
+                <div className="flex items-center">
+                  <div className={`w-4 h-4 rounded-full border-2 mr-3 flex items-center justify-center ${
+                    /[@$!%*?&]/.test(password) ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {/[@$!%*?&]/.test(password) && <HiCheckCircle className="w-3 h-3 text-white" />}
+                  </div>
+                  <span className="text-sm text-gray-700">Contains special character</span>
+                </div>
+              </div>
+
+              <div>
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">
-                  Confirm Password
+                  Confirm Password <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <input
@@ -457,7 +508,8 @@ export default function Register() {
                     minLength={8}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Confirm your password"
                   />
                   <button
                     type="button"

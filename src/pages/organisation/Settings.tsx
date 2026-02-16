@@ -28,18 +28,12 @@ import {
   FaFlag,
   FaUsers,
   FaUserFriends,
-  FaHandshake
+  FaHandshake,
+  FaEnvelope
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
-
-const COUNTRIES = [
-  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France',
-  'Italy', 'Spain', 'Netherlands', 'Belgium', 'Switzerland', 'Sweden', 'Norway',
-  'Denmark', 'Finland', 'Poland', 'Portugal', 'Ireland', 'Austria', 'Greece',
-  'Japan', 'South Korea', 'Singapore', 'Hong Kong', 'India', 'China', 'Brazil',
-  'Mexico', 'Argentina', 'South Africa', 'Nigeria', 'Kenya', 'Ghana', 'Egypt',
-  'United Arab Emirates', 'Saudi Arabia', 'Israel', 'Turkey', 'Russia', 'New Zealand',
-];
+import { COUNTRIES } from '@/utils/countries';
+import PhoneNumberInput from '@/components/common/PhoneNumberInput';
 
 const CATEGORIES = [
   { id: 'company', label: 'Company', icon: FaBuilding },
@@ -84,6 +78,7 @@ export default function Settings() {
     incorporationNumber: '',
     
     // Organisation Details (for non-registered)
+    organisationName: '',
     organisationCountry: '',
     
     // Category
@@ -102,6 +97,8 @@ export default function Settings() {
     foundedDate: '',
     
     // Contact & Online
+    organisationEmail: '',
+    phoneNumber: '',
     website: '',
     socialMedia: {
       facebook: '',
@@ -162,6 +159,7 @@ export default function Settings() {
           incorporationNumber: org.incorporationNumber || '',
           
           // Organisation Details (for non-registered)
+          organisationName: org.organisationName || org.companyName || '',
           organisationCountry: org.organisationCountry || '',
           
           // Category
@@ -180,6 +178,8 @@ export default function Settings() {
           foundedDate: org.foundedDate || '',
           
           // Contact & Online
+          organisationEmail: org.user?.email || '',
+          phoneNumber: org.user?.phoneNumber || '',
           website: org.website || '',
           socialMedia: {
             facebook: org.socialMedia?.facebook || '',
@@ -330,25 +330,28 @@ export default function Settings() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Company Name <span className="text-red-500">*</span>
+                      {formData.isRegistered ? 'Legal Name' : 'Organisation Name'} <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
                       required
+                      value={formData.isRegistered ? formData.legalName : formData.organisationName}
+                      onChange={(e) => setFormData({ 
+                        ...formData, 
+                        [formData.isRegistered ? 'legalName' : 'organisationName']: e.target.value 
+                      })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      placeholder={formData.isRegistered ? "Enter legal name" : "Enter organisation name"}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                    <input
+                      type="text"
                       value={formData.companyName}
                       onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       placeholder="Enter company name"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Legal Name</label>
-                    <input
-                      type="text"
-                      value={formData.legalName}
-                      onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="Enter legal name"
                     />
                   </div>
                   <div className="md:col-span-2">
@@ -375,6 +378,39 @@ export default function Settings() {
                     />
                     <p className="text-xs text-gray-500 mt-1">{formData.description.length}/500 characters</p>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact Information Section */}
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                <FaEnvelope className="w-5 h-5 mr-2 text-brand-600" />
+                Contact Information
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email Address <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={formData.organisationEmail}
+                    onChange={(e) => setFormData({ ...formData, organisationEmail: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-gray-50"
+                    placeholder="organisation@example.com"
+                    readOnly
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Email cannot be changed here</p>
+                </div>
+                <div>
+                  <PhoneNumberInput
+                    value={formData.phoneNumber}
+                    onChange={(value) => setFormData({ ...formData, phoneNumber: value })}
+                    label="Phone Number"
+                    placeholder="Enter phone number"
+                  />
                 </div>
               </div>
             </div>
@@ -690,6 +726,7 @@ export default function Settings() {
                     required
                     value={formData.foundedDate}
                     onChange={(e) => setFormData({ ...formData, foundedDate: e.target.value })}
+                    max={new Date().toISOString().split('T')[0]}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 </div>

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/services/api';
 import LandingLayout from '@/components/landing/LandingLayout';
-import { HiBriefcase, HiLocationMarker, HiStar } from 'react-icons/hi';
+import { HiBriefcase, HiLocationMarker, HiStar, HiChevronDown } from 'react-icons/hi';
+import { COUNTRIES } from '@/utils/countries';
 
 interface Organization {
   id: string;
@@ -12,6 +13,15 @@ interface Organization {
   industry?: string;
   verificationStatus: string;
   createdAt: string;
+  jobCount?: number;
+  category?: {
+    category?: string;
+    schoolType?: string;
+    religiousOrgType?: string;
+    internationalOrgType?: string;
+    politicalPartyCountry?: string;
+    associatedSchool?: string;
+  };
   user: {
     email: string;
     firstName: string;
@@ -24,7 +34,7 @@ export default function OrganisationsLanding() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [locationTerm, setLocationTerm] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState('');
 
   useEffect(() => {
     fetchOrganizations();
@@ -48,7 +58,7 @@ export default function OrganisationsLanding() {
   const filteredOrganizations = organizations.filter((org) => {
     const matchesSearch = org.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (org.description?.toLowerCase().includes(searchTerm.toLowerCase()) || false);
-    const matchesLocation = !locationTerm || org.country.toLowerCase().includes(locationTerm.toLowerCase());
+    const matchesLocation = !selectedCountry || org.country.toLowerCase() === selectedCountry.toLowerCase();
     return matchesSearch && matchesLocation;
   });
 
@@ -57,21 +67,19 @@ export default function OrganisationsLanding() {
     // Search is handled by filteredOrganizations
   };
 
-  // Mock data for jobs and ratings (since these aren't in the API response)
-  const getJobCount = () => {
-    // In a real app, this would come from the API
-    return Math.floor(Math.random() * 10) + 1;
+  // Mock data for ratings (since these aren't in the API response yet)
+  const getRating = (orgId: string) => {
+    // Use org ID to generate consistent rating
+    const hash = orgId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return ((hash % 20) / 10 + 3).toFixed(1); // Between 3.0 and 5.0
   };
 
-  const getRating = () => {
-    // In a real app, this would come from the API
-    return (Math.random() * 2 + 3).toFixed(1); // Random between 3.0 and 5.0
+  const getReviewCount = (orgId: string) => {
+    // Use org ID to generate consistent review count
+    const hash = orgId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return (hash % 50) + 10; // Between 10 and 60
   };
 
-  const getReviewCount = () => {
-    // In a real app, this would come from the API
-    return Math.floor(Math.random() * 50) + 10;
-  };
 
   return (
     <LandingLayout>
@@ -97,14 +105,20 @@ export default function OrganisationsLanding() {
                   />
                 </div>
                 <div className="flex-1 relative">
-                  <HiLocationMarker className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="Location"
-                    value={locationTerm}
-                    onChange={(e) => setLocationTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
+                  <HiLocationMarker className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 z-10" />
+                  <select
+                    value={selectedCountry}
+                    onChange={(e) => setSelectedCountry(e.target.value)}
+                    className="w-full pl-12 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
+                  >
+                    <option value="">All Locations</option>
+                    {COUNTRIES.map((country) => (
+                      <option key={country} value={country}>
+                        {country}
+                      </option>
+                    ))}
+                  </select>
+                  <HiChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
                 </div>
                 <button
                   type="submit"
@@ -135,11 +149,11 @@ export default function OrganisationsLanding() {
                     ? 'There are no organisations available at the moment.'
                     : 'No organisations match your search criteria.'}
                 </p>
-                {searchTerm || locationTerm ? (
+                {searchTerm || selectedCountry ? (
                   <button
                     onClick={() => {
                       setSearchTerm('');
-                      setLocationTerm('');
+                      setSelectedCountry('');
                     }}
                     className="text-brand-600 hover:text-brand-700 font-medium"
                   >
@@ -174,14 +188,14 @@ export default function OrganisationsLanding() {
                     {/* Footer Info */}
                     <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                       <div className="flex items-center text-sm text-gray-600">
-                        <span>{getJobCount()} jobs opening</span>
+                        <span>{org.jobCount || 0} job{org.jobCount !== 1 ? 's' : ''} opening</span>
                         <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </div>
                       <div className="flex items-center text-sm text-gray-600">
                         <HiStar className="w-4 h-4 text-yellow-400 mr-1" />
-                        <span>{getRating()} Ratings | {getReviewCount()} reviews</span>
+                        <span>{getRating(org.id)} Ratings | {getReviewCount(org.id)} reviews</span>
                       </div>
                     </div>
                   </div>
@@ -194,4 +208,3 @@ export default function OrganisationsLanding() {
     </LandingLayout>
   );
 }
-

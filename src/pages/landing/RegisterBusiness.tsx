@@ -17,6 +17,7 @@ import {
   HiEyeOff,
   HiLockClosed
 } from 'react-icons/hi';
+import PhoneNumberInput from '@/components/common/PhoneNumberInput';
 import { 
   FaBuilding, 
   FaGraduationCap, 
@@ -88,15 +89,7 @@ interface CategoryOption {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-// Common countries list (can be expanded)
-const COUNTRIES = [
-  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France',
-  'Italy', 'Spain', 'Netherlands', 'Belgium', 'Switzerland', 'Sweden', 'Norway',
-  'Denmark', 'Finland', 'Poland', 'Portugal', 'Ireland', 'Austria', 'Greece',
-  'Japan', 'South Korea', 'Singapore', 'Hong Kong', 'India', 'China', 'Brazil',
-  'Mexico', 'Argentina', 'South Africa', 'Nigeria', 'Kenya', 'Ghana', 'Egypt',
-  'United Arab Emirates', 'Saudi Arabia', 'Israel', 'Turkey', 'Russia', 'New Zealand',
-];
+import { COUNTRIES } from '@/utils/countries';
 
 // Organization categories
 const CATEGORIES: CategoryOption[] = [
@@ -1333,6 +1326,7 @@ export default function RegisterBusiness() {
                 type="date"
                 value={formData.foundedDate}
                 onChange={(e) => handleInputChange('foundedDate', e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
                 required
               />
@@ -1598,17 +1592,12 @@ export default function RegisterBusiness() {
           {formData.emailVerified && (
             <div className="pt-6 border-t border-gray-200">
               <div>
-                <label htmlFor="phoneNumber" className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="phoneNumber"
-                  type="tel"
+                <PhoneNumberInput
                   value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="Enter your phone number"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onChange={setPhoneNumber}
+                  label="Phone Number"
                   required
+                  placeholder="Enter phone number"
                 />
                 <p className="mt-2 text-sm text-gray-500">
                   We'll use this to contact you about your organisation
@@ -1753,13 +1742,6 @@ export default function RegisterBusiness() {
   // Step 6: Preview/Review
   const renderStep6 = () => {
     const { categoryLabel, additionalInfo } = getCategoryInfo();
-    const fullAddress = [
-      formData.address.buildingName,
-      formData.address.streetNumber,
-      formData.address.street,
-      formData.address.city,
-      formData.address.country
-    ].filter(Boolean).join(', ');
 
     const isRegistered = formData.isRegistered === true;
     const orgName = isRegistered ? formData.legalName : formData.organisationName;
@@ -1791,7 +1773,7 @@ export default function RegisterBusiness() {
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  {isRegistered && categoryLabel && (
+                  {categoryLabel && (
                     <span className="px-3 py-1 bg-brand-100 text-brand-700 rounded-full text-sm font-medium">
                       {categoryLabel}{additionalInfo ? ` - ${additionalInfo}` : ''}
                     </span>
@@ -1882,7 +1864,23 @@ export default function RegisterBusiness() {
                 </div>
                 <div>
                   <span className="text-xs text-gray-500">Address:</span>
-                  <p className="text-sm font-medium text-gray-900">{fullAddress || 'N/A'}</p>
+                  <div className="text-sm text-gray-900 mt-1">
+                    {formData.address.buildingName && (
+                      <p>{formData.address.buildingName}</p>
+                    )}
+                    {formData.address.streetNumber && formData.address.street && (
+                      <p>{formData.address.streetNumber} {formData.address.street}</p>
+                    )}
+                    {formData.address.city && (
+                      <p>{formData.address.city}</p>
+                    )}
+                    {formData.address.country && (
+                      <p>{formData.address.country}</p>
+                    )}
+                    {!formData.address.buildingName && !formData.address.street && !formData.address.city && !formData.address.country && (
+                      <p className="text-gray-500">N/A</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1895,28 +1893,86 @@ export default function RegisterBusiness() {
                 </div>
                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">CONTACT</h3>
               </div>
-              <div>
-                <span className="text-xs text-gray-500">Email:</span>
-                <div className="flex items-center mt-1">
-                  <p className="text-sm font-medium text-gray-900 mr-2">{formData.organisationEmail || 'N/A'}</p>
-                  {formData.emailVerified && (
-                    <HiCheckCircle className="w-4 h-4 text-green-500" />
-                  )}
+              <div className="space-y-2">
+                <div>
+                  <span className="text-xs text-gray-500">Email:</span>
+                  <div className="flex items-center mt-1">
+                    <p className="text-sm font-medium text-gray-900 mr-2">{formData.organisationEmail || 'N/A'}</p>
+                    {formData.emailVerified && (
+                      <HiCheckCircle className="w-4 h-4 text-green-500" />
+                    )}
+                  </div>
                 </div>
+                {phoneNumber && (
+                  <div>
+                    <span className="text-xs text-gray-500">Phone Number:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{phoneNumber || 'N/A'}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           {/* Description - Full Width */}
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center mb-4">
-              <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
-                <FaBookmark className="w-5 h-5 text-brand-600" />
+          {formData.description && (
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <div className="flex items-center mb-4">
+                <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                  <FaBookmark className="w-5 h-5 text-brand-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">DESCRIPTION</h3>
               </div>
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">DESCRIPTION</h3>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{formData.description}</p>
             </div>
-            <p className="text-sm text-gray-700">{formData.description || 'No description provided'}</p>
-          </div>
+          )}
+
+          {/* Category Details Section */}
+          {formData.category && (
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              <div className="flex items-center mb-4">
+                <div className="w-10 h-10 bg-brand-100 rounded-lg flex items-center justify-center mr-3">
+                  <FaFileAlt className="w-5 h-5 text-brand-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">CATEGORY DETAILS</h3>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <span className="text-xs text-gray-500">Category:</span>
+                  <p className="text-sm font-medium text-gray-900 mt-1">{categoryLabel || formData.category || 'N/A'}</p>
+                </div>
+                {formData.schoolType && (
+                  <div>
+                    <span className="text-xs text-gray-500">School Type:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{formData.schoolType.replace(/_/g, ' ')}</p>
+                  </div>
+                )}
+                {formData.religiousOrgType && (
+                  <div>
+                    <span className="text-xs text-gray-500">Religious Organisation Type:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{formData.religiousOrgType}</p>
+                  </div>
+                )}
+                {formData.internationalOrgType && (
+                  <div>
+                    <span className="text-xs text-gray-500">International Organisation Type:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{formData.internationalOrgType}</p>
+                  </div>
+                )}
+                {formData.politicalPartyCountry && (
+                  <div>
+                    <span className="text-xs text-gray-500">Political Party Country:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{formData.politicalPartyCountry}</p>
+                  </div>
+                )}
+                {formData.associatedSchool && (
+                  <div>
+                    <span className="text-xs text-gray-500">Associated School:</span>
+                    <p className="text-sm font-medium text-gray-900 mt-1">{formData.associatedSchool}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Navigation Buttons */}
@@ -2052,6 +2108,7 @@ export default function RegisterBusiness() {
                 type="date"
                 value={formData.foundedDate}
                 onChange={(e) => handleInputChange('foundedDate', e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
                 required
               />

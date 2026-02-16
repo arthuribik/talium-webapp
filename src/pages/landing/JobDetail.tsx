@@ -54,6 +54,7 @@ export default function JobDetail() {
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
   const [showProfessionalModal, setShowProfessionalModal] = useState(false);
+  const [hasApplied, setHasApplied] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -65,8 +66,20 @@ export default function JobDetail() {
     setLoading(true);
     setError('');
     try {
-      const response = await api.get(`/v1/jobs/${jobId}`);
-      setJob(response.data.data || response.data);
+      // Check if this job has been viewed before (unique view tracking)
+      const viewedJobs = JSON.parse(localStorage.getItem('viewedJobs') || '[]');
+      const isUniqueView = !viewedJobs.includes(jobId);
+      
+      // Add to viewed jobs if it's a unique view
+      if (isUniqueView) {
+        viewedJobs.push(jobId);
+        localStorage.setItem('viewedJobs', JSON.stringify(viewedJobs));
+      }
+      
+      const response = await api.get(`/v1/jobs/${jobId}?isUniqueView=${isUniqueView}`);
+      const jobData = response.data.data || response.data;
+      setJob(jobData);
+      setHasApplied(jobData.hasApplied || false);
     } catch (err: any) {
       console.error('Failed to fetch job:', err);
       setError(err.response?.data?.message || 'Failed to load job details');
@@ -121,6 +134,7 @@ export default function JobDetail() {
     try {
       await api.post(`/v1/jobs/${id}/apply`, {});
       toast.success('Application submitted successfully!');
+      setHasApplied(true);
       // Optionally refresh job data to show updated applicant count
       if (id) {
         fetchJob(id);
@@ -235,8 +249,8 @@ export default function JobDetail() {
                   </div>
                 </div>
               </div>
-              {/* Show buttons only for authenticated professionals or unauthenticated users */}
-              {(isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated ? (
+              {/* Show buttons only if not already applied and for authenticated professionals or unauthenticated users */}
+              {!hasApplied && ((isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated) ? (
                 <div className="flex flex-col gap-3">
                   {isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
                     <>
@@ -247,9 +261,11 @@ export default function JobDetail() {
                       >
                         {applying ? 'Applying...' : 'Apply Now'}
                       </button>
-                      <button className="px-8 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors whitespace-nowrap">
-                        Save Job
-                      </button>
+                      {!hasApplied && (
+                        <button className="px-8 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors whitespace-nowrap">
+                          Save Job
+                        </button>
+                      )}
                     </>
                   ) : (
                     <button
@@ -262,6 +278,10 @@ export default function JobDetail() {
                       Apply Now
                     </button>
                   )}
+                </div>
+              ) : hasApplied && isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
+                <div className="px-8 py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium whitespace-nowrap text-center">
+                  ✓ You have already applied for this job
                 </div>
               ) : null}
             </div>
@@ -405,8 +425,8 @@ export default function JobDetail() {
                 </div>
               </div>
 
-              {/* Apply Button (Sticky) - Only show for authenticated professionals or unauthenticated users */}
-              {(isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated ? (
+              {/* Apply Button (Sticky) - Only show for authenticated professionals or unauthenticated users, and only if not already applied */}
+              {!hasApplied && ((isAuthenticated && user?.userType === 'PROFESSIONAL') || !isAuthenticated) ? (
                 <div className="lg:sticky lg:top-4">
                   {isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
                     <>
@@ -437,6 +457,12 @@ export default function JobDetail() {
                       </p>
                     </>
                   )}
+                </div>
+              ) : hasApplied && isAuthenticated && user?.userType === 'PROFESSIONAL' ? (
+                <div className="lg:sticky lg:top-4">
+                  <div className="w-full px-6 py-4 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium text-center text-lg">
+                    ✓ You have already applied for this job
+                  </div>
                 </div>
               ) : null}
             </div>

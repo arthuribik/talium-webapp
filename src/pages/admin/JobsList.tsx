@@ -13,6 +13,7 @@ import {
   HiPause,
   HiX,
   HiPlus,
+  HiDotsVertical,
 } from 'react-icons/hi';
 
 interface Job {
@@ -40,11 +41,40 @@ export default function JobsList() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [createdJobId, setCreatedJobId] = useState<string | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
   const limit = 20;
 
   useEffect(() => {
     fetchJobs();
+    fetchOrganisations();
   }, [page, statusFilter]);
+
+  // Close action menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (actionMenuOpen) {
+        setActionMenuOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [actionMenuOpen]);
+
+  const fetchOrganisations = async () => {
+    setLoadingOrganisations(true);
+    try {
+      const response = await api.get('/v1/admin/organisations?limit=1000');
+      setOrganisations(response.data.data.organisations || []);
+    } catch (err) {
+      console.error('Failed to fetch organisations:', err);
+    } finally {
+      setLoadingOrganisations(false);
+    }
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -79,7 +109,47 @@ export default function JobsList() {
     navigate(`/admin/jobs/${jobId}`);
   };
 
+  const handleJobAction = async (jobId: string, action: 'publish' | 'pause' | 'draft') => {
+    setActionMenuOpen(null);
+    try {
+      let status: 'published' | 'paused' | 'draft' = 'draft';
+      if (action === 'publish') {
+        status = 'published';
+      } else if (action === 'pause') {
+        status = 'paused';
+      } else if (action === 'draft') {
+        status = 'draft';
+      }
+
+      await api.put(`/v1/admin/jobs/${jobId}/status`, { status });
+      toast.success(`Job ${action === 'publish' ? 'published' : action === 'pause' ? 'paused' : 'returned to draft'} successfully!`);
+      fetchJobs();
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.message || `Failed to ${action} job`;
+      toast.error(errorMsg);
+    }
+  };
+
+  const handlePublishModalAction = async (action: 'draft' | 'publish') => {
+    if (!createdJobId) return;
+
+    try {
+      const status = action === 'publish' ? 'published' : 'draft';
+      await api.put(`/v1/admin/jobs/${createdJobId}/status`, { status });
+      toast.success(`Job ${action === 'publish' ? 'published' : 'saved as draft'} successfully!`);
+      setShowPublishModal(false);
+      setCreatedJobId(null);
+      fetchJobs();
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.message || `Failed to ${action} job`;
+      toast.error(errorMsg);
+    }
+  };
+
+  const [organisations, setOrganisations] = useState<any[]>([]);
+  const [loadingOrganisations, setLoadingOrganisations] = useState(false);
   const [formData, setFormData] = useState({
+    organisationId: '',
     jobTitle: '',
     location: '',
     workMode: '',
@@ -167,10 +237,15 @@ export default function JobsList() {
         } : undefined,
       };
 
-      await api.post('/v1/admin/jobs', payload);
+      const url = formData.organisationId 
+        ? `/v1/admin/jobs?organisationId=${formData.organisationId}`
+        : '/v1/admin/jobs';
+      const response = await api.post(url, payload);
+      const jobId = response.data.data?.id;
       
       // Reset form and close sidebar
       setFormData({
+        organisationId: '',
         jobTitle: '',
         location: '',
         workMode: '',
@@ -193,8 +268,15 @@ export default function JobsList() {
         },
       });
       setSidebarOpen(false);
-      toast.success('Job created successfully!');
-      fetchJobs(); // Refresh the jobs list
+      
+      // Show publish modal
+      if (jobId) {
+        setCreatedJobId(jobId);
+        setShowPublishModal(true);
+      } else {
+        toast.success('Job created successfully!');
+        fetchJobs(); // Refresh the jobs list
+      }
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to create job';
       toast.error(errorMsg);
@@ -309,14 +391,16 @@ export default function JobsList() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Posted
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredJobs.map((job) => (
                       <tr
                         key={job.id}
-                        onClick={() => handleRowClick(job.id)}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                        className="hover:bg-gray-50 transition-colors"
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
@@ -360,6 +444,87 @@ export default function JobsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {new Date(job.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActionMenuOpen(actionMenuOpen === job.id ? null : job.id);
+                              }}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <HiDotsVertical className="w-5 h-5 text-gray-600" />
+                            </button>
+                            {actionMenuOpen === job.id && (
+                              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                                {job.status === 'draft' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleJobAction(job.id, 'publish');
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                  >
+                                    Publish
+                                  </button>
+                                )}
+                                {job.status === 'published' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleJobAction(job.id, 'pause');
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                  >
+                                    Pause
+                                  </button>
+                                )}
+                                {job.status === 'paused' && (
+                                  <>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleJobAction(job.id, 'publish');
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                    >
+                                      Resume
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleJobAction(job.id, 'draft');
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                    >
+                                      Return to Draft
+                                    </button>
+                                  </>
+                                )}
+                                {job.status !== 'draft' && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleJobAction(job.id, 'draft');
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                  >
+                                    Return to Draft
+                                  </button>
+                                )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRowClick(job.id);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                >
+                                  View Details
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -425,6 +590,28 @@ export default function JobsList() {
 
               {/* Form */}
               <form onSubmit={handleFormSubmit} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Organisation *</label>
+                  <select
+                    name="organisationId"
+                    required
+                    value={formData.organisationId}
+                    onChange={handleFormChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    disabled={loadingOrganisations}
+                  >
+                    <option value="">Select an organisation...</option>
+                    {organisations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.companyName}
+                      </option>
+                    ))}
+                  </select>
+                  {loadingOrganisations && (
+                    <p className="mt-1 text-sm text-gray-500">Loading organisations...</p>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Job Title *</label>
                   <input
@@ -686,8 +873,34 @@ export default function JobsList() {
             </div>
           </div>
         </>
-      )}
+        )}
       </div>
+
+      {/* Publish Modal */}
+      {showPublishModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Job Created Successfully!</h3>
+            <p className="text-gray-600 mb-6">
+              What would you like to do with this job?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handlePublishModalAction('draft')}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Keep as Draft
+              </button>
+              <button
+                onClick={() => handlePublishModalAction('publish')}
+                className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
+              >
+                Publish
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   );
 }

@@ -2,13 +2,24 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '@/services/api';
 import LandingLayout from '@/components/landing/LandingLayout';
-import { HiArrowLeft, HiCheckCircle, HiGlobe, HiMail } from 'react-icons/hi';
-import { FaFacebook, FaTwitter } from 'react-icons/fa';
+import { HiArrowLeft, HiCheckCircle, HiUser, HiLocationMarker } from 'react-icons/hi';
+import { FaFacebook, FaTwitter, FaLinkedin, FaInstagram, FaYoutube } from 'react-icons/fa';
+import toast from 'react-hot-toast';
 
 interface Professional {
   id: string;
   country?: string;
   nationality?: string;
+  dateOfBirth?: string;
+  description?: string;
+  socialMedia?: {
+    facebook?: string;
+    twitter?: string;
+    linkedin?: string;
+    instagram?: string;
+    youtube?: string;
+  };
+  profileImage?: string;
   identityStatus: string;
   profileCompleteness: number;
   createdAt: string;
@@ -29,6 +40,7 @@ interface Education {
   id: string;
   institutionName: string;
   degreeType?: string;
+  levelOfEducation?: string;
   fieldOfStudy: string;
   startDate: string;
   endDate?: string;
@@ -57,66 +69,63 @@ export default function ProfessionalDetail() {
   const [professional, setProfessional] = useState<Professional | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('profile');
+  const [imageError, setImageError] = useState(false);
 
   useEffect(() => {
     if (id) {
       fetchProfessionalDetail();
+      setImageError(false);
     }
   }, [id]);
 
   const fetchProfessionalDetail = async () => {
+    if (!id) return;
     setLoading(true);
     try {
-      // Fetch from admin endpoint (may require auth, but we'll try)
-      const response = await api.get('/v1/admin/professionals?limit=1000');
-      const prof = response.data.data.professionals.find((p: any) => p.id === id);
-      if (prof) {
-        // Fetch additional details if available
-        try {
-          const detailResponse = await api.get(`/v1/admin/professionals?limit=1000`);
-          const fullProf = detailResponse.data.data.professionals.find((p: any) => p.id === id);
-          if (fullProf) {
-            setProfessional({
-              ...fullProf,
-              education: fullProf.education || [],
-              workExperience: fullProf.workExperience || [],
-            });
-          } else {
-            setProfessional({
-              ...prof,
-              education: [],
-              workExperience: [],
-            });
-          }
-        } catch (err) {
-          // If detail fetch fails, use basic data
-          setProfessional({
-            ...prof,
-            education: [],
-            workExperience: [],
-          });
-        }
+      // Fetch professional by ID from admin endpoint
+      const response = await api.get(`/v1/admin/professionals/${id}`);
+      if (response.data.success && response.data.data) {
+        const prof = response.data.data;
+        setProfessional({
+          ...prof,
+          education: prof.education || [],
+          workExperience: prof.workExperience || [],
+          description: prof.description || null,
+          socialMedia: prof.socialMedia || {},
+          profileImage: prof.profileImage || null,
+        });
+      } else {
+        setProfessional(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch professional:', err);
+      if (err.response?.status === 404) {
+        setProfessional(null);
+      } else {
+        toast.error('Failed to load professional profile');
+        setProfessional(null);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const getProfileImage = (profId: string) => {
-    const images = [
-      'photo-1507003211169-0a1dd7228f2d',
-      'photo-1472099645785-5658abf4ff4e',
-      'photo-1494790108377-be9c29b29330',
-      'photo-1500648767791-00dcc994a43e',
-      'photo-1534528741775-53994a69daeb',
-      'photo-1529626455594-4ff0802cfb7e',
-      'photo-1517841905240-472988babdf9',
-      'photo-1539571696357-5a69c17a67c6',
-    ];
-    const index = parseInt(profId.slice(-1), 16) || 0;
-    return `https://images.unsplash.com/${images[index % images.length]}?w=200&h=200&fit=crop`;
+  const getProfileImage = (professional: Professional) => {
+    if (professional.profileImage && !imageError) {
+      return professional.profileImage;
+    }
+    return null; // Will show placeholder icon
+  };
+
+  const getProfession = (professional: Professional): string => {
+    if (professional.workExperience && professional.workExperience.length > 0) {
+      // Get the most recent work experience role
+      const sorted = [...professional.workExperience].sort((a, b) => 
+        new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
+      );
+      return sorted[0].role;
+    }
+    return 'Professional';
   };
 
   const calculateDuration = (startDate: string, endDate?: string, isCurrent?: boolean) => {
@@ -154,13 +163,23 @@ export default function ProfessionalDetail() {
   };
 
   const getCompanyLogo = (companyName: string) => {
-    // Use first letter as logo for now
     return companyName.charAt(0).toUpperCase();
   };
 
   const getInstitutionLogo = (institutionName: string) => {
-    // Use first letter as logo for now
     return institutionName.charAt(0).toUpperCase();
+  };
+
+  const getLocationDisplay = (location: any): string => {
+    if (!location) return 'Not specified';
+    if (typeof location === 'string') return location;
+    if (typeof location === 'object') {
+      const parts = [];
+      if (location.city) parts.push(location.city);
+      if (location.country) parts.push(location.country);
+      return parts.length > 0 ? parts.join(', ') : 'Not specified';
+    }
+    return 'Not specified';
   };
 
   if (loading) {
@@ -178,10 +197,14 @@ export default function ProfessionalDetail() {
       <LandingLayout>
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="text-center">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <HiUser className="w-12 h-12 text-gray-400" />
+            </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Professional not found</h2>
+            <p className="text-gray-600 mb-4">The professional profile you're looking for doesn't exist or has been removed.</p>
             <button
               onClick={() => navigate('/professionals')}
-              className="text-brand-600 hover:text-brand-700"
+              className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
             >
               Back to Professionals
             </button>
@@ -192,7 +215,8 @@ export default function ProfessionalDetail() {
   }
 
   const fullName = `${professional.user.firstName} ${professional.user.lastName}`;
-  const circlesCount = Math.floor(Math.random() * 50) + 10; // Mock data
+  const profession = getProfession(professional);
+  const profileImageUrl = getProfileImage(professional);
 
   return (
     <LandingLayout>
@@ -213,12 +237,17 @@ export default function ProfessionalDetail() {
               {/* Left: Profile Picture and Info */}
               <div className="flex-1">
                 <div className="flex items-start gap-6">
-                  <div className="w-24 h-24 rounded-full overflow-hidden flex-shrink-0">
-                    <img
-                      src={getProfileImage(professional.id)}
-                      alt={fullName}
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="w-24 h-24 rounded-full overflow-hidden flex-shrink-0 bg-brand-100 flex items-center justify-center">
+                    {profileImageUrl ? (
+                      <img
+                        src={profileImageUrl}
+                        alt={fullName}
+                        className="w-full h-full object-cover"
+                        onError={() => setImageError(true)}
+                      />
+                    ) : (
+                      <HiUser className="w-12 h-12 text-brand-600" />
+                    )}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
@@ -227,8 +256,16 @@ export default function ProfessionalDetail() {
                         <HiCheckCircle className="w-6 h-6 text-brand-500 flex-shrink-0" />
                       )}
                     </div>
-                    <p className="text-lg text-gray-600 mb-2">Senior Product Designer</p>
-                    <p className="text-sm text-gray-500">{circlesCount}K circles</p>
+                    <p className="text-lg text-gray-600 mb-2">{profession}</p>
+                    {professional.country && (
+                      <p className="text-sm text-gray-500 flex items-center gap-1">
+                        <HiLocationMarker className="w-4 h-4" />
+                        {professional.country}
+                        {professional.nationality && professional.nationality !== professional.country && (
+                          <span> • {professional.nationality}</span>
+                        )}
+                      </p>
+                    )}
                     <div className="flex gap-3 mt-4">
                       <button className="px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors">
                         View full profile
@@ -245,22 +282,44 @@ export default function ProfessionalDetail() {
               <div className="md:w-64">
                 <h3 className="text-sm font-semibold text-gray-900 mb-4">Contact Information</h3>
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <HiGlobe className="w-5 h-5 text-gray-400" />
-                    <span>www.{professional.user.firstName.toLowerCase()}-{professional.user.lastName.toLowerCase()}.com</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <HiMail className="w-5 h-5 text-gray-400" />
-                    <span>@{professional.user.firstName.charAt(0)}{professional.user.lastName}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <FaFacebook className="w-5 h-5 text-gray-400" />
-                    <span>{fullName}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <FaTwitter className="w-5 h-5 text-gray-400" />
-                    <span>@{professional.user.firstName.charAt(0)}{professional.user.lastName}</span>
-                  </div>
+                  {professional.socialMedia?.facebook && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <FaFacebook className="w-5 h-5 text-gray-400" />
+                      <span className="truncate">{professional.socialMedia.facebook}</span>
+                    </div>
+                  )}
+                  {professional.socialMedia?.twitter && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <FaTwitter className="w-5 h-5 text-gray-400" />
+                      <span className="truncate">{professional.socialMedia.twitter}</span>
+                    </div>
+                  )}
+                  {professional.socialMedia?.linkedin && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <FaLinkedin className="w-5 h-5 text-gray-400" />
+                      <span className="truncate">{professional.socialMedia.linkedin}</span>
+                    </div>
+                  )}
+                  {professional.socialMedia?.instagram && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <FaInstagram className="w-5 h-5 text-gray-400" />
+                      <span className="truncate">{professional.socialMedia.instagram}</span>
+                    </div>
+                  )}
+                  {professional.socialMedia?.youtube && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <FaYoutube className="w-5 h-5 text-gray-400" />
+                      <span className="truncate">{professional.socialMedia.youtube}</span>
+                    </div>
+                  )}
+                  {(!professional.socialMedia || 
+                    (!professional.socialMedia.facebook && 
+                     !professional.socialMedia.twitter && 
+                     !professional.socialMedia.linkedin && 
+                     !professional.socialMedia.instagram && 
+                     !professional.socialMedia.youtube)) && (
+                    <p className="text-sm text-gray-500 italic">No social media links available</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -306,14 +365,14 @@ export default function ProfessionalDetail() {
           {activeTab === 'profile' && (
             <div className="space-y-6">
               {/* About Section */}
-              <div className="bg-white rounded-xl shadow-sm p-8">
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">About</h2>
-                <p className="text-gray-700 leading-relaxed">
-                  Experienced professional specializing in B2B SaaS and PaaS solutions, with a strong focus on compliance products. 
-                  Passionate about user-centered design and delivering meaningful products that solve real-world problems. 
-                  Committed to creating intuitive experiences that drive business value.
-                </p>
-              </div>
+              {professional.description ? (
+                <div className="bg-white rounded-xl shadow-sm p-8">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-4">About</h2>
+                  <p className="text-gray-700 leading-relaxed whitespace-pre-line">
+                    {professional.description}
+                  </p>
+                </div>
+              ) : null}
 
               {/* Experience Section */}
               <div className="bg-white rounded-xl shadow-sm p-8">
@@ -330,31 +389,39 @@ export default function ProfessionalDetail() {
                         <div className="flex-1">
                           <h3 className="text-lg font-semibold text-gray-900 mb-1">{exp.role}</h3>
                           <p className="text-gray-600 mb-1">{exp.organisationName}</p>
-                          <p className="text-sm text-gray-500 mb-3">
+                          <p className="text-sm text-gray-500 mb-2">
                             {formatDateRange(exp.startDate, exp.endDate, exp.currentlyWorking)}
+                            {getLocationDisplay(exp.location) !== 'Not specified' && (
+                              <span className="ml-2">• {getLocationDisplay(exp.location)}</span>
+                            )}
                           </p>
-                          <p className="text-gray-700">
-                            {exp.responsibilities && exp.responsibilities.length > 0
-                              ? exp.responsibilities.join('. ')
-                              : 'Building and managing company\'s internal tools for end to end address verification across Nigeria and other African countries.'}
-                          </p>
+                          {exp.responsibilities && exp.responsibilities.length > 0 && (
+                            <div className="mt-3">
+                              <p className="text-sm font-medium text-gray-700 mb-1">Responsibilities:</p>
+                              <ul className="list-disc list-inside text-gray-600 text-sm space-y-1">
+                                {exp.responsibilities.map((resp, idx) => (
+                                  <li key={idx}>{resp}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {exp.achievements && exp.achievements.length > 0 && (
+                            <div className="mt-3">
+                              <p className="text-sm font-medium text-gray-700 mb-1">Achievements:</p>
+                              <ul className="list-disc list-inside text-gray-600 text-sm space-y-1">
+                                {exp.achievements.map((ach, idx) => (
+                                  <li key={idx}>{ach}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="flex gap-4">
-                    <div className="w-12 h-12 bg-brand-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <span className="text-white font-bold text-lg">G</span>
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-1">Product Designer</h3>
-                      <p className="text-gray-600 mb-1">Google Inc.</p>
-                      <p className="text-sm text-gray-500 mb-3">April 2022 - Present (3 years, 2 months)</p>
-                      <p className="text-gray-700">
-                        Building and managing company's internal tools for end to end address verification across Nigeria and other African countries.
-                      </p>
-                    </div>
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No work experience information available</p>
                   </div>
                 )}
               </div>
@@ -374,47 +441,22 @@ export default function ProfessionalDetail() {
                         <div className="flex-1">
                           <h3 className="text-lg font-semibold text-gray-900 mb-1">{edu.institutionName}</h3>
                           <p className="text-gray-600 mb-1">
-                            {edu.degreeType || edu.fieldOfStudy}
+                            {edu.levelOfEducation && `${edu.levelOfEducation} in `}
+                            {edu.fieldOfStudy}
+                            {edu.degreeType && ` - ${edu.degreeType}`}
                           </p>
-                          <p className="text-sm text-gray-500 mb-3">
+                          <p className="text-sm text-gray-500 mb-2">
                             {formatDateRange(edu.startDate, edu.endDate, edu.currentlyAttending)}
-                          </p>
-                          <p className="text-gray-700">
-                            Building and managing company's internal tools for end to end address verification across Nigeria and other African countries.
+                            {edu.country && <span className="ml-2">• {edu.country}</span>}
                           </p>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <>
-                    <div className="flex gap-4 mb-6">
-                      <div className="w-12 h-12 bg-yellow-400 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-white font-bold text-lg">N</span>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">Nexford University</h3>
-                        <p className="text-gray-600 mb-1">Google Inc.</p>
-                        <p className="text-sm text-gray-500 mb-3">April 2022 - Present (3 years, 2 months)</p>
-                        <p className="text-gray-700">
-                          Building and managing company's internal tools for end to end address verification across Nigeria and other African countries.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-4">
-                      <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-white font-bold text-lg">U</span>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">Utiva</h3>
-                        <p className="text-gray-600 mb-1">Product Design bootcamp</p>
-                        <p className="text-sm text-gray-500 mb-3">2019 - 2020</p>
-                        <p className="text-gray-700">
-                          Building and managing company's internal tools for end to end address verification across Nigeria and other African countries.
-                        </p>
-                      </div>
-                    </div>
-                  </>
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No education information available</p>
+                  </div>
                 )}
               </div>
             </div>
@@ -464,4 +506,3 @@ export default function ProfessionalDetail() {
     </LandingLayout>
   );
 }
-

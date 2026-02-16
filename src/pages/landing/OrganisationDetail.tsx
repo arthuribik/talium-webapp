@@ -14,7 +14,8 @@ import {
   HiCalendar,
   HiLightningBolt,
 } from 'react-icons/hi';
-import { FaInstagram, FaFacebook, FaTwitter } from 'react-icons/fa';
+import { FaInstagram, FaFacebook, FaTwitter, FaLinkedin, FaYoutube } from 'react-icons/fa';
+import toast from 'react-hot-toast';
 
 interface Organization {
   id: string;
@@ -22,14 +23,54 @@ interface Organization {
   country: string;
   industry?: string;
   description?: string;
+  website?: string;
   verificationStatus: string;
   createdAt: string;
-  website?: string;
+  foundedDate?: string;
+  isRegistered?: boolean;
+  countryOfIncorporation?: string;
+  incorporationNumber?: string;
+  companySize?: string;
+  headquartersCity?: string;
+  headquartersCountry?: string;
+  socialMedia?: {
+    facebook?: string;
+    twitter?: string;
+    linkedin?: string;
+    instagram?: string;
+    youtube?: string;
+  };
+  address?: {
+    buildingName?: string;
+    streetNumber?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    zipCode?: string;
+  };
+  category?: {
+    category?: string;
+    schoolType?: string;
+    religiousOrgType?: string;
+    internationalOrgType?: string;
+    politicalPartyCountry?: string;
+    associatedSchool?: string;
+  };
   user: {
     email: string;
     firstName: string;
     lastName: string;
+    phoneNumber?: string;
   };
+  jobs?: Array<{
+    id: string;
+    jobTitle: string;
+    location: string;
+    status: string;
+    createdAt: string;
+  }>;
+  jobCount?: number;
 }
 
 export default function OrganisationDetail() {
@@ -38,74 +79,111 @@ export default function OrganisationDetail() {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [locationTerm, setLocationTerm] = useState('');
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
 
   useEffect(() => {
     if (id) {
       fetchOrganization();
+      fetchJobs();
     }
   }, [id]);
 
   const fetchOrganization = async () => {
+    if (!id) return;
     setLoading(true);
     try {
+      // Fetch from admin endpoint
       const response = await api.get('/v1/admin/organisations?limit=1000');
       const org = response.data.data.organisations.find((o: any) => o.id === id);
+      
       if (org) {
-        setOrganization(org);
-        // Try to fetch registration data for additional details
-        try {
-          const regResponse = await api.get('/v1/admin/registrations?limit=1000');
-          const registrations = regResponse.data.data.registrations || [];
-          const matchedReg = registrations.find((reg: any) => 
-            reg.step5?.organisationEmail === org.user.email ||
-            reg.step2?.legalName === org.companyName ||
-            reg.step7?.organisationName === org.companyName
-          );
-          if (matchedReg) {
-            // Store registration data for use in overview
-            setOrganization((prev) => ({
-              ...prev!,
-              registration: matchedReg,
-            } as any));
+        // Parse description if it's JSON
+        let descriptionText = '';
+        let categoryData: any = {};
+        
+        if (org.description) {
+          try {
+            if (typeof org.description === 'string' && org.description.trim().startsWith('{')) {
+              const parsed = JSON.parse(org.description);
+              descriptionText = parsed.textDescription || '';
+              if (parsed.category || parsed.schoolType || parsed.religiousOrgType) {
+                categoryData = {
+                  category: parsed.category || null,
+                  schoolType: parsed.schoolType || null,
+                  religiousOrgType: parsed.religiousOrgType || null,
+                  internationalOrgType: parsed.internationalOrgType || null,
+                  politicalPartyCountry: parsed.politicalPartyCountry || null,
+                  associatedSchool: parsed.associatedSchool || null,
+                };
+              }
+            } else {
+              descriptionText = org.description;
+            }
+          } catch (e) {
+            descriptionText = org.description;
           }
-        } catch (regErr) {
-          // Registration data is optional
         }
+
+        // Parse address if it's JSON
+        let addressData: any = {};
+        if (org.address) {
+          try {
+            if (typeof org.address === 'string') {
+              addressData = JSON.parse(org.address);
+            } else {
+              addressData = org.address;
+            }
+          } catch (e) {
+            addressData = {};
+          }
+        }
+
+        // Parse social media if it's JSON
+        let socialMediaData: any = {};
+        if (addressData.socialMedia) {
+          socialMediaData = addressData.socialMedia;
+        }
+
+        setOrganization({
+          ...org,
+          description: descriptionText,
+          category: categoryData,
+          address: addressData,
+          socialMedia: socialMediaData,
+          foundedDate: org.yearOfCommencement
+            ? `${org.yearOfCommencement}-01-01`
+            : undefined,
+        });
+      } else {
+        setOrganization(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch organization:', err);
+      if (err.response?.status === 404) {
+        setOrganization(null);
+      } else {
+        toast.error('Failed to load organization details');
+        setOrganization(null);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    navigate(`/organisations?search=${searchTerm}&location=${locationTerm}`);
-  };
-
-  // Mock data for metrics (since these aren't in the API)
-  const metrics = {
-    rating: '3.7',
-    reviewedBy: 12,
-    employees: 345,
-    profileCreated: organization?.createdAt ? new Date(organization.createdAt) : new Date('2020-04-01'),
-  };
-
-  // Get overview details from organization and registration data
-  const registration = (organization as any)?.registration;
-  const foundedDate = registration?.step4?.foundedDate || registration?.step7?.foundedDate;
-  const isRegistered = registration?.step1?.isRegistered;
-  
-  const overviewDetails = {
-    founded: foundedDate ? new Date(foundedDate).getFullYear().toString() : '2019',
-    founderCEO: organization?.user?.firstName + ' ' + organization?.user?.lastName || 'N/A',
-    cto: 'N/A',
-    coo: 'N/A',
-    organizationType: organization?.industry || 'N/A',
-    incorporationStatus: isRegistered ? 'Private Limited Liability' : 'Unincorporated',
+  const fetchJobs = async () => {
+    if (!id) return;
+    setJobsLoading(true);
+    try {
+      const response = await api.get(`/v1/jobs?organisationId=${id}`);
+      if (response.data.success) {
+        setJobs(response.data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch jobs:', err);
+    } finally {
+      setJobsLoading(false);
+    }
   };
 
   if (loading) {
@@ -123,8 +201,15 @@ export default function OrganisationDetail() {
       <LandingLayout>
         <div className="min-h-screen bg-gray-50 flex items-center justify-center">
           <div className="text-center">
+            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <HiBriefcase className="w-12 h-12 text-gray-400" />
+            </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Organization not found</h2>
-            <Link to="/organisations" className="text-brand-600 hover:text-brand-700">
+            <p className="text-gray-600 mb-4">The organization you're looking for doesn't exist or has been removed.</p>
+            <Link
+              to="/organisations"
+              className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors inline-block"
+            >
               Back to Organisations
             </Link>
           </div>
@@ -137,56 +222,38 @@ export default function OrganisationDetail() {
     return name.charAt(0).toUpperCase();
   };
 
+  const getLocationDisplay = () => {
+    if (organization.address) {
+      const parts = [];
+      if (organization.address.city) parts.push(organization.address.city);
+      if (organization.address.state) parts.push(organization.address.state);
+      if (organization.address.country) parts.push(organization.address.country);
+      if (parts.length > 0) return parts.join(', ');
+    }
+    return organization.country || 'Not specified';
+  };
+
+  const getFoundedYear = () => {
+    if (organization.foundedDate) {
+      return new Date(organization.foundedDate).getFullYear().toString();
+    }
+    return null;
+  };
+
+  const getProfileAge = () => {
+    if (organization.createdAt) {
+      const created = new Date(organization.createdAt);
+      const years = Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24 * 365));
+      return years;
+    }
+    return null;
+  };
+
+  const publishedJobs = jobs.filter((job) => job.status === 'published');
+
   return (
     <LandingLayout>
       <div className="min-h-screen bg-gray-50">
-        {/* Search Bar Section */}
-        <section className="bg-white border-b">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 text-center mb-6">
-              Find organisations, apply for jobs, engage with customer support, or leave reviews.
-            </h1>
-
-            <form onSubmit={handleSearch} className="max-w-4xl mx-auto">
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="flex-1 relative">
-                  <HiBriefcase className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="Company"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div className="flex-1 relative">
-                  <HiLocationMarker className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="City, State or Zip code"
-                    value={locationTerm}
-                    onChange={(e) => setLocationTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div className="flex-1 relative">
-                  <HiCheckCircle className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <select className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500">
-                    <option>Verified</option>
-                    <option>All</option>
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  className="px-8 py-3 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors whitespace-nowrap"
-                >
-                  Search
-                </button>
-              </div>
-            </form>
-          </div>
-        </section>
-
         {/* Back Button */}
         <div className="bg-brand-500">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -206,7 +273,7 @@ export default function OrganisationDetail() {
             <div className="flex flex-col lg:flex-row gap-8">
               {/* Left Side - Logo and Info */}
               <div className="flex items-start gap-6 flex-1">
-                <div className="w-24 h-24 bg-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                <div className="w-24 h-24 bg-brand-500 rounded-lg flex items-center justify-center flex-shrink-0">
                   <span className="text-white font-bold text-4xl">
                     {getInitial(organization.companyName)}
                   </span>
@@ -220,7 +287,7 @@ export default function OrganisationDetail() {
                   </div>
                   <div className="flex items-center gap-2 text-gray-600 mb-1">
                     <HiLocationMarker className="w-5 h-5" />
-                    <span>{organization.country}</span>
+                    <span>{getLocationDisplay()}</span>
                   </div>
                   {organization.industry && (
                     <div className="flex items-center gap-2 text-gray-600">
@@ -231,67 +298,83 @@ export default function OrganisationDetail() {
                 </div>
               </div>
 
-              {/* Right Side - Team Members and Social Links */}
-              <div className="flex flex-col items-end gap-4">
-                {/* Team Members */}
-                <div className="flex items-center gap-2">
-                  {[
-                    'photo-1507003211169-0a1dd7228f2d',
-                    'photo-1472099645785-5658abf4ff4e',
-                    'photo-1494790108377-be9c29b29330',
-                    'photo-1500648767791-00dcc994a43e',
-                  ].map((photoId, i) => (
-                    <div
-                      key={i}
-                      className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center border-2 border-white -ml-2 first:ml-0 overflow-hidden"
-                    >
-                      <img
-                        src={`https://images.unsplash.com/${photoId}?w=40&h=40&fit=crop`}
-                        alt="Team member"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ))}
-                  <button className="text-sm text-gray-600 hover:text-gray-900 ml-2">
-                    Show more
-                  </button>
-                </div>
-
-                {/* Social Links */}
-                <div className="flex flex-col gap-2 text-sm">
-                  {organization.website && (
-                    <a
-                      href={organization.website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
-                    >
-                      <HiGlobe className="w-4 h-4" />
-                      <span>{organization.website.replace(/^https?:\/\//, '')}</span>
-                    </a>
-                  )}
+              {/* Right Side - Social Links */}
+              <div className="flex flex-col items-end gap-2 text-sm">
+                {organization.website && (
                   <a
-                    href="#"
+                    href={organization.website.startsWith('http') ? organization.website : `https://${organization.website}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
                   >
-                    <FaInstagram className="w-4 h-4" />
-                    <span>@{organization.companyName.toLowerCase().replace(/\s+/g, '')}</span>
+                    <HiGlobe className="w-4 h-4" />
+                    <span>{organization.website.replace(/^https?:\/\//, '')}</span>
                   </a>
+                )}
+                {organization.socialMedia?.facebook && (
                   <a
-                    href="#"
+                    href={organization.socialMedia.facebook}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
                   >
                     <FaFacebook className="w-4 h-4" />
-                    <span>{organization.companyName}</span>
+                    <span>Facebook</span>
                   </a>
+                )}
+                {organization.socialMedia?.twitter && (
                   <a
-                    href="#"
+                    href={organization.socialMedia.twitter}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
                   >
                     <FaTwitter className="w-4 h-4" />
-                    <span>@{organization.companyName.toLowerCase().replace(/\s+/g, '')}</span>
+                    <span>Twitter</span>
                   </a>
-                </div>
+                )}
+                {organization.socialMedia?.instagram && (
+                  <a
+                    href={organization.socialMedia.instagram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
+                  >
+                    <FaInstagram className="w-4 h-4" />
+                    <span>Instagram</span>
+                  </a>
+                )}
+                {organization.socialMedia?.linkedin && (
+                  <a
+                    href={organization.socialMedia.linkedin}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
+                  >
+                    <FaLinkedin className="w-4 h-4" />
+                    <span>LinkedIn</span>
+                  </a>
+                )}
+                {organization.socialMedia?.youtube && (
+                  <a
+                    href={organization.socialMedia.youtube}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-gray-600 hover:text-brand-500"
+                  >
+                    <FaYoutube className="w-4 h-4" />
+                    <span>YouTube</span>
+                  </a>
+                )}
+                {(!organization.website && 
+                  (!organization.socialMedia || 
+                   (!organization.socialMedia.facebook && 
+                    !organization.socialMedia.twitter && 
+                    !organization.socialMedia.instagram && 
+                    !organization.socialMedia.linkedin && 
+                    !organization.socialMedia.youtube))) && (
+                  <p className="text-gray-500 italic text-xs">No social media links available</p>
+                )}
               </div>
             </div>
           </div>
@@ -301,7 +384,7 @@ export default function OrganisationDetail() {
         {organization.description && (
           <section className="bg-white border-b">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-              <p className="text-gray-700 leading-relaxed max-w-4xl">
+              <p className="text-gray-700 leading-relaxed max-w-4xl whitespace-pre-line">
                 {organization.description}
               </p>
             </div>
@@ -314,51 +397,57 @@ export default function OrganisationDetail() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="flex items-center gap-3 mb-2">
-                  <HiStar className="w-6 h-6 text-yellow-400" />
+                  <HiBriefcase className="w-6 h-6 text-brand-500" />
                   <div>
-                    <div className="text-2xl font-bold text-gray-900">{metrics.rating}</div>
-                    <div className="text-sm text-gray-600">out of 5</div>
+                    <div className="text-2xl font-bold text-gray-900">{publishedJobs.length}</div>
+                    <div className="text-sm text-gray-600">Active Jobs</div>
                   </div>
                 </div>
-                <div className="text-sm text-gray-500">Reviews</div>
-              </div>
-
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <HiDocumentText className="w-6 h-6 text-brand-500" />
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">{metrics.reviewedBy}</div>
-                    <div className="text-sm text-gray-600">Taldium Users</div>
-                  </div>
-                </div>
-                <div className="text-sm text-gray-500">Reviewed by</div>
+                <div className="text-sm text-gray-500">Published job openings</div>
               </div>
 
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="flex items-center gap-3 mb-2">
                   <HiUser className="w-6 h-6 text-brand-500" />
                   <div>
-                    <div className="text-2xl font-bold text-gray-900">{metrics.employees}</div>
-                    <div className="text-sm text-gray-600">Employees</div>
+                    <div className="text-2xl font-bold text-gray-900">
+                      {organization.companySize || 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">Company Size</div>
                   </div>
                 </div>
-                <div className="text-sm text-gray-500">No. of employees</div>
+                <div className="text-sm text-gray-500">Number of employees</div>
               </div>
 
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <HiCalendar className="w-6 h-6 text-brand-500" />
-                  <div>
-                    <div className="text-2xl font-bold text-gray-900">
-                      {metrics.profileCreated.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      {Math.floor((Date.now() - metrics.profileCreated.getTime()) / (1000 * 60 * 60 * 24 * 365))} years ago
+              {getFoundedYear() && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <HiCalendar className="w-6 h-6 text-brand-500" />
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">{getFoundedYear()}</div>
+                      <div className="text-sm text-gray-600">Founded</div>
                     </div>
                   </div>
+                  <div className="text-sm text-gray-500">Year established</div>
                 </div>
-                <div className="text-sm text-gray-500">Profile Created</div>
-              </div>
+              )}
+
+              {getProfileAge() !== null && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <HiDocumentText className="w-6 h-6 text-brand-500" />
+                    <div>
+                      <div className="text-2xl font-bold text-gray-900">
+                        {new Date(organization.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {getProfileAge()} {getProfileAge() === 1 ? 'year' : 'years'} ago
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-500">Profile Created</div>
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -389,48 +478,137 @@ export default function OrganisationDetail() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {activeTab === 'overview' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Founded</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.founded}</p>
-                </div>
+                {getFoundedYear() && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Founded</label>
+                    <p className="text-lg text-gray-900 mt-1">{getFoundedYear()}</p>
+                  </div>
+                )}
                 <div>
                   <label className="text-sm font-medium text-gray-500">Founder & CEO</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.founderCEO}</p>
+                  <p className="text-lg text-gray-900 mt-1">
+                    {organization.user.firstName} {organization.user.lastName}
+                  </p>
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">CTO</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.cto}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">COO</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.coo}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Organization Type</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.organizationType}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500">Incorporation Status</label>
-                  <p className="text-lg text-gray-900 mt-1">{overviewDetails.incorporationStatus}</p>
-                </div>
+                {organization.industry && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Industry</label>
+                    <p className="text-lg text-gray-900 mt-1">{organization.industry}</p>
+                  </div>
+                )}
+                {organization.companySize && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Company Size</label>
+                    <p className="text-lg text-gray-900 mt-1">{organization.companySize}</p>
+                  </div>
+                )}
+                {organization.isRegistered !== undefined && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Registration Status</label>
+                    <p className="text-lg text-gray-900 mt-1">
+                      {organization.isRegistered ? 'Registered' : 'Unregistered'}
+                    </p>
+                  </div>
+                )}
+                {organization.isRegistered && organization.countryOfIncorporation && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Country of Incorporation</label>
+                    <p className="text-lg text-gray-900 mt-1">{organization.countryOfIncorporation}</p>
+                  </div>
+                )}
+                {organization.isRegistered && organization.incorporationNumber && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Incorporation Number</label>
+                    <p className="text-lg text-gray-900 mt-1">{organization.incorporationNumber}</p>
+                  </div>
+                )}
+                {organization.headquartersCity && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Headquarters</label>
+                    <p className="text-lg text-gray-900 mt-1">
+                      {organization.headquartersCity}
+                      {organization.headquartersCountry && `, ${organization.headquartersCountry}`}
+                    </p>
+                  </div>
+                )}
+                {organization.address && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Address</label>
+                    <p className="text-lg text-gray-900 mt-1">
+                      {[
+                        organization.address.buildingName,
+                        organization.address.streetNumber,
+                        organization.address.street,
+                        organization.address.city,
+                        organization.address.state,
+                        organization.address.country,
+                        organization.address.zipCode,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+                  </div>
+                )}
+                {organization.category?.category && (
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Category</label>
+                    <p className="text-lg text-gray-900 mt-1">{organization.category.category}</p>
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === 'jobs' && (
-              <div className="text-center py-12">
-                <p className="text-gray-600">Jobs will be displayed here</p>
+              <div>
+                {jobsLoading ? (
+                  <div className="text-center py-12">
+                    <p className="text-gray-600">Loading jobs...</p>
+                  </div>
+                ) : publishedJobs.length > 0 ? (
+                  <div className="space-y-4">
+                    {publishedJobs.map((job) => (
+                      <Link
+                        key={job.id}
+                        to={`/jobs/${job.id}`}
+                        className="block bg-gray-50 rounded-lg p-6 hover:bg-gray-100 transition-colors"
+                      >
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">{job.jobTitle}</h3>
+                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                          <span className="flex items-center gap-1">
+                            <HiLocationMarker className="w-4 h-4" />
+                            {job.location}
+                          </span>
+                          <span>
+                            {new Date(job.createdAt).toLocaleDateString('en-US', {
+                              month: 'long',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                          </span>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <HiBriefcase className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600">No job openings available at the moment</p>
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === 'reviews' && (
               <div className="text-center py-12">
-                <p className="text-gray-600">Reviews will be displayed here</p>
+                <HiStar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">Reviews feature coming soon</p>
               </div>
             )}
 
             {activeTab === 'communications' && (
               <div className="text-center py-12">
-                <p className="text-gray-600">Communications will be displayed here</p>
+                <HiDocumentText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">Communications feature coming soon</p>
               </div>
             )}
           </div>
@@ -439,4 +617,3 @@ export default function OrganisationDetail() {
     </LandingLayout>
   );
 }
-

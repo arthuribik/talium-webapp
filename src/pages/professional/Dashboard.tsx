@@ -168,7 +168,7 @@ export default function ProfessionalDashboard() {
                 <p className="text-sm">No applications yet</p>
                 <p className="text-xs text-gray-400 mt-1">Start applying to jobs to see your applications here</p>
                 <button
-                  onClick={() => navigate('/jobs')}
+                  onClick={() => navigate('/professional/jobs')}
                   className="mt-4 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors text-sm"
                 >
                   Browse Jobs

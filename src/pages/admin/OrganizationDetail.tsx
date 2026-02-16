@@ -68,7 +68,7 @@ interface RegistrationData {
   createdAt?: string;
 }
 
-type Tab = 'overview' | 'compliance';
+type Tab = 'profile' | 'compliance' | 'billing' | 'team' | 'activity';
 
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -77,7 +77,7 @@ export default function OrganizationDetail() {
   const [organization, setOrganization] = useState<any>(null);
   const [registration, setRegistration] = useState<RegistrationData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [activeTab, setActiveTab] = useState<Tab>('profile');
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
@@ -89,7 +89,7 @@ export default function OrganizationDetail() {
   // Load tab from URL on mount
   useEffect(() => {
     const tabParam = searchParams.get('tab') as Tab;
-    if (tabParam && ['overview', 'compliance'].includes(tabParam)) {
+    if (tabParam && ['profile', 'compliance', 'billing', 'team', 'activity'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -392,14 +392,14 @@ export default function OrganizationDetail() {
         <div className="border-b border-gray-200">
           <nav className="flex space-x-8">
             <button
-              onClick={() => handleTabChange('overview')}
+              onClick={() => handleTabChange('profile')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'overview'
+                activeTab === 'profile'
                   ? 'border-brand-500 text-brand-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Overview
+              Organisation Profile
             </button>
             <button
               onClick={() => handleTabChange('compliance')}
@@ -412,12 +412,42 @@ export default function OrganizationDetail() {
               <HiShieldCheck className="w-5 h-5 mr-2" />
               Compliance
             </button>
+            <button
+              onClick={() => handleTabChange('billing')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'billing'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Billing
+            </button>
+            <button
+              onClick={() => handleTabChange('team')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'team'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Team
+            </button>
+            <button
+              onClick={() => handleTabChange('activity')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'activity'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Activity Log
+            </button>
           </nav>
         </div>
       </div>
 
-      {/* Overview Tab */}
-      {activeTab === 'overview' && (
+      {/* Organisation Profile Tab */}
+      {activeTab === 'profile' && (
         <>
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -787,6 +817,33 @@ export default function OrganizationDetail() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Billing Tab */}
+      {activeTab === 'billing' && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Billing Information</h2>
+          <p className="text-gray-600">Billing details and subscription information will be displayed here.</p>
+          {/* TODO: Implement billing details */}
+        </div>
+      )}
+
+      {/* Team Tab */}
+      {activeTab === 'team' && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Team Members</h2>
+          <p className="text-gray-600">Team members and their roles will be displayed here.</p>
+          {/* TODO: Implement team members list */}
+        </div>
+      )}
+
+      {/* Activity Log Tab */}
+      {activeTab === 'activity' && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Activity Log</h2>
+          <p className="text-gray-600">Recent activities and changes will be displayed here.</p>
+          {/* TODO: Implement activity log */}
         </div>
       )}
       </div>

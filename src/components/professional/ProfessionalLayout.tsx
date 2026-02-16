@@ -13,9 +13,16 @@ import {
   HiChevronRight,
   HiChevronDown,
   HiLogout,
+  HiDocumentText,
+  HiShieldCheck,
+  HiBriefcase,
+  HiX,
+  HiClock,
 } from 'react-icons/hi';
 import { MdPerson } from 'react-icons/md';
 import logo from '@/assets/logo.svg';
+import { useInactivityTimer } from '@/hooks/useInactivityTimer';
+import { useLogoutCountdown } from '@/hooks/useLogoutCountdown';
 
 interface ProfessionalLayoutProps {
   children: React.ReactNode;
@@ -28,11 +35,63 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showManualLogoutModal, setShowManualLogoutModal] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const performLogout = () => {
+    dispatch(logout());
+    navigate('/login');
+  };
+
+  const { timeRemaining, formatTime, resetTimer } = useInactivityTimer({
+    timeout: 5 * 60 * 1000, // 5 minutes
+    onTimeout: () => {
+      performLogout();
+    },
+    enabled: !!user,
+  });
+
+  const {
+    timeRemaining: logoutCountdown,
+    isActive: isLogoutCountdownActive,
+    startCountdown: startLogoutCountdown,
+    cancelCountdown: cancelLogoutCountdown,
+    formatTime: formatLogoutTime,
+  } = useLogoutCountdown({
+    countdownDuration: 5000, // 5 seconds
+    onComplete: performLogout,
+  });
+
+  // Show inactivity modal when countdown starts
+  useEffect(() => {
+    if (timeRemaining !== null && timeRemaining > 0) {
+      setShowLogoutModal(true);
+    } else if (timeRemaining === 0) {
+      setShowLogoutModal(false);
+    }
+  }, [timeRemaining]);
+
+  // Show manual logout modal when countdown starts
+  useEffect(() => {
+    if (isLogoutCountdownActive && logoutCountdown !== null) {
+      setShowManualLogoutModal(true);
+    } else {
+      setShowManualLogoutModal(false);
+    }
+  }, [isLogoutCountdownActive, logoutCountdown]);
+
+  const handleLogoutClick = () => {
+    setDropdownOpen(false);
+    startLogoutCountdown();
+  };
 
   const navItems = [
     { path: '/professional', label: 'Dashboard', icon: HiHome },
+    { path: '/professional/jobs', label: 'Jobs', icon: HiBriefcase },
     { path: '/professional/applications', label: 'Applications', icon: HiClipboardList },
+    { path: '/professional/shared-data', label: 'Shared Data History', icon: HiDocumentText },
+    { path: '/professional/verification', label: 'Verification Center', icon: HiShieldCheck },
     { path: '/professional/subscription', label: 'Subscription', icon: HiCreditCard },
     { path: '/professional/settings', label: 'Settings', icon: HiCog },
   ];
@@ -42,11 +101,6 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
       return location.pathname === path;
     }
     return location.pathname === path || location.pathname.startsWith(path + '/');
-  };
-
-  const handleLogout = () => {
-    dispatch(logout());
-    navigate('/login');
   };
 
   // Close dropdown when clicking outside
@@ -151,18 +205,25 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
-                      navigate('/professional/settings?tab=profile');
+                      navigate('/professional/profile');
                     }}
                     className="w-full flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   >
                     <MdPerson className="w-4 h-4 mr-3" />
-                    Settings
+                    My Profile
                   </button>
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
-                      handleLogout();
+                      navigate('/professional/settings');
                     }}
+                    className="w-full flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  >
+                    <HiCog className="w-4 h-4 mr-3" />
+                    Settings
+                  </button>
+                  <button
+                    onClick={handleLogoutClick}
                     className="w-full flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
                   >
                     <HiLogout className="w-4 h-4 mr-3" />
@@ -179,6 +240,102 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
           {children}
         </main>
       </div>
+
+      {/* Logout Countdown Modal */}
+      {showLogoutModal && timeRemaining !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative">
+            <button
+              onClick={() => {
+                setShowLogoutModal(false);
+                resetTimer();
+              }}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <HiX className="w-6 h-6" />
+            </button>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <HiClock className="w-8 h-8 text-yellow-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">
+                Session Timeout Warning
+              </h3>
+              <p className="text-gray-600 mb-4">
+                You've been inactive for a while. You will be logged out in:
+              </p>
+              <div className="text-4xl font-bold text-brand-600 mb-6">
+                {formatTime(timeRemaining)}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowLogoutModal(false);
+                    resetTimer();
+                  }}
+                  className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
+                >
+                  Stay Logged In
+                </button>
+                <button
+                  onClick={performLogout}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Logout Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Logout Countdown Modal */}
+      {showManualLogoutModal && logoutCountdown !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative">
+            <button
+              onClick={() => {
+                cancelLogoutCountdown();
+                setShowManualLogoutModal(false);
+              }}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <HiX className="w-6 h-6" />
+            </button>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <HiLogout className="w-8 h-8 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">
+                Logging Out
+              </h3>
+              <p className="text-gray-600 mb-4">
+                You will be logged out in:
+              </p>
+              <div className="text-4xl font-bold text-red-600 mb-6">
+                {formatLogoutTime(logoutCountdown)}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    cancelLogoutCountdown();
+                    setShowManualLogoutModal(false);
+                  }}
+                  className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={performLogout}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Logout Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

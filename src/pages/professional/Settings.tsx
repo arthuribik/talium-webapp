@@ -3,12 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiUser, HiLockClosed, HiSave, HiPlus, HiPencil, HiTrash, HiX } from 'react-icons/hi';
+import { HiLockClosed, HiSave, HiPlus, HiPencil, HiTrash, HiX, HiChevronDown } from 'react-icons/hi';
+import { COUNTRIES } from '@/utils/countries';
 
 export default function ProfessionalSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'profile';
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [privacySettings, setPrivacySettings] = useState({
@@ -77,15 +77,12 @@ export default function ProfessionalSettings() {
   });
 
   useEffect(() => {
-    if (activeTab === 'profile') {
-      fetchProfile();
-    } else if (activeTab === 'privacy') {
+    if (activeTab === 'privacy') {
       fetchPrivacySettings();
     }
   }, [activeTab]);
 
   const fetchProfile = async () => {
-    setLoading(true);
     try {
       const response = await api.get('/v1/professional/profile');
       const data = response.data.data;
@@ -107,13 +104,10 @@ export default function ProfessionalSettings() {
     } catch (err) {
       console.error('Failed to fetch profile:', err);
       toast.error('Failed to load profile');
-    } finally {
-      setLoading(false);
     }
   };
 
   const fetchPrivacySettings = async () => {
-    setLoading(true);
     try {
       const response = await api.get('/v1/professional/privacy-settings');
       if (response.data.data) {
@@ -121,8 +115,6 @@ export default function ProfessionalSettings() {
       }
     } catch (err) {
       console.error('Failed to fetch privacy settings:', err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -326,38 +318,21 @@ export default function ProfessionalSettings() {
     }
   };
 
-  if (loading && activeTab === 'profile') {
-    return (
-      <ProfessionalLayout>
-        <div className="p-6">
-          <div className="text-center text-gray-600 py-16">Loading profile...</div>
-        </div>
-      </ProfessionalLayout>
-    );
-  }
 
   return (
     <ProfessionalLayout>
       <div className="p-6">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Settings</h1>
-          <p className="text-gray-600">Manage your profile and privacy settings</p>
+          <p className="text-gray-600">Manage your privacy and security settings</p>
+          <p className="text-sm text-gray-500 mt-2">
+            To manage your profile, go to <a href="/professional/profile" className="text-brand-600 hover:text-brand-700 font-medium">My Profile</a>
+          </p>
         </div>
 
         {/* Tabs */}
         <div className="mb-6 border-b border-gray-200">
           <div className="flex space-x-4">
-            <button
-              onClick={() => setSearchParams({ tab: 'profile' })}
-              className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-                activeTab === 'profile'
-                  ? 'border-brand-500 text-brand-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <HiUser className="w-4 h-4 inline mr-2" />
-              Profile
-            </button>
             <button
               onClick={() => setSearchParams({ tab: 'privacy' })}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
@@ -383,8 +358,8 @@ export default function ProfessionalSettings() {
           </div>
         </div>
 
-        {/* Profile Tab */}
-        {activeTab === 'profile' && profile && (
+        {/* Profile Tab - Moved to separate Profile page */}
+        {false && activeTab === 'profile' && profile && (
           <form onSubmit={handleProfileSubmit} className="space-y-6">
             {/* About Section */}
             <div className="bg-white rounded-xl shadow-sm p-6">
@@ -403,21 +378,39 @@ export default function ProfessionalSettings() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                    <input
-                      type="text"
-                      value={profileForm.country}
-                      onChange={(e) => setProfileForm({ ...profileForm, country: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
+                    <div className="relative">
+                      <select
+                        value={profileForm.country}
+                        onChange={(e) => setProfileForm({ ...profileForm, country: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
+                      >
+                        <option value="">Select country</option>
+                        {COUNTRIES.map((country) => (
+                          <option key={country} value={country}>
+                            {country}
+                          </option>
+                        ))}
+                      </select>
+                      <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nationality</label>
-                    <input
-                      type="text"
-                      value={profileForm.nationality}
-                      onChange={(e) => setProfileForm({ ...profileForm, nationality: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
+                    <div className="relative">
+                      <select
+                        value={profileForm.nationality}
+                        onChange={(e) => setProfileForm({ ...profileForm, nationality: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
+                      >
+                        <option value="">Select nationality</option>
+                        {COUNTRIES.map((country) => (
+                          <option key={country} value={country}>
+                            {country}
+                          </option>
+                        ))}
+                      </select>
+                      <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
@@ -425,6 +418,7 @@ export default function ProfessionalSettings() {
                       type="date"
                       value={profileForm.dateOfBirth}
                       onChange={(e) => setProfileForm({ ...profileForm, dateOfBirth: e.target.value })}
+                      max={new Date().toISOString().split('T')[0]}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>

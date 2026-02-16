@@ -45,7 +45,11 @@ import OrganisationJobDetail from '@/pages/organisation/JobDetail';
 import OrganisationSettings from '@/pages/organisation/Settings';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
 import ProfessionalDashboard from '@/pages/professional/Dashboard';
+import ProfessionalJobs from '@/pages/professional/Jobs';
+import ProfessionalProfile from '@/pages/professional/Profile';
 import Applications from '@/pages/professional/Applications';
+import SharedDataHistory from '@/pages/professional/SharedDataHistory';
+import VerificationCenter from '@/pages/professional/VerificationCenter';
 import ProfessionalSubscription from '@/pages/professional/Subscription';
 import ProfessionalSettings from '@/pages/professional/Settings';
 
@@ -528,10 +532,42 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/professional/jobs"
+        element={
+          <ProfessionalRoute>
+            <ProfessionalJobs />
+          </ProfessionalRoute>
+        }
+      />
+      <Route
+        path="/professional/profile"
+        element={
+          <ProfessionalRoute>
+            <ProfessionalProfile />
+          </ProfessionalRoute>
+        }
+      />
+      <Route
         path="/professional/applications"
         element={
           <ProfessionalRoute>
             <Applications />
+          </ProfessionalRoute>
+        }
+      />
+      <Route
+        path="/professional/shared-data"
+        element={
+          <ProfessionalRoute>
+            <SharedDataHistory />
+          </ProfessionalRoute>
+        }
+      />
+      <Route
+        path="/professional/verification"
+        element={
+          <ProfessionalRoute>
+            <VerificationCenter />
           </ProfessionalRoute>
         }
       />
