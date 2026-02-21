@@ -94,21 +94,21 @@ export default function ProfessionalDashboard() {
       value: stats?.totalApplications || 0,
       icon: <FaFileAlt className="w-6 h-6" />,
       color: 'bg-blue-500',
-      link: '/professional/applications',
+      link: '/professional/jobs',
     },
     {
       title: 'Pending Applications',
       value: stats?.pendingApplications || 0,
       icon: <HiClock className="w-6 h-6" />,
       color: 'bg-yellow-500',
-      link: '/professional/applications',
+      link: '/professional/jobs',
     },
     {
       title: 'Accepted Applications',
       value: stats?.acceptedApplications || 0,
       icon: <FaUserCheck className="w-6 h-6" />,
       color: 'bg-green-500',
-      link: '/professional/applications',
+      link: '/professional/jobs',
     },
     {
       title: 'Profile Completeness',
@@ -154,7 +154,7 @@ export default function ProfessionalDashboard() {
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Recent Applications</h2>
             <Link
-              to="/professional/applications"
+              to="/professional/jobs"
               className="text-brand-600 hover:text-brand-700 text-sm font-medium flex items-center"
             >
               View All
@@ -234,7 +234,7 @@ export default function ProfessionalDashboard() {
             </button>
 
             <Link
-              to="/professional/applications"
+              to="/professional/jobs"
               className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-between"
             >
               <div className="flex items-center">

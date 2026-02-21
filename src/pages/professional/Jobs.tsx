@@ -558,7 +558,7 @@ export default function Jobs() {
                                 Apply Now
                               </button>
                               <button
-                                onClick={() => navigate(`/jobs/${job.id}`)}
+                                onClick={() => navigate(`/professional/jobs/${job.id}`)}
                                 className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                               >
                                 View Details
@@ -601,7 +601,7 @@ export default function Jobs() {
                 {applications.map((app) => (
                   <div
                     key={app.id}
-                    onClick={() => navigate(`/jobs/${app.jobId}`)}
+                    onClick={() => navigate(`/professional/jobs/${app.jobId}`)}
                     className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
                   >
                     <div className="flex items-start justify-between">
@@ -697,7 +697,7 @@ export default function Jobs() {
                                 Apply Now
                               </button>
                               <button
-                                onClick={() => navigate(`/jobs/${job.id}`)}
+                                onClick={() => navigate(`/professional/jobs/${job.id}`)}
                                 className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                               >
                                 View Details
@@ -769,7 +769,7 @@ export default function Jobs() {
                     <div className="flex gap-3">
                       {offer.jobId ? (
                         <button
-                          onClick={() => navigate(`/jobs/${offer.jobId}`)}
+                          onClick={() => navigate(`/professional/jobs/${offer.jobId}`)}
                           className="px-6 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
                         >
                           View Job Details

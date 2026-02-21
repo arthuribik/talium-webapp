@@ -5,8 +5,6 @@ import type { RootState } from '@/store/store';
 import { logout } from '@/store/authSlice';
 import {
   HiHome,
-  HiClipboardList,
-  HiCreditCard,
   HiCog,
   HiSearch,
   HiChevronLeft,
@@ -89,10 +87,8 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
   const navItems = [
     { path: '/professional', label: 'Dashboard', icon: HiHome },
     { path: '/professional/jobs', label: 'Jobs', icon: HiBriefcase },
-    { path: '/professional/applications', label: 'Applications', icon: HiClipboardList },
     { path: '/professional/shared-data', label: 'Shared Data History', icon: HiDocumentText },
     { path: '/professional/verification', label: 'Verification Center', icon: HiShieldCheck },
-    { path: '/professional/subscription', label: 'Subscription', icon: HiCreditCard },
     { path: '/professional/settings', label: 'Settings', icon: HiCog },
   ];
 

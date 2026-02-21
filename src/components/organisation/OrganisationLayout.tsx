@@ -6,6 +6,7 @@ import { logout } from '@/store/authSlice';
 import {
   HiHome,
   HiUser,
+  HiUserGroup,
   HiBriefcase,
   HiCog,
   HiCreditCard,
@@ -38,7 +39,7 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
     { path: '/organization', label: 'Dashboard', icon: HiHome },
     { path: '/organization/professionals', label: 'Professionals', icon: HiUser },
     { path: '/organization/jobs', label: 'Jobs', icon: HiBriefcase },
-    // { path: '/organization/org-profile', label: 'Manage Org Profile', icon: HiOfficeBuilding },
+    { path: '/organization/team', label: 'Team', icon: HiUserGroup },
     { path: '/organization/billing', label: 'Billings', icon: HiCreditCard },
     { path: '/organization/settings', label: 'Settings', icon: HiCog },
   ];

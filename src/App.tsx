@@ -44,10 +44,11 @@ import PostJobs from '@/pages/organisation/PostJobs';
 import OrganisationJobDetail from '@/pages/organisation/JobDetail';
 import OrganisationSettings from '@/pages/organisation/Settings';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
+import Team from '@/pages/organisation/Team';
 import ProfessionalDashboard from '@/pages/professional/Dashboard';
 import ProfessionalJobs from '@/pages/professional/Jobs';
+import ProfessionalJobDetail from '@/pages/professional/JobDetail';
 import ProfessionalProfile from '@/pages/professional/Profile';
-import Applications from '@/pages/professional/Applications';
 import SharedDataHistory from '@/pages/professional/SharedDataHistory';
 import VerificationCenter from '@/pages/professional/VerificationCenter';
 import ProfessionalSubscription from '@/pages/professional/Subscription';
@@ -540,18 +541,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/professional/profile"
+        path="/professional/jobs/:id"
         element={
           <ProfessionalRoute>
-            <ProfessionalProfile />
+            <ProfessionalJobDetail />
           </ProfessionalRoute>
         }
       />
       <Route
-        path="/professional/applications"
+        path="/professional/profile"
         element={
           <ProfessionalRoute>
-            <Applications />
+            <ProfessionalProfile />
           </ProfessionalRoute>
         }
       />
@@ -648,6 +649,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/organization/team"
+        element={
+          <OrganisationRoute>
+            <Team />
+          </OrganisationRoute>
+        }
+      />
+      <Route
         path="/organization/settings"
         element={
           <OrganisationRoute>
@@ -680,6 +689,7 @@ function AppRoutes() {
       <Route path="/organisation/org-profile" element={<Navigate to="/organization/settings?tab=profile" replace />} />
       <Route path="/organisation/settings" element={<Navigate to="/organization/settings" replace />} />
       <Route path="/organisation/billing" element={<Navigate to="/organization/billing" replace />} />
+      <Route path="/organisation/team" element={<Navigate to="/organization/team" replace />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

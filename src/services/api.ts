@@ -23,7 +23,7 @@ const getApiBaseURL = (): string => {
                        window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
   
   if (isProduction) {
-    return 'https://talium-engine.onrender.com';
+    return 'https://taldium-engine.onrender.com';
   }
   
   return 'http://localhost:5103';
