@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
+import { SearchableList } from '@/components/common/SearchableList';
 
 export default function CreateJob() {
   const { user } = useAppSelector((state) => state.auth);
@@ -121,36 +122,36 @@ export default function CreateJob() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700">Work Mode</label>
-            <select
-              name="workMode"
-              required
+            <SearchableList
               value={formData.workMode}
-              onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-            >
-              <option value="">Select Work Mode</option>
-              <option value="remote">Remote</option>
-              <option value="hybrid">Hybrid</option>
-              <option value="on_site">On Site</option>
-              <option value="global_remote">Global Remote</option>
-            </select>
+              onChange={(workMode) => setFormData({ ...formData, workMode })}
+              options={[
+                { value: '', label: 'Select Work Mode' },
+                { value: 'remote', label: 'Remote' },
+                { value: 'hybrid', label: 'Hybrid' },
+                { value: 'on_site', label: 'On Site' },
+                { value: 'global_remote', label: 'Global Remote' },
+              ]}
+              placeholder="Select Work Mode"
+              className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"
+            />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700">Employment Type</label>
-            <select
-              name="employmentType"
-              required
+            <SearchableList
               value={formData.employmentType}
-              onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-            >
-              <option value="">Select Type</option>
-              <option value="full_time">Full-time</option>
-              <option value="part_time">Part-time</option>
-              <option value="contract">Contract</option>
-              <option value="internship">Internship</option>
-            </select>
+              onChange={(employmentType) => setFormData({ ...formData, employmentType })}
+              options={[
+                { value: '', label: 'Select Type' },
+                { value: 'full_time', label: 'Full-time' },
+                { value: 'part_time', label: 'Part-time' },
+                { value: 'contract', label: 'Contract' },
+                { value: 'internship', label: 'Internship' },
+              ]}
+              placeholder="Select Type"
+              className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"
+            />
           </div>
 
           <div>

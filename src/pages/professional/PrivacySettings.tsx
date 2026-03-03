@@ -3,6 +3,7 @@ import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import { HiLockClosed, HiSave } from 'react-icons/hi';
+import { SearchableList } from '@/components/common/SearchableList';
 
 export default function PrivacySettings() {
   const [loading, setLoading] = useState(true);
@@ -79,15 +80,17 @@ export default function PrivacySettings() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Profile Visibility
               </label>
-              <select
+              <SearchableList
                 value={settings.profileVisibility}
-                onChange={(e) => handleChange('profileVisibility', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              >
-                <option value="public">Public - Visible to everyone</option>
-                <option value="private">Private - Only visible to you</option>
-                <option value="organisations">Organisations Only - Visible to organizations</option>
-              </select>
+                onChange={(v) => handleChange('profileVisibility', v)}
+                options={[
+                  { value: 'public', label: 'Public - Visible to everyone' },
+                  { value: 'private', label: 'Private - Only visible to you' },
+                  { value: 'organisations', label: 'Organisations Only - Visible to organizations' },
+                ]}
+                placeholder="Select visibility"
+                className="focus:ring-2 focus:ring-brand-500"
+              />
             </div>
 
             {/* Toggle Settings */}

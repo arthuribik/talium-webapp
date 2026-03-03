@@ -11,6 +11,7 @@ import {
   HiArrowRight,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+import { SearchableList } from '@/components/common/SearchableList';
 
 const WORK_MODES = [
   { value: '', label: 'All Work Mode' },
@@ -185,34 +186,33 @@ export default function OrganisationDashboard() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-6">
-          <select
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 min-w-[160px] appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27m6 8 4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:1.5rem_1.5rem] bg-[right_0.5rem_center] bg-no-repeat pr-10"
-          >
-            <option value="">All Country</option>
-            {COUNTRIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <select
-            value={workMode}
-            onChange={(e) => setWorkMode(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 min-w-[160px] appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27m6 8 4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:1.5rem_1.5rem] bg-[right_0.5rem_center] bg-no-repeat pr-10"
-          >
-            {WORK_MODES.map((o) => (
-              <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 min-w-[160px] appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3E%3Cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27m6 8 4 4 4-4%27/%3E%3C/svg%3E')] bg-[length:1.5rem_1.5rem] bg-[right_0.5rem_center] bg-no-repeat pr-10"
-          >
-            {STATUS_OPTIONS.map((o) => (
-              <option key={o.value || 'all'} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          <div className="min-w-[160px]">
+            <SearchableList
+              value={country}
+              onChange={setCountry}
+              options={[{ value: '', label: 'All Country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+              placeholder="All Country"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 w-full"
+            />
+          </div>
+          <div className="min-w-[160px]">
+            <SearchableList
+              value={workMode}
+              onChange={setWorkMode}
+              options={WORK_MODES}
+              placeholder="All Work Mode"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 w-full"
+            />
+          </div>
+          <div className="min-w-[160px]">
+            <SearchableList
+              value={status}
+              onChange={setStatus}
+              options={STATUS_OPTIONS}
+              placeholder="All Status"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-700 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 w-full"
+            />
+          </div>
         </div>
 
         {/* KPI Cards */}

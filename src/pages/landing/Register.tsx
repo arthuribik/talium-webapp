@@ -7,6 +7,7 @@ import { api } from '@/services/api';
 import { HiCheckCircle, HiArrowRight, HiArrowLeft, HiEye, HiEyeOff } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
 import PhoneNumberInput from '@/components/common/PhoneNumberInput';
+import { SearchableList } from '@/components/common/SearchableList';
 import logo from '@/assets/logo.svg';
 
 type Step = 1 | 2 | 3;
@@ -362,20 +363,14 @@ export default function Register() {
                 <label htmlFor="country" className="block text-sm font-medium text-gray-700 mb-2">
                 Country
               </label>
-              <select
+              <SearchableList
                 id="country"
-                name="country"
                 value={formData.country}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              >
-                <option value="">Select country</option>
-                {COUNTRIES.map((country) => (
-                  <option key={country} value={country}>
-                    {country}
-                  </option>
-                ))}
-              </select>
+                onChange={(country) => setFormData({ ...formData, country })}
+                options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                placeholder="Select country"
+                className="w-full focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              />
             </div>
             <div>
               <PhoneNumberInput

@@ -3,6 +3,7 @@ import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import { HiUserAdd, HiX, HiDotsVertical } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+import { SearchableList } from '@/components/common/SearchableList';
 
 interface TeamStats {
   totalMembers: number;
@@ -335,15 +336,17 @@ export default function Team() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                  <select
+                  <SearchableList
                     value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="org_admin">Admin</option>
-                    <option value="org_recruiter">Editor</option>
-                    <option value="org_member">Viewer</option>
-                  </select>
+                    onChange={setInviteRole}
+                    options={[
+                      { value: 'org_admin', label: 'Admin' },
+                      { value: 'org_recruiter', label: 'Editor' },
+                      { value: 'org_member', label: 'Viewer' },
+                    ]}
+                    placeholder="Select role"
+                    className="w-full focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
@@ -380,15 +383,17 @@ export default function Team() {
               <p className="text-sm text-gray-600 mb-4">{editingMember.name} – {editingMember.email}</p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
+                <SearchableList
                   value={newRole}
-                  onChange={(e) => setNewRole(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="org_admin">Admin</option>
-                  <option value="org_recruiter">Editor</option>
-                  <option value="org_member">Viewer</option>
-                </select>
+                  onChange={setNewRole}
+                  options={[
+                    { value: 'org_admin', label: 'Admin' },
+                    { value: 'org_recruiter', label: 'Editor' },
+                    { value: 'org_member', label: 'Viewer' },
+                  ]}
+                  placeholder="Select role"
+                  className="w-full focus:ring-2 focus:ring-blue-500"
+                />
               </div>
               <div className="flex gap-3 mt-6">
                 <button

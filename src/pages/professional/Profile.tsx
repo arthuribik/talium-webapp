@@ -358,18 +358,13 @@ export default function Profile() {
                   Nationality (from Verification)
                 </label>
                 {editing ? (
-                  <select
+                  <SearchableList
                     value={formData.nationality}
-                    onChange={(e) => setFormData({ ...formData, nationality: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select Nationality</option>
-                    {countryOptions.map((country) => (
-                      <option key={country} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(nationality) => setFormData({ ...formData, nationality })}
+                    options={[{ value: '', label: 'Select Nationality' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                    placeholder="Select Nationality"
+                    className="focus:ring-2 focus:ring-brand-500"
+                  />
                 ) : (
                   <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
                     {profile.nationality || 'Not set'}
@@ -381,18 +376,13 @@ export default function Profile() {
                   Current Location - Country (from Verification)
                 </label>
                 {editing ? (
-                  <select
+                  <SearchableList
                     value={formData.country}
-                    onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select Country</option>
-                    {countryOptions.map((country) => (
-                      <option key={country} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(country) => setFormData({ ...formData, country })}
+                    options={[{ value: '', label: 'Select Country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                    placeholder="Select Country"
+                    className="focus:ring-2 focus:ring-brand-500"
+                  />
                 ) : (
                   <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
                     {profile.country || 'Not set'}

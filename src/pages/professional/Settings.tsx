@@ -3,12 +3,29 @@ import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiLockClosed, HiSave, HiPlus, HiPencil, HiTrash, HiX, HiChevronDown } from 'react-icons/hi';
+import { HiLockClosed, HiSave, HiPlus, HiPencil, HiTrash, HiX } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+import { SearchableList } from '@/components/common/SearchableList';
+
+const SETTINGS_TABS = ['privacy', 'security'] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number];
+const DEFAULT_TAB: SettingsTab = 'privacy';
+
+function isSettingsTab(t: string | null): t is SettingsTab {
+  return t !== null && SETTINGS_TABS.includes(t as SettingsTab);
+}
 
 export default function ProfessionalSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'profile';
+  const tabParam = searchParams.get('tab');
+  const activeTab: SettingsTab = isSettingsTab(tabParam) ? tabParam : DEFAULT_TAB;
+
+  // Sync URL on load: ensure ?tab= is set and valid
+  useEffect(() => {
+    if (!isSettingsTab(tabParam)) {
+      setSearchParams({ tab: activeTab }, { replace: true });
+    }
+  }, [tabParam, activeTab, setSearchParams]);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [privacySettings, setPrivacySettings] = useState({
@@ -359,7 +376,7 @@ export default function ProfessionalSettings() {
         </div>
 
         {/* Profile Tab - Moved to separate Profile page */}
-        {false && activeTab === 'profile' && profile && (
+        {false && profile && (
           <form onSubmit={handleProfileSubmit} className="space-y-6">
             {/* About Section */}
             <div className="bg-white rounded-xl shadow-sm p-6">
@@ -378,39 +395,23 @@ export default function ProfessionalSettings() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                    <div className="relative">
-                      <select
-                        value={profileForm.country}
-                        onChange={(e) => setProfileForm({ ...profileForm, country: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
-                      >
-                        <option value="">Select country</option>
-                        {COUNTRIES.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
-                          </option>
-                        ))}
-                      </select>
-                      <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    </div>
+                    <SearchableList
+                      value={profileForm.country}
+                      onChange={(country) => setProfileForm({ ...profileForm, country })}
+                      options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                      placeholder="Select country"
+                      className="focus:ring-2 focus:ring-brand-500"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Nationality</label>
-                    <div className="relative">
-                      <select
-                        value={profileForm.nationality}
-                        onChange={(e) => setProfileForm({ ...profileForm, nationality: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
-                      >
-                        <option value="">Select nationality</option>
-                        {COUNTRIES.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
-                          </option>
-                        ))}
-                      </select>
-                      <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    </div>
+                    <SearchableList
+                      value={profileForm.nationality}
+                      onChange={(nationality) => setProfileForm({ ...profileForm, nationality })}
+                      options={[{ value: '', label: 'Select nationality' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                      placeholder="Select nationality"
+                      className="focus:ring-2 focus:ring-brand-500"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
@@ -559,21 +560,22 @@ export default function ProfessionalSettings() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Level of Education</label>
-                      <select
+                      <SearchableList
                         value={educationForm.levelOfEducation}
-                        onChange={(e) => setEducationForm({ ...educationForm, levelOfEducation: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        required
-                      >
-                        <option value="">Select Level</option>
-                        <option value="high_school">High School</option>
-                        <option value="associate">Associate</option>
-                        <option value="bachelor">Bachelor</option>
-                        <option value="master">Master</option>
-                        <option value="doctorate">Doctorate</option>
-                        <option value="certificate">Certificate</option>
-                        <option value="diploma">Diploma</option>
-                      </select>
+                        onChange={(levelOfEducation) => setEducationForm({ ...educationForm, levelOfEducation })}
+                        options={[
+                          { value: '', label: 'Select Level' },
+                          { value: 'high_school', label: 'High School' },
+                          { value: 'associate', label: 'Associate' },
+                          { value: 'bachelor', label: 'Bachelor' },
+                          { value: 'master', label: 'Master' },
+                          { value: 'doctorate', label: 'Doctorate' },
+                          { value: 'certificate', label: 'Certificate' },
+                          { value: 'diploma', label: 'Diploma' },
+                        ]}
+                        placeholder="Select Level"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Institution Name</label>
@@ -784,33 +786,35 @@ export default function ProfessionalSettings() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
-                      <select
+                      <SearchableList
                         value={experienceForm.employmentType}
-                        onChange={(e) => setExperienceForm({ ...experienceForm, employmentType: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        required
-                      >
-                        <option value="">Select Type</option>
-                        <option value="full_time">Full-time</option>
-                        <option value="part_time">Part-time</option>
-                        <option value="contract">Contract</option>
-                        <option value="internship">Internship</option>
-                      </select>
+                        onChange={(employmentType) => setExperienceForm({ ...experienceForm, employmentType })}
+                        options={[
+                          { value: '', label: 'Select Type' },
+                          { value: 'full_time', label: 'Full-time' },
+                          { value: 'part_time', label: 'Part-time' },
+                          { value: 'contract', label: 'Contract' },
+                          { value: 'internship', label: 'Internship' },
+                        ]}
+                        placeholder="Select Type"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode</label>
-                      <select
+                      <SearchableList
                         value={experienceForm.workMode}
-                        onChange={(e) => setExperienceForm({ ...experienceForm, workMode: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        required
-                      >
-                        <option value="">Select Mode</option>
-                        <option value="remote">Remote</option>
-                        <option value="hybrid">Hybrid</option>
-                        <option value="on_site">On-site</option>
-                        <option value="global_remote">Global Remote</option>
-                      </select>
+                        onChange={(workMode) => setExperienceForm({ ...experienceForm, workMode })}
+                        options={[
+                          { value: '', label: 'Select Mode' },
+                          { value: 'remote', label: 'Remote' },
+                          { value: 'hybrid', label: 'Hybrid' },
+                          { value: 'on_site', label: 'On-site' },
+                          { value: 'global_remote', label: 'Global Remote' },
+                        ]}
+                        placeholder="Select Mode"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -992,15 +996,17 @@ export default function ProfessionalSettings() {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Profile Visibility
                 </label>
-                <select
+                <SearchableList
                   value={privacySettings.profileVisibility}
-                  onChange={(e) => handlePrivacyChange('profileVisibility', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  <option value="public">Public - Visible to everyone</option>
-                  <option value="private">Private - Only visible to you</option>
-                  <option value="organisations">Organisations Only - Visible to organizations</option>
-                </select>
+                  onChange={(v) => handlePrivacyChange('profileVisibility', v)}
+                  options={[
+                    { value: 'public', label: 'Public - Visible to everyone' },
+                    { value: 'private', label: 'Private - Only visible to you' },
+                    { value: 'organisations', label: 'Organisations Only - Visible to organizations' },
+                  ]}
+                  placeholder="Select visibility"
+                  className="focus:ring-2 focus:ring-brand-500"
+                />
               </div>
 
               <div className="space-y-4">

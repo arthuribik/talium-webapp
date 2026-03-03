@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
+import { SearchableList } from '@/components/common/SearchableList';
 
 export default function ProfessionalSetup() {
   const navigate = useNavigate();
@@ -139,18 +140,19 @@ export default function ProfessionalSetup() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">ID Type</label>
-                <select
-                  required
+                <SearchableList
                   value={identityData.idType}
-                  onChange={(e) => setIdentityData({ ...identityData, idType: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
-                  <option value="">Select ID Type</option>
-                  <option value="national_id">National ID</option>
-                  <option value="passport">Passport</option>
-                  <option value="drivers_license">Driver's License</option>
-                  <option value="voters_card">Voter's Card</option>
-                </select>
+                  onChange={(idType) => setIdentityData({ ...identityData, idType })}
+                  options={[
+                    { value: '', label: 'Select ID Type' },
+                    { value: 'national_id', label: 'National ID' },
+                    { value: 'passport', label: 'Passport' },
+                    { value: 'drivers_license', label: "Driver's License" },
+                    { value: 'voters_card', label: "Voter's Card" },
+                  ]}
+                  placeholder="Select ID Type"
+                  className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">ID Number</label>
@@ -189,18 +191,19 @@ export default function ProfessionalSetup() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">Level of Education</label>
-                <select
-                  required
+                <SearchableList
                   value={educationData.levelOfEducation}
-                  onChange={(e) => setEducationData({ ...educationData, levelOfEducation: e.target.value })}
-                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-                >
-                  <option value="">Select Level</option>
-                  <option value="high_school">High School</option>
-                  <option value="bachelor">Bachelor</option>
-                  <option value="master">Master</option>
-                  <option value="doctorate">Doctorate</option>
-                </select>
+                  onChange={(levelOfEducation) => setEducationData({ ...educationData, levelOfEducation })}
+                  options={[
+                    { value: '', label: 'Select Level' },
+                    { value: 'high_school', label: 'High School' },
+                    { value: 'bachelor', label: 'Bachelor' },
+                    { value: 'master', label: 'Master' },
+                    { value: 'doctorate', label: 'Doctorate' },
+                  ]}
+                  placeholder="Select Level"
+                  className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Institution Name</label>

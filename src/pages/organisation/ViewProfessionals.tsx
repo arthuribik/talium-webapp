@@ -15,7 +15,17 @@ import {
   HiPaperAirplane,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+import ReactQuill from 'react-quill';
+import 'quill/dist/quill.snow.css';
 import { COUNTRIES } from '@/utils/countries';
+import { SearchableList } from '@/components/common/SearchableList';
+
+function isRichTextEmpty(html: string): boolean {
+  if (!html || !html.trim()) return true;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const text = doc.body.textContent || '';
+  return !text.trim();
+}
 
 // Map country/nationality name to flag emoji for table display
 const COUNTRY_FLAGS: Record<string, string> = {
@@ -123,8 +133,7 @@ export default function ViewProfessionals() {
   const [scoutSearchActive, setScoutSearchActive] = useState(false);
   const [scoutForm, setScoutForm] = useState({
     jobTitle: '',
-    jobTitleCustom: '',
-    searchType: 'strict' as 'strict' | 'partial',
+    searchType: 'strict' as 'strict' | 'fuzzy',
     location: 'Global',
     domicile: '',
     workMode: '',
@@ -241,7 +250,7 @@ export default function ViewProfessionals() {
   };
 
   const handleScoutSearchSubmit = async () => {
-    const jobTitle = scoutForm.jobTitleCustom.trim() || scoutForm.jobTitle || undefined;
+    const jobTitle = scoutForm.jobTitle.trim() || undefined;
     setScoutSearchLoading(true);
     try {
       const res = await api.post('/v1/organisation/professionals/scout-search', {
@@ -331,7 +340,7 @@ export default function ViewProfessionals() {
 
   const handleMessageSubmit = async () => {
     if (!selectedProfessional) return;
-    if (!messageForm.message.trim()) {
+    if (isRichTextEmpty(messageForm.message)) {
       toast.error('Please enter a message');
       return;
     }
@@ -384,7 +393,7 @@ export default function ViewProfessionals() {
           </div>
           <button
             onClick={handleStartDirectScout}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-medium shrink-0"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium shrink-0"
           >
             <HiBriefcase className="w-5 h-5" />
             Start Direct Scout
@@ -746,43 +755,46 @@ export default function ViewProfessionals() {
           </div>
         )}
 
-        {/* Start Direct Scout (criteria) Modal */}
+        {/* Start Direct Scout (criteria) Drawer – slides in from right */}
         {showScoutModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => setShowScoutModal(false)}
+              aria-hidden
+            />
+            <div className="relative w-full max-w-2xl h-full bg-white shadow-xl overflow-y-auto flex flex-col">
+              <div className="p-6 flex-shrink-0 border-b border-gray-200">
+                <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-gray-900">Start Direct Scout</h2>
                   <button type="button" onClick={() => setShowScoutModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
                     <HiX className="w-6 h-6 text-gray-500" />
                   </button>
                 </div>
+              </div>
+              <div className="p-6 flex-1 overflow-y-auto">
 
                 <div className="space-y-5">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">What Job Title are you Scouting for?</label>
-                    <select
+                    <SearchableList
                       value={scoutForm.jobTitle}
-                      onChange={(e) => setScoutForm({ ...scoutForm, jobTitle: e.target.value })}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 mb-2"
-                    >
-                      <option value="">Select or type a title</option>
-                      <option value="Software Engineer">Software Engineer</option>
-                      <option value="Product Manager">Product Manager</option>
-                      <option value="UX Designer">UX Designer</option>
-                      <option value="Data Scientist">Data Scientist</option>
-                      <option value="AI Engineer">AI Engineer</option>
-                      <option value="Ambassador">Ambassador</option>
-                      <option value="Operations Manager">Operations Manager</option>
-                      <option value="Financial Analyst">Financial Analyst</option>
-                      <option value="Customer Specialist">Customer Specialist</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={scoutForm.jobTitleCustom}
-                      onChange={(e) => setScoutForm({ ...scoutForm, jobTitleCustom: e.target.value })}
-                      placeholder="Or type a job title..."
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      onChange={(v) => setScoutForm({ ...scoutForm, jobTitle: v })}
+                      options={[
+                        { value: '', label: 'Select or type a title' },
+                        { value: 'Software Engineer', label: 'Software Engineer' },
+                        { value: 'Product Manager', label: 'Product Manager' },
+                        { value: 'UX Designer', label: 'UX Designer' },
+                        { value: 'Data Scientist', label: 'Data Scientist' },
+                        { value: 'AI Engineer', label: 'AI Engineer' },
+                        { value: 'Ambassador', label: 'Ambassador' },
+                        { value: 'Operations Manager', label: 'Operations Manager' },
+                        { value: 'Financial Analyst', label: 'Financial Analyst' },
+                        { value: 'Customer Specialist', label: 'Customer Specialist' },
+                      ]}
+                      placeholder="Select or type a title"
+                      className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                      allowCustom
                     />
                   </div>
 
@@ -790,29 +802,39 @@ export default function ViewProfessionals() {
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Search Type</label>
                     <select
                       value={scoutForm.searchType}
-                      onChange={(e) => setScoutForm({ ...scoutForm, searchType: e.target.value as 'strict' | 'partial' })}
+                      onChange={(e) => setScoutForm({ ...scoutForm, searchType: e.target.value as 'strict' | 'fuzzy' })}
                       className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                     >
                       <option value="strict">Strict Search</option>
-                      <option value="partial">Partial Search</option>
+                      <option value="fuzzy">Fuzzy Search</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-1">
-                      {scoutForm.searchType === 'strict' ? 'Only returns candidates with the exact job title.' : 'Returns candidates whose job title contains your search.'}
+                      {scoutForm.searchType === 'strict'
+                        ? 'Only returns candidates with the exact job title.'
+                        : 'Returns candidates whose job title contains all search words (in any order).'}
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">What Location are you Looking to Scout?</label>
-                    <select
+                    <SearchableList
                       value={scoutForm.location}
-                      onChange={(e) => setScoutForm({ ...scoutForm, location: e.target.value })}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      <option value="Global">Global</option>
-                      {COUNTRIES.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setScoutForm({ ...scoutForm, location: v })}
+                      options={[
+                        { value: 'Global', label: 'Global' },
+                        { value: 'Nigeria', label: 'Nigeria' },
+                        { value: 'Ghana', label: 'Ghana' },
+                        { value: 'Kenya', label: 'Kenya' },
+                        { value: 'Rwanda', label: 'Rwanda' },
+                        { value: 'United Kingdom', label: 'United Kingdom' },
+                        { value: 'United States', label: 'United States' },
+                        ...COUNTRIES.filter(
+                          (c) => !['Nigeria', 'Ghana', 'Kenya', 'Rwanda', 'United Kingdom', 'United States'].includes(c),
+                        ).map((c) => ({ value: c, label: c })),
+                      ]}
+                      placeholder="Select location"
+                      className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                    />
                   </div>
 
                   <div>
@@ -838,6 +860,7 @@ export default function ViewProfessionals() {
                         <option value="remote">Remote</option>
                         <option value="hybrid">Hybrid</option>
                         <option value="on_site">On-site</option>
+                        <option value="local_remote">Local Remote</option>
                         <option value="global_remote">Global Remote</option>
                       </select>
                     </div>
@@ -860,15 +883,17 @@ export default function ViewProfessionals() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Salary</label>
                     <div className="flex flex-wrap items-center gap-2">
-                      <select
+                      <SearchableList
                         value={scoutForm.currency}
-                        onChange={(e) => setScoutForm({ ...scoutForm, currency: e.target.value })}
-                        className="px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      >
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                      </select>
+                        onChange={(v) => setScoutForm({ ...scoutForm, currency: v })}
+                        options={[
+                          { value: 'USD', label: 'USD' },
+                          { value: 'EUR', label: 'EUR' },
+                          { value: 'GBP', label: 'GBP' },
+                        ]}
+                        placeholder="Currency"
+                        className="min-w-[7rem] border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                      />
                       <input
                         type="number"
                         value={scoutForm.salaryMin}
@@ -986,31 +1011,35 @@ export default function ViewProfessionals() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type *</label>
-                      <select
+                      <SearchableList
                         value={hireForm.employmentType}
-                        onChange={(e) => setHireForm({ ...hireForm, employmentType: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      >
-                        <option value="">Select employment type</option>
-                        <option value="full_time">Full Time</option>
-                        <option value="part_time">Part Time</option>
-                        <option value="contract">Contract</option>
-                        <option value="internship">Internship</option>
-                      </select>
+                        onChange={(v) => setHireForm({ ...hireForm, employmentType: v })}
+                        options={[
+                          { value: '', label: 'Select employment type' },
+                          { value: 'full_time', label: 'Full Time' },
+                          { value: 'part_time', label: 'Part Time' },
+                          { value: 'contract', label: 'Contract' },
+                          { value: 'internship', label: 'Internship' },
+                        ]}
+                        placeholder="Select employment type"
+                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode *</label>
-                      <select
+                      <SearchableList
                         value={hireForm.workMode}
-                        onChange={(e) => setHireForm({ ...hireForm, workMode: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      >
-                        <option value="">Select work mode</option>
-                        <option value="remote">Remote</option>
-                        <option value="hybrid">Hybrid</option>
-                        <option value="on_site">On-site</option>
-                        <option value="global_remote">Global Remote</option>
-                      </select>
+                        onChange={(v) => setHireForm({ ...hireForm, workMode: v })}
+                        options={[
+                          { value: '', label: 'Select work mode' },
+                          { value: 'remote', label: 'Remote' },
+                          { value: 'hybrid', label: 'Hybrid' },
+                          { value: 'on_site', label: 'On-site' },
+                          { value: 'global_remote', label: 'Global Remote' },
+                        ]}
+                        placeholder="Select work mode"
+                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                      />
                     </div>
                   </div>
                   <div>
@@ -1095,14 +1124,25 @@ export default function ViewProfessionals() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Message *</label>
-                    <textarea
-                      rows={5}
-                      required
-                      value={messageForm.message}
-                      onChange={(e) => setMessageForm({ ...messageForm, message: e.target.value })}
-                      placeholder="Your message..."
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    />
+                    <div className="rounded-lg border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-teal-500 [&_.ql-toolbar]:border-0 [&_.ql-toolbar]:bg-gray-50 [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[140px] [&_.ql-editor.ql-blank::before]:text-gray-400">
+                      <ReactQuill
+                        theme="snow"
+                        value={messageForm.message}
+                        onChange={(html) => setMessageForm({ ...messageForm, message: html })}
+                        placeholder="Your message..."
+                        modules={{
+                          toolbar: [
+                            [{ header: [1, 2, 3, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ list: 'ordered' }, { list: 'bullet' }],
+                            [{ indent: '-1' }, { indent: '+1' }],
+                            ['blockquote'],
+                            ['link'],
+                            ['clean'],
+                          ],
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6">
@@ -1114,7 +1154,7 @@ export default function ViewProfessionals() {
                   </button>
                   <button
                     onClick={handleMessageSubmit}
-                    disabled={!messageForm.message.trim()}
+                    disabled={isRichTextEmpty(messageForm.message)}
                     className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
                   >
                     Send Message

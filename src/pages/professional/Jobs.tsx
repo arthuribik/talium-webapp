@@ -16,6 +16,7 @@ import {
   HiStar
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+import { SearchableList } from '@/components/common/SearchableList';
 
 interface Job {
   id: string;
@@ -381,21 +382,13 @@ export default function Jobs() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                      <div className="relative">
-                        <select
-                          value={filters.country}
-                          onChange={(e) => setFilters({ ...filters, country: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
-                        >
-                          <option value="">All Countries</option>
-                          {COUNTRIES.map((country) => (
-                            <option key={country} value={country}>
-                              {country}
-                            </option>
-                          ))}
-                        </select>
-                        <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-                      </div>
+                      <SearchableList
+                        value={filters.country}
+                        onChange={(country) => setFilters({ ...filters, country })}
+                        options={[{ value: '', label: 'All Countries' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                        placeholder="All Countries"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
@@ -409,37 +402,28 @@ export default function Jobs() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Organisation</label>
-                      <div className="relative">
-                        <select
-                          value={filters.organisation}
-                          onChange={(e) => setFilters({ ...filters, organisation: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
-                        >
-                          <option value="">All Organisations</option>
-                          {uniqueOrganisations.map((org) => (
-                            <option key={org} value={org}>
-                              {org}
-                            </option>
-                          ))}
-                        </select>
-                        <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-                      </div>
+                      <SearchableList
+                        value={filters.organisation}
+                        onChange={(organisation) => setFilters({ ...filters, organisation })}
+                        options={[{ value: '', label: 'All Organisations' }, ...uniqueOrganisations.map((org) => ({ value: org, label: org }))]}
+                        placeholder="All Organisations"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode</label>
-                      <div className="relative">
-                        <select
-                          value={filters.workMode}
-                          onChange={(e) => setFilters({ ...filters, workMode: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 appearance-none bg-white"
-                        >
-                          <option value="">All Work Modes</option>
-                          <option value="remote">Remote</option>
-                          <option value="onsite">Onsite</option>
-                          <option value="hybrid">Hybrid</option>
-                        </select>
-                        <HiChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-                      </div>
+                      <SearchableList
+                        value={filters.workMode}
+                        onChange={(workMode) => setFilters({ ...filters, workMode })}
+                        options={[
+                          { value: '', label: 'All Work Modes' },
+                          { value: 'remote', label: 'Remote' },
+                          { value: 'onsite', label: 'Onsite' },
+                          { value: 'hybrid', label: 'Hybrid' },
+                        ]}
+                        placeholder="All Work Modes"
+                        className="focus:ring-2 focus:ring-brand-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>

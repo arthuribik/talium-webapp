@@ -47,14 +47,75 @@ const getToken = () => {
 };
 
 // Helper function to get refresh token from localStorage
-// Reserved for future token refresh implementation
-// @ts-ignore - Intentionally unused, reserved for future token refresh
-const getRefreshToken = () => {
+const getRefreshToken = (): string | null => {
   try {
     return localStorage.getItem('refreshToken');
   } catch (error) {
     console.error('Error reading refreshToken from localStorage:', error);
     return null;
+  }
+};
+
+// Decode JWT payload without verification (client-side expiry check only)
+const isTokenExpired = (token: string): boolean => {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const exp = payload.exp as number | undefined;
+    if (!exp) return true;
+    return Date.now() >= exp * 1000;
+  } catch {
+    return true;
+  }
+};
+
+let refreshPromise: Promise<string | null> | null = null;
+
+const doRefresh = (): Promise<string | null> => {
+  if (refreshPromise) return refreshPromise;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken?.trim()) {
+    return Promise.resolve(null);
+  }
+  refreshPromise = axios
+    .post(getApiBaseURL() + '/v1/auth/refresh', { refreshToken }, { headers: { 'Content-Type': 'application/json' } })
+    .then((res) => {
+      refreshPromise = null;
+      const data = res.data;
+      if (data?.token) {
+        try {
+          localStorage.setItem('token', data.token);
+          if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+          if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
+          api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+          return data.token;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    })
+    .catch(() => {
+      refreshPromise = null;
+      return null;
+    });
+  return refreshPromise;
+};
+
+const clearAuthAndLogout = (isAdminRoute: boolean) => {
+  try {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+  } catch (e) {
+    console.error('Error clearing localStorage:', e);
+  }
+  delete api.defaults.headers.common['Authorization'];
+  const stillOnProtectedRoute =
+    window.location.pathname.startsWith('/admin') ||
+    window.location.pathname.startsWith('/organization') ||
+    window.location.pathname.startsWith('/professional');
+  if (stillOnProtectedRoute) {
+    window.location.href = isAdminRoute ? '/admin/login' : '/login';
   }
 };
 
@@ -94,58 +155,62 @@ const isPublicEndpoint = (url: string | undefined, method?: string): boolean => 
   return publicGetEndpoints.some(endpoint => url.includes(endpoint));
 };
 
-// Request interceptor to add token to every request (except public endpoints)
+// Refresh endpoint must not send Bearer token (uses body refreshToken only)
+const isRefreshEndpoint = (url: string | undefined): boolean => {
+  return !!url && url.includes('/v1/auth/refresh');
+};
+
+// Request interceptor: add token; if token expired, refresh first or log out
 api.interceptors.request.use(
-  (config) => {
-    // Ensure headers object exists
+  async (config) => {
     if (!config.headers) {
       config.headers = {} as any;
     }
-    
-    // Skip adding auth header for public GET endpoints only
-    if (isPublicEndpoint(config.url, config.method)) {
-      // Remove authorization header for public endpoints
+
+    if (isRefreshEndpoint(config.url)) {
       delete config.headers['Authorization'];
       delete (config.headers as any).Authorization;
-      
+      return config;
+    }
+
+    if (isPublicEndpoint(config.url, config.method)) {
+      delete config.headers['Authorization'];
+      delete (config.headers as any).Authorization;
       if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
         console.log(`[API] Public endpoint - skipping auth for ${config.method?.toUpperCase()} ${config.url}`);
       }
       return config;
     }
-    
-    // Get token from localStorage on every request to ensure it's up to date
-    const token = getToken();
-    
-    if (token && token.trim()) {
-      // Set Authorization header - ensure it's always set correctly
+
+    let token = getToken();
+    if (token?.trim() && isTokenExpired(token)) {
+      const newToken = await doRefresh();
+      if (!newToken) {
+        clearAuthAndLogout(window.location.pathname.startsWith('/admin'));
+        return Promise.reject(new Error('Session expired'));
+      }
+      token = newToken;
+    }
+
+    if (token?.trim()) {
       const authValue = `Bearer ${token.trim()}`;
       config.headers['Authorization'] = authValue;
-      // Also set it directly on the headers object
       (config.headers as any).Authorization = authValue;
-      // Also ensure it's set in defaults for consistency
       api.defaults.headers.common['Authorization'] = authValue;
-      
-      // Debug in development
       if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
         console.log(`[API] Adding token to ${config.method?.toUpperCase()} ${config.url}`);
       }
     } else {
-      // Remove authorization header if no token
       delete config.headers['Authorization'];
       delete (config.headers as any).Authorization;
       delete api.defaults.headers.common['Authorization'];
-      
       if ((import.meta as any).env?.DEV || (import.meta as any).env?.MODE === 'development') {
-        console.warn(`[API] No token found for ${config.method?.toUpperCase()} ${config.url}`);
+        console.warn(`[API] No token for ${config.method?.toUpperCase()} ${config.url}`);
       }
     }
-    
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Response interceptor to handle 401 errors
@@ -173,7 +238,6 @@ if (typeof window !== 'undefined') {
 
 api.interceptors.response.use(
   (response) => {
-    // Clear any pending redirect on successful response
     if (redirectTimeout) {
       clearTimeout(redirectTimeout);
       redirectTimeout = null;
@@ -181,87 +245,51 @@ api.interceptors.response.use(
     redirectInProgress = false;
     return response;
   },
-  (error) => {
-    // Only handle 401 Unauthorized errors
+  async (error) => {
+    const originalRequest = error.config;
+
     if (error.response?.status === 401) {
-      const requestUrl = error.config?.url || '';
-      
-      // Skip redirect for public GET endpoints - they don't require auth
-      if (isPublicEndpoint(requestUrl, error.config?.method)) {
+      const requestUrl = originalRequest?.url || '';
+      if (isPublicEndpoint(requestUrl, originalRequest?.method)) {
         return Promise.reject(error);
       }
-      
+
       const currentPath = window.location.pathname;
       const isAdminRoute = currentPath.startsWith('/admin');
       const now = Date.now();
       const timeSinceInit = now - initializationTime;
       const timeSinceLogin = now - lastLoginTime;
-      
-      // NEVER redirect during initial app load (first 3 seconds)
-      // This prevents redirects before route guards can check auth
+
       if (!appInitialized || timeSinceInit < 3000) {
         return Promise.reject(error);
       }
-      
-      // NEVER redirect within 5 seconds after login
-      // This prevents redirects immediately after successful login
       if (timeSinceLogin > 0 && timeSinceLogin < 5000) {
-        console.log('[API] Ignoring 401 - too soon after login');
         return Promise.reject(error);
       }
-      
-      // Skip redirect if already on login pages or home
       if (currentPath === '/login' || currentPath === '/admin/login' || currentPath === '/') {
         return Promise.reject(error);
       }
-      
-      // Prevent multiple redirects within 5 seconds
-      if (redirectInProgress || (now - last401Time < 5000)) {
+
+      const refreshToken = getRefreshToken();
+
+      // Try refresh once per failed request (avoid retry loop)
+      if (refreshToken?.trim() && originalRequest && !originalRequest._retry) {
+        originalRequest._retry = true;
+        const newToken = await doRefresh();
+        if (newToken) {
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+          (originalRequest.headers as any).Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        }
+      }
+
+      // No refresh token, refresh failed, or already retried: log out immediately
+      if (redirectInProgress || (now - last401Time < 2000)) {
         return Promise.reject(error);
       }
-      
-      const token = getToken();
-      
-      // Only redirect if we have a token (meaning it was sent but rejected)
-      // AND the request was NOT made during initial load or right after login
-      // This indicates the token is invalid/expired, not just missing
-      if (token && token.trim() && appInitialized && timeSinceInit > 3000 && timeSinceLogin > 5000) {
-        // Cancel any pending redirect
-        if (redirectTimeout) {
-          clearTimeout(redirectTimeout);
-        }
-        
-        redirectInProgress = true;
-        last401Time = now;
-        
-        // Clear auth data on unauthorized
-        try {
-          localStorage.removeItem('token');
-          localStorage.removeItem('refreshToken');
-          localStorage.removeItem('user');
-        } catch (e) {
-          console.error('Error clearing localStorage:', e);
-        }
-        delete api.defaults.headers.common['Authorization'];
-        
-        // Use a delay to avoid redirect loops and allow other requests to complete
-        redirectTimeout = setTimeout(() => {
-          redirectInProgress = false;
-          redirectTimeout = null;
-          // Only redirect if we're still on a protected route
-          const stillOnProtectedRoute = window.location.pathname.startsWith('/admin') || 
-                                        window.location.pathname.startsWith('/organization') ||
-                                        window.location.pathname.startsWith('/professional');
-          if (stillOnProtectedRoute) {
-            if (isAdminRoute) {
-              window.location.href = '/admin/login';
-            } else {
-            window.location.href = '/login';
-            }
-          }
-        }, 1000);
-      }
-      // If no token, just reject - let the route guard handle it
+      redirectInProgress = true;
+      last401Time = now;
+      clearAuthAndLogout(isAdminRoute);
     }
     return Promise.reject(error);
   }

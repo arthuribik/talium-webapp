@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
+import { SearchableList } from '@/components/common/SearchableList';
 
 export default function OrganisationSetup() {
   const { user } = useAppSelector((state) => state.auth);
@@ -81,17 +82,17 @@ export default function OrganisationSetup() {
         <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Incorporation Status</label>
-            <select
-              name="incorporationStatus"
-              required
+            <SearchableList
               value={formData.incorporationStatus}
-              onChange={handleChange}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
-            >
-              <option value="">Select Status</option>
-              <option value="registered">Registered</option>
-              <option value="not_registered">Not Registered</option>
-            </select>
+              onChange={(incorporationStatus) => setFormData({ ...formData, incorporationStatus })}
+              options={[
+                { value: '', label: 'Select Status' },
+                { value: 'registered', label: 'Registered' },
+                { value: 'not_registered', label: 'Not Registered' },
+              ]}
+              placeholder="Select Status"
+              className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"
+            />
           </div>
 
           <div>

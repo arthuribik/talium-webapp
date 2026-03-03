@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '@/services/api';
 import LandingLayout from '@/components/landing/LandingLayout';
 import { HiBriefcase, HiLocationMarker, HiSearch } from 'react-icons/hi';
+import { SearchableList } from '@/components/common/SearchableList';
 
 interface Job {
   id: string;
@@ -147,17 +148,19 @@ export default function JobsLanding() {
                 />
               </div>
               <div className="flex-1">
-                <select
+                <SearchableList
                   value={remoteFilter}
-                  onChange={(e) => setRemoteFilter(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  <option value="all">All</option>
-                  <option value="remote">Remote</option>
-                  <option value="hybrid">Hybrid</option>
-                  <option value="on_site">On Site</option>
-                  <option value="global_remote">Global Remote</option>
-                </select>
+                  onChange={setRemoteFilter}
+                  options={[
+                    { value: 'all', label: 'All' },
+                    { value: 'remote', label: 'Remote' },
+                    { value: 'hybrid', label: 'Hybrid' },
+                    { value: 'on_site', label: 'On Site' },
+                    { value: 'global_remote', label: 'Global Remote' },
+                  ]}
+                  placeholder="Work mode"
+                  className="w-full focus:ring-2 focus:ring-brand-500"
+                />
               </div>
               <button
                 type="submit"

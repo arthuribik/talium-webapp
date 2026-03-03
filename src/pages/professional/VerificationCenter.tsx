@@ -20,6 +20,7 @@ import {
   HiPencil,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+import { SearchableList } from '@/components/common/SearchableList';
 
 type SectionKey = 'personal' | 'location' | 'education' | 'social' | 'work' | 'certification' | 'family';
 
@@ -42,6 +43,32 @@ const LOCATION_DOCUMENT_TYPE_OPTIONS = [
   { value: 'lease_agreement', label: 'Lease agreement' },
   { value: 'government_letter', label: 'Government letter' },
   { value: 'other', label: 'Other' },
+];
+
+const INDUSTRY_OPTIONS = [
+  'Information Technology',
+  'Financial Services',
+  'Healthcare',
+  'Education',
+  'Manufacturing',
+  'Retail',
+  'Consulting',
+  'Government',
+  'Non-profit',
+  'Media & Entertainment',
+  'Telecommunications',
+  'Energy & Utilities',
+  'Real Estate',
+  'Legal',
+  'Agriculture',
+  'Transportation & Logistics',
+  'Hospitality',
+  'Construction',
+  'Pharmaceuticals',
+  'Insurance',
+  'E-commerce',
+  'Marketing & Advertising',
+  'Other',
 ];
 
 type LocationEntry = {
@@ -83,6 +110,41 @@ const emptyEducation = (): EducationEntry => ({
   costOfEducation: '',
   currency: 'USD',
   country: '',
+});
+
+type WorkEntry = {
+  id?: string;
+  organisationName: string;
+  industry: string;
+  role: string;
+  employmentType: string;
+  workMode: string;
+  startDate: string;
+  endDate: string;
+  currency: string;
+  salary: string;
+  otherCompensation: string[];
+  otherCompensationInput: string;
+  selfDeclared: boolean;
+  verifyWebsite: string;
+  verifyHrEmail: string;
+};
+
+const emptyWork = (): WorkEntry => ({
+  organisationName: '',
+  industry: '',
+  role: '',
+  employmentType: '',
+  workMode: '',
+  startDate: '',
+  endDate: '',
+  currency: 'USD',
+  salary: '',
+  otherCompensation: [],
+  otherCompensationInput: '',
+  selfDeclared: false,
+  verifyWebsite: '',
+  verifyHrEmail: '',
 });
 
 const EDUCATION_LEVELS = [
@@ -160,7 +222,7 @@ export default function VerificationCenter() {
   const activeTab: SectionKey = isSectionKey(tabParam) ? tabParam : 'personal';
   const [saving, setSaving] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
-  const [pendingSaveAction, setPendingSaveAction] = useState<'personal' | 'location' | 'social' | 'education' | 'work' | 'save_all' | null>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<'personal' | 'location' | 'social' | 'education' | 'work' | 'certification' | 'family' | 'save_all' | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordVerifying, setPasswordVerifying] = useState(false);
 
@@ -202,34 +264,12 @@ export default function VerificationCenter() {
     tiktok: '',
     snapchat: '',
   });
-  const [linkedInOtp, setLinkedInOtp] = useState('');
-  const [sendingOtp, setSendingOtp] = useState(false);
-
   // Education (list of entries like Location)
   const [educationEntriesList, setEducationEntriesList] = useState<EducationEntry[]>([emptyEducation()]);
   const [educationSaving, setEducationSaving] = useState(false);
 
-  // Work
-  const [workList, setWorkList] = useState<any[]>([]);
-  const [showWorkForm, setShowWorkForm] = useState(false);
-  const [workForm, setWorkForm] = useState({
-    organisationName: '',
-    industry: '',
-    role: '',
-    employmentType: '',
-    workMode: '',
-    startDate: '',
-    endDate: '',
-    duration: '',
-    currency: 'USD',
-    salary: '',
-    otherCompensation: [] as string[],
-    otherCompensationInput: '',
-    selfDeclared: false,
-    verifyWebsite: '',
-    verifyHrEmail: '',
-  });
-  const [editingWorkId, setEditingWorkId] = useState<string | null>(null);
+  // Work (list of entries like Location)
+  const [workEntriesList, setWorkEntriesList] = useState<WorkEntry[]>([emptyWork()]);
   const [workSaving, setWorkSaving] = useState(false);
 
   // Certification (local only for now)
@@ -286,6 +326,8 @@ export default function VerificationCenter() {
         const addressData = data.address && typeof data.address === 'object' ? data.address : {};
         setPersonal((p) => ({
           ...p,
+          middleName: data.middleName ?? p.middleName ?? '',
+          gender: data.gender ?? p.gender ?? '',
           nationality: data.nationality || '',
           country: data.country || '',
           dateOfBirth: data.dateOfBirth
@@ -349,7 +391,64 @@ export default function VerificationCenter() {
         } else {
           setEducationEntriesList([emptyEducation()]);
         }
-        setWorkList(data.workExperience || []);
+        const workList = data.workExperience || [];
+        if (Array.isArray(workList) && workList.length > 0) {
+          setWorkEntriesList(
+            workList.map((w: any) => {
+              const vc = w.verificationContact && typeof w.verificationContact === 'object' ? w.verificationContact : {};
+              const sr = w.salaryRange && typeof w.salaryRange === 'object' ? w.salaryRange : null;
+              return {
+                id: w.id,
+                organisationName: w.organisationName || '',
+                industry: w.industry || '',
+                role: w.role || '',
+                employmentType: w.employmentType || '',
+                workMode: w.workMode || '',
+                startDate: w.startDate ? (typeof w.startDate === 'string' ? w.startDate.slice(0, 10) : '') : '',
+                endDate: w.endDate ? (typeof w.endDate === 'string' ? w.endDate.slice(0, 10) : '') : '',
+                currency: w.currency || 'USD',
+                salary: sr != null && (sr.min != null || sr.max != null) ? String(sr.min ?? sr.max ?? '') : '',
+                otherCompensation: Array.isArray(w.achievements) ? w.achievements : [],
+                otherCompensationInput: '',
+                selfDeclared: !vc.email && !vc.website,
+                verifyWebsite: vc.website || '',
+                verifyHrEmail: vc.email || '',
+              };
+            }),
+          );
+        } else {
+          setWorkEntriesList([emptyWork()]);
+        }
+        if (Array.isArray(data.certifications)) {
+          if (data.certifications.length > 0) {
+            setCertList(
+              data.certifications.map((c: any) => ({
+                name: c.name || '',
+                issuedBy: c.issuedBy || '',
+                issuedDate: c.issuedDate || '',
+                expirationDate: c.expirationDate || '',
+                credentialId: c.credentialId || '',
+                reportingUrl: c.reportingUrl || '',
+                supportingMediaUrl: c.supportingMediaUrl || '',
+              })),
+            );
+          } else {
+            setCertList([emptyCertificate()]);
+          }
+        }
+        if (data.familyInfo && typeof data.familyInfo === 'object') {
+          const fi = data.familyInfo as any;
+          setMaritalStatus(fi.maritalStatus || '');
+          setSpouseName(fi.spouseName || '');
+          if (Array.isArray(fi.relations) && fi.relations.length > 0) {
+            setRelationsList(
+              fi.relations.map((r: any) => ({
+                relationType: r.relationType || '',
+                fullName: r.fullName || '',
+              })),
+            );
+          }
+        }
       }
     } catch (err) {
       console.error(err);
@@ -377,10 +476,14 @@ export default function VerificationCenter() {
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
+        firstName: personal.firstName?.trim() || undefined,
+        lastName: personal.lastName?.trim() || undefined,
+        middleName: personal.middleName?.trim() || undefined,
+        gender: personal.gender || undefined,
         dateOfBirth: personal.dateOfBirth || undefined,
         nationality: personal.nationality || undefined,
         idType: personal.idType || undefined,
-        idNumber: personal.idNumber || undefined,
+        idNumber: personal.idNumber?.trim() || undefined,
         idDocumentUrl: personal.idDocumentUrl || undefined,
       });
       toast.success('Personal information saved');
@@ -468,6 +571,18 @@ export default function VerificationCenter() {
     setEducationEntriesList((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
 
+  const updateWorkEntry = (index: number, updates: Partial<WorkEntry>) => {
+    setWorkEntriesList((prev) =>
+      prev.map((entry, i) => (i === index ? { ...entry, ...updates } : entry)),
+    );
+  };
+  const addWorkEntry = () => {
+    setWorkEntriesList((prev) => [...prev, emptyWork()]);
+  };
+  const removeWorkEntry = (index: number) => {
+    setWorkEntriesList((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+  };
+
   const removeLocation = (index: number) => {
     setLocationsList((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
@@ -520,19 +635,6 @@ export default function VerificationCenter() {
     }
   };
 
-  const handleSendOtp = async () => {
-    setSendingOtp(true);
-    try {
-      // Placeholder – no backend OTP for LinkedIn yet
-      await new Promise((r) => setTimeout(r, 800));
-      toast.success('OTP sent to your LinkedIn email (demo)');
-    } catch {
-      toast.error('Failed to send OTP');
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
   const handleSaveEducation = async () => {
     if (!profile?.id) return;
     setEducationSaving(true);
@@ -567,53 +669,44 @@ export default function VerificationCenter() {
     }
   };
 
-  const handleWorkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const buildWorkPayload = (entry: WorkEntry) => ({
+    organisationName: entry.organisationName,
+    industry: entry.industry,
+    role: entry.role,
+    employmentType: (entry.employmentType || 'full_time') as any,
+    workMode: (entry.workMode || 'on_site') as any,
+    startDate: entry.startDate || new Date().toISOString().split('T')[0],
+    endDate: entry.endDate || undefined,
+    currentlyWorking: !entry.endDate,
+    location: { city: '', state: '', country: '' },
+    responsibilities: [],
+    achievements: entry.otherCompensation?.length ? [...entry.otherCompensation] : [],
+    salaryRange: entry.salary ? { min: parseFloat(entry.salary) || 0, max: parseFloat(entry.salary) || 0 } : undefined,
+    currency: entry.currency,
+    ...(entry.selfDeclared
+      ? {}
+      : {
+          verificationContact: {
+            email: entry.verifyHrEmail?.trim() || undefined,
+            website: entry.verifyWebsite?.trim() || undefined,
+          },
+        }),
+  });
+
+  const handleSaveWork = async () => {
     if (!profile?.id) return;
     setWorkSaving(true);
     try {
-      const payload = {
-        organisationName: workForm.organisationName,
-        industry: workForm.industry,
-        role: workForm.role,
-        employmentType: (workForm.employmentType || 'full_time') as any,
-        workMode: (workForm.workMode || 'on_site') as any,
-        startDate: workForm.startDate || new Date().toISOString().split('T')[0],
-        endDate: workForm.endDate || undefined,
-        currentlyWorking: !workForm.endDate,
-        location: { city: '', state: '', country: '' },
-        responsibilities: [],
-        achievements: [],
-        salaryRange: workForm.salary ? { min: parseFloat(workForm.salary) || 0, max: parseFloat(workForm.salary) || 0 } : undefined,
-        currency: workForm.currency,
-      };
-      if (editingWorkId) {
-        await api.put(`/v1/professional/experience/${editingWorkId}`, payload);
-        toast.success('Work experience updated');
-      } else {
-        await api.post(`/v1/professional/${profile.id}/experience`, payload);
-        toast.success('Work experience added');
+      for (const entry of workEntriesList) {
+        const payload = buildWorkPayload(entry);
+        if (entry.id) {
+          await api.put(`/v1/professional/experience/${entry.id}`, payload);
+        } else {
+          await api.post(`/v1/professional/${profile.id}/experience`, payload);
+        }
       }
-      setShowWorkForm(false);
-      setEditingWorkId(null);
+      toast.success('Work experience saved');
       setSectionEditMode((prev) => ({ ...prev, work: false }));
-      setWorkForm({
-        organisationName: '',
-        industry: '',
-        role: '',
-        employmentType: '',
-        workMode: '',
-        startDate: '',
-        endDate: '',
-        duration: '',
-        currency: 'USD',
-        salary: '',
-        otherCompensation: [] as string[],
-        otherCompensationInput: '',
-        selfDeclared: false,
-        verifyWebsite: '',
-        verifyHrEmail: '',
-      });
       fetchProfile();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save work experience');
@@ -673,6 +766,50 @@ export default function VerificationCenter() {
     toast.success('Certification verification will be available soon');
   };
 
+  const handleSaveCertification = async () => {
+    setSaving(true);
+    try {
+      await api.put('/v1/professional/profile', {
+        certifications: certList.map((c) => ({
+          name: c.name,
+          issuedBy: c.issuedBy,
+          issuedDate: c.issuedDate || undefined,
+          expirationDate: c.expirationDate || undefined,
+          credentialId: c.credentialId,
+          reportingUrl: c.reportingUrl || undefined,
+          supportingMediaUrl: c.supportingMediaUrl || undefined,
+        })),
+      });
+      toast.success('Certifications saved');
+      fetchProfile();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save certifications');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveFamily = async () => {
+    setSaving(true);
+    try {
+      await api.put('/v1/professional/profile', {
+        familyInfo: {
+          maritalStatus: maritalStatus || undefined,
+          spouseName: maritalStatus === 'married' ? spouseName || undefined : undefined,
+          relations: relationsList
+            .filter((r) => r.relationType?.trim() || r.fullName?.trim())
+            .map((r) => ({ relationType: r.relationType, fullName: r.fullName })),
+        },
+      });
+      toast.success('Family information saved');
+      fetchProfile();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save family information');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const updateFamilyRelation = (index: number, updates: Partial<FamilyRelationEntry>) => {
     setRelationsList((prev) =>
       prev.map((r, i) => (i === index ? { ...r, ...updates } : r)),
@@ -687,7 +824,7 @@ export default function VerificationCenter() {
     setRelationsList((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
 
-  const openPasswordModal = (action: 'personal' | 'location' | 'social' | 'education' | 'work' | 'save_all') => {
+  const openPasswordModal = (action: 'personal' | 'location' | 'social' | 'education' | 'work' | 'certification' | 'family' | 'save_all') => {
     setPendingSaveAction(action);
     setPasswordInput('');
     setPasswordModalOpen(true);
@@ -713,7 +850,9 @@ export default function VerificationCenter() {
       else if (action === 'location') handleSaveLocation();
       else if (action === 'social') handleSaveSocial();
       else if (action === 'education') handleSaveEducation();
-      else if (action === 'work') handleWorkSubmit({ preventDefault: () => {} } as React.FormEvent);
+      else if (action === 'work') handleSaveWork();
+      else if (action === 'certification') handleSaveCertification();
+      else if (action === 'family') handleSaveFamily();
       else if (action === 'save_all') {
         handleSavePersonal();
         handleSaveSocial();
@@ -798,34 +937,32 @@ export default function VerificationCenter() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           {activeTab === 'personal' && (
               <div className="space-y-4">
-                {verificationStatus.personal.verified ? (
-                  <div className="rounded-lg bg-green-50 border border-green-200 p-4">
-                    <p className="font-medium text-green-800 flex items-center gap-2">
-                      <HiCheckCircle className="w-5 h-5 flex-shrink-0" />
-                      Status: Verified
-                    </p>
-                    <p className="text-sm text-green-700 mt-1">Your personal information has been verified.</p>
-                  </div>
-                ) : (
-                  <>
-                    {verificationStatus.personal.completed && !verificationStatus.personal.verified && (
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                          Pending verification
-                        </span>
-                        {!isSectionEditable('personal') && (
-                          <button
-                            type="button"
-                            onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                          >
-                            <HiPencil className="w-4 h-4" />
-                            Edit
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.personal.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.personal.completed ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                      Pending verification
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.personal.completed && !verificationStatus.personal.verified && !isSectionEditable('personal') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="md:col-span-2">
                         <div className="flex items-center gap-2 py-2">
                           <span className="text-gray-900 text-medium">{personal.email || '—'}</span>
@@ -886,48 +1023,36 @@ export default function VerificationCenter() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Gender <span className="text-red-500">*</span></label>
-                        <select
+                        <SearchableList
                           value={personal.gender}
-                          onChange={(e) => setPersonal((p) => ({ ...p, gender: e.target.value }))}
+                          onChange={(gender) => setPersonal((p) => ({ ...p, gender }))}
+                          options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
+                          placeholder="Select"
                           disabled={!isSectionEditable('personal')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          required
-                        >
-                          <option value="">Select</option>
-                          {GENDERS.map((g) => (
-                            <option key={g} value={g}>{g}</option>
-                          ))}
-                        </select>
+                          className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                        />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Nationality <span className="text-red-500">*</span></label>
-                        <select
+                        <SearchableList
                           value={personal.nationality}
-                          onChange={(e) => setPersonal((p) => ({ ...p, nationality: e.target.value }))}
+                          onChange={(nationality) => setPersonal((p) => ({ ...p, nationality }))}
+                          options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                          placeholder="Select country"
                           disabled={!isSectionEditable('personal')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          required
-                        >
-                          <option value="">Select country</option>
-                          {COUNTRIES.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
+                          className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                        />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">ID Type <span className="text-red-500">*</span></label>
-                        <select
+                        <SearchableList
                           value={personal.idType}
-                          onChange={(e) => setPersonal((p) => ({ ...p, idType: e.target.value }))}
+                          onChange={(idType) => setPersonal((p) => ({ ...p, idType }))}
+                          options={[{ value: '', label: 'Select' }, ...ID_TYPE_OPTIONS]}
+                          placeholder="Select"
                           disabled={!isSectionEditable('personal')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          required
-                        >
-                          <option value="">Select</option>
-                          {ID_TYPE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
+                          className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                        />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Passport / ID No <span className="text-red-500">*</span></label>
@@ -977,30 +1102,36 @@ export default function VerificationCenter() {
                         {saving ? 'Saving...' : 'Save'}
                       </button>
                     )}
-                  </>
-                )}
               </div>
             )}
 
           {activeTab === 'location' && (
               <div className="space-y-4">
-                {verificationStatus.location?.completed && !verificationStatus.location?.verified && (
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.location?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.location?.completed ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                       Pending verification
                     </span>
-                    {!isSectionEditable('location') && (
-                      <button
-                        type="button"
-                        onClick={() => setSectionEditMode((prev) => ({ ...prev, location: true }))}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                      >
-                        <HiPencil className="w-4 h-4" />
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                )}
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.location?.completed && !verificationStatus.location?.verified && !isSectionEditable('location') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, location: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-6">
                   {locationsList.map((loc, index) => (
                     <div key={index} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-4">
@@ -1020,17 +1151,14 @@ export default function VerificationCenter() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Country of residence</label>
-                          <select
+                          <SearchableList
                             value={loc.country}
-                            onChange={(e) => updateLocation(index, { country: e.target.value })}
+                            onChange={(country) => updateLocation(index, { country })}
+                            options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                            placeholder="Select country"
                             disabled={!isSectionEditable('location')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select country</option>
-                            {COUNTRIES.map((c) => (
-                              <option key={c} value={c}>{c}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
@@ -1070,17 +1198,14 @@ export default function VerificationCenter() {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-                          <select
+                          <SearchableList
                             value={loc.documentType}
-                            onChange={(e) => updateLocation(index, { documentType: e.target.value })}
+                            onChange={(documentType) => updateLocation(index, { documentType })}
+                            options={[{ value: '', label: 'Select' }, ...LOCATION_DOCUMENT_TYPE_OPTIONS]}
+                            placeholder="Select"
                             disabled={!isSectionEditable('location')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select</option>
-                            {LOCATION_DOCUMENT_TYPE_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-1">Upload document</label>
@@ -1127,23 +1252,31 @@ export default function VerificationCenter() {
 
           {activeTab === 'education' && (
               <div className="space-y-4">
-                {verificationStatus.education?.completed && !verificationStatus.education?.verified && (
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.education?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.education?.completed ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                       Pending verification
                     </span>
-                    {!isSectionEditable('education') && (
-                      <button
-                        type="button"
-                        onClick={() => setSectionEditMode((prev) => ({ ...prev, education: true }))}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                      >
-                        <HiPencil className="w-4 h-4" />
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                )}
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.education?.completed && !verificationStatus.education?.verified && !isSectionEditable('education') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, education: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-6">
                   {educationEntriesList.map((entry, index) => (
                     <div key={entry.id ?? index} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-4">
@@ -1163,31 +1296,25 @@ export default function VerificationCenter() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Level of education</label>
-                          <select
+                          <SearchableList
                             value={entry.levelOfEducation}
-                            onChange={(e) => updateEducationEntry(index, { levelOfEducation: e.target.value })}
+                            onChange={(levelOfEducation) => updateEducationEntry(index, { levelOfEducation })}
+                            options={[{ value: '', label: 'Select' }, ...EDUCATION_LEVELS]}
+                            placeholder="Select"
                             disabled={!isSectionEditable('education')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select</option>
-                            {EDUCATION_LEVELS.map((l) => (
-                              <option key={l.value} value={l.value}>{l.label}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Undergraduate / Postgraduate</label>
-                          <select
+                          <SearchableList
                             value={entry.programLevel}
-                            onChange={(e) => updateEducationEntry(index, { programLevel: e.target.value })}
+                            onChange={(programLevel) => updateEducationEntry(index, { programLevel })}
+                            options={[{ value: '', label: 'Select' }, ...EDUCATION_PROGRAM_LEVEL_OPTIONS]}
+                            placeholder="Select"
                             disabled={!isSectionEditable('education')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select</option>
-                            {EDUCATION_PROGRAM_LEVEL_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Degree type</label>
@@ -1215,46 +1342,42 @@ export default function VerificationCenter() {
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
-                          <select
+                          <SearchableList
                             value={entry.duration}
-                            onChange={(e) => updateEducationEntry(index, { duration: e.target.value })}
+                            onChange={(duration) => updateEducationEntry(index, { duration })}
+                            options={[{ value: '', label: 'Select' }, ...DURATION_OPTIONS.map((d) => ({ value: d, label: d }))]}
+                            placeholder="Select"
                             disabled={!isSectionEditable('education')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select</option>
-                            {DURATION_OPTIONS.map((d) => (
-                              <option key={d} value={d}>{d}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                          <select
+                          <SearchableList
                             value={entry.country}
-                            onChange={(e) => updateEducationEntry(index, { country: e.target.value })}
+                            onChange={(country) => updateEducationEntry(index, { country })}
+                            options={[{ value: '', label: 'Select' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                            placeholder="Select"
                             disabled={!isSectionEditable('education')}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="">Select</option>
-                            {COUNTRIES.map((c) => (
-                              <option key={c} value={c}>{c}</option>
-                            ))}
-                          </select>
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Cost of education</label>
                           <div className="flex gap-2">
-                            <select
+                            <SearchableList
                               value={entry.currency}
-                              onChange={(e) => updateEducationEntry(index, { currency: e.target.value })}
+                              onChange={(currency) => updateEducationEntry(index, { currency })}
+                              options={[
+                                { value: 'USD', label: 'USD' },
+                                { value: 'NGN', label: 'NGN' },
+                                { value: 'EUR', label: 'EUR' },
+                                { value: 'GBP', label: 'GBP' },
+                              ]}
+                              placeholder="Currency"
                               disabled={!isSectionEditable('education')}
-                              className="w-24 px-2 py-2 border border-gray-300 rounded-lg disabled:bg-gray-50 disabled:cursor-not-allowed"
-                            >
-                              <option value="USD">USD</option>
-                              <option value="NGN">NGN</option>
-                              <option value="EUR">EUR</option>
-                              <option value="GBP">GBP</option>
-                            </select>
+                              className="w-24 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                            />
                             <input
                               type="text"
                               value={entry.costOfEducation}
@@ -1295,283 +1418,309 @@ export default function VerificationCenter() {
 
           {activeTab === 'work' && (
               <div className="space-y-4">
-                {verificationStatus.work?.completed && !verificationStatus.work?.verified && (
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.work?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.work?.completed ? (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                       Pending verification
                     </span>
-                    {!isSectionEditable('work') && (
-                      <button
-                        type="button"
-                        onClick={() => setSectionEditMode((prev) => ({ ...prev, work: true }))}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                      >
-                        <HiPencil className="w-4 h-4" />
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                )}
-                {showWorkForm ? (
-                  <form onSubmit={(e) => { e.preventDefault(); openPasswordModal('work'); }} className="p-4 bg-gray-50 rounded-lg space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-semibold text-gray-900">{editingWorkId ? 'Edit' : 'Add'} work experience</h4>
-                      {isSectionEditable('work') && (
-                        <button type="button" onClick={() => { setShowWorkForm(false); setEditingWorkId(null); }}>
-                          <HiX className="w-5 h-5 text-gray-500" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Name of organisation</label>
-                        <input
-                          type="text"
-                          value={workForm.organisationName}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, organisationName: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          placeholder="e.g. Youverify Ltd"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Industry / Sector</label>
-                        <input
-                          type="text"
-                          value={workForm.industry}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, industry: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          placeholder="e.g. Information Technology"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Role / Position</label>
-                        <input
-                          type="text"
-                          value={workForm.role}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, role: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          placeholder="e.g. Senior Product Manager"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Employment type</label>
-                        <select
-                          value={workForm.employmentType}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, employmentType: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                        >
-                          <option value="">Select</option>
-                          <option value="full_time">Full-time</option>
-                          <option value="part_time">Part-time</option>
-                          <option value="contract">Contract</option>
-                          <option value="internship">Internship</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Work mode</label>
-                        <select
-                          value={workForm.workMode}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, workMode: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                        >
-                          <option value="">Select</option>
-                          <option value="on_site">On-site</option>
-                          <option value="remote">Remote</option>
-                          <option value="hybrid">Hybrid</option>
-                          <option value="global_remote">Global Remote</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Start date</label>
-                        <input
-                          type="date"
-                          value={workForm.startDate}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, startDate: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">End date</label>
-                        <input
-                          type="date"
-                          value={workForm.endDate}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, endDate: e.target.value }))}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Salary</label>
-                        <div className="flex gap-2">
-                          <select
-                            value={workForm.currency}
-                            onChange={(e) => setWorkForm((f) => ({ ...f, currency: e.target.value }))}
-                            disabled={!isSectionEditable('work')}
-                            className="w-20 px-2 py-2 border border-gray-300 rounded-lg disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          >
-                            <option value="USD">USD</option>
-                            <option value="NGN">NGN</option>
-                          </select>
-                          <input
-                            type="text"
-                            value={workForm.salary}
-                            onChange={(e) => setWorkForm((f) => ({ ...f, salary: e.target.value }))}
-                            disabled={!isSectionEditable('work')}
-                            readOnly={!isSectionEditable('work')}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                            placeholder="Salary (Yr/Mo)"
-                          />
-                        </div>
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Other compensation</label>
-                        <input
-                          type="text"
-                          value={workForm.otherCompensationInput}
-                          onChange={(e) => setWorkForm((f) => ({ ...f, otherCompensationInput: e.target.value }))}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const value = workForm.otherCompensationInput.trim();
-                              if (value) {
-                                setWorkForm((f) => ({
-                                  ...f,
-                                  otherCompensation: [...f.otherCompensation, value],
-                                  otherCompensationInput: '',
-                                }));
-                              }
-                            }
-                          }}
-                          disabled={!isSectionEditable('work')}
-                          readOnly={!isSectionEditable('work')}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                          placeholder="Type and press Enter to add (e.g. Stock, HMD)"
-                        />
-                        {workForm.otherCompensation.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {workForm.otherCompensation.map((chip, i) => (
-                              <span
-                                key={`${chip}-${i}`}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm bg-brand-100 text-brand-800"
-                              >
-                                {chip}
-                                {isSectionEditable('work') && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setWorkForm((f) => ({
-                                        ...f,
-                                        otherCompensation: f.otherCompensation.filter((_, j) => j !== i),
-                                      }))
-                                    }
-                                    className="hover:bg-brand-200 rounded-full p-0.5"
-                                    aria-label="Remove"
-                                  >
-                                    <HiX className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={workForm.selfDeclared}
-                            onChange={(e) => setWorkForm((f) => ({ ...f, selfDeclared: e.target.checked }))}
-                            disabled={!isSectionEditable('work')}
-                            className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                          />
-                          <span className="text-sm font-medium text-gray-700">Self declared</span>
-                        </label>
-                      </div>
-                      {!workForm.selfDeclared && (
-                        <>
-                          <div className="md:col-span-2">
-                            <p className="text-sm font-medium text-gray-700 mb-2">Verify information</p>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
-                            <input
-                              type="url"
-                              value={workForm.verifyWebsite}
-                              onChange={(e) => setWorkForm((f) => ({ ...f, verifyWebsite: e.target.value }))}
-                              disabled={!isSectionEditable('work')}
-                              readOnly={!isSectionEditable('work')}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                              placeholder="e.g. https://company.com"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">HR email</label>
-                            <input
-                              type="email"
-                              value={workForm.verifyHrEmail}
-                              onChange={(e) => setWorkForm((f) => ({ ...f, verifyHrEmail: e.target.value }))}
-                              disabled={!isSectionEditable('work')}
-                              readOnly={!isSectionEditable('work')}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
-                              placeholder="e.g. hr@company.com"
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    {isSectionEditable('work') && (
-                      <button
-                        type="button"
-                        onClick={() => openPasswordModal('work')}
-                        disabled={workSaving}
-                        className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
-                      >
-                        <HiSave className="w-4 h-4" />
-                        {workSaving ? 'Saving...' : 'Save'}
-                      </button>
-                    )}
-                  </form>
-                ) : (
-                  <>
-                    {workList.length > 0 && (
-                      <ul className="space-y-2">
-                        {workList.map((w: any) => (
-                          <li key={w.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                            <span className="font-medium text-gray-900">{w.organisationName} – {w.role}</span>
-                            <span className="text-xs text-gray-500">{w.verificationStatus === 'verified' ? 'Verified' : 'Pending'}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.work?.completed && !verificationStatus.work?.verified && !isSectionEditable('work') && (
                     <button
                       type="button"
-                      onClick={() => setShowWorkForm(true)}
-                      disabled={!isSectionEditable('work')}
-                      className="flex items-center gap-2 text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, work: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
                     >
-                      <HiPlus className="w-4 h-4" />
-                      Add work experience
+                      <HiPencil className="w-4 h-4" />
+                      Edit
                     </button>
-                  </>
+                  )}
+                </div>
+                <div className="space-y-6">
+                  {workEntriesList.map((entry, index) => (
+                    <div key={entry.id ?? index} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">Work experience {index + 1}</span>
+                        {workEntriesList.length > 1 && isSectionEditable('work') && (
+                          <button
+                            type="button"
+                            onClick={() => removeWorkEntry(index)}
+                            className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1"
+                          >
+                            <HiX className="w-4 h-4" />
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Name of organisation</label>
+                          <input
+                            type="text"
+                            value={entry.organisationName}
+                            onChange={(e) => updateWorkEntry(index, { organisationName: e.target.value })}
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                            placeholder="e.g. Youverify Ltd"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Industry / Sector</label>
+                          <SearchableList
+                            value={entry.industry}
+                            onChange={(industry) => updateWorkEntry(index, { industry })}
+                            options={INDUSTRY_OPTIONS}
+                            placeholder="Search or select industry"
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Role / Position</label>
+                          <input
+                            type="text"
+                            value={entry.role}
+                            onChange={(e) => updateWorkEntry(index, { role: e.target.value })}
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                            placeholder="e.g. Senior Product Manager"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Employment type</label>
+                          <SearchableList
+                            value={entry.employmentType}
+                            onChange={(employmentType) => updateWorkEntry(index, { employmentType })}
+                            options={[
+                              { value: '', label: 'Select' },
+                              { value: 'full_time', label: 'Full-time' },
+                              { value: 'part_time', label: 'Part-time' },
+                              { value: 'contract', label: 'Contract' },
+                              { value: 'internship', label: 'Internship' },
+                            ]}
+                            placeholder="Select"
+                            disabled={!isSectionEditable('work')}
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Work mode</label>
+                          <SearchableList
+                            value={entry.workMode}
+                            onChange={(workMode) => updateWorkEntry(index, { workMode })}
+                            options={[
+                              { value: '', label: 'Select' },
+                              { value: 'on_site', label: 'On-site' },
+                              { value: 'remote', label: 'Remote' },
+                              { value: 'hybrid', label: 'Hybrid' },
+                              { value: 'global_remote', label: 'Global Remote' },
+                            ]}
+                            placeholder="Select"
+                            disabled={!isSectionEditable('work')}
+                            className="disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Start date</label>
+                          <input
+                            type="date"
+                            value={entry.startDate}
+                            onChange={(e) => updateWorkEntry(index, { startDate: e.target.value })}
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">End date</label>
+                          <input
+                            type="date"
+                            value={entry.endDate}
+                            onChange={(e) => updateWorkEntry(index, { endDate: e.target.value })}
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Salary</label>
+                          <div className="flex gap-2">
+                            <SearchableList
+                              value={entry.currency}
+                              onChange={(currency) => updateWorkEntry(index, { currency })}
+                              options={[{ value: 'USD', label: 'USD' }, { value: 'NGN', label: 'NGN' }]}
+                              placeholder="Currency"
+                              disabled={!isSectionEditable('work')}
+                              className="w-20 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                            />
+                            <input
+                              type="text"
+                              value={entry.salary}
+                              onChange={(e) => updateWorkEntry(index, { salary: e.target.value })}
+                              disabled={!isSectionEditable('work')}
+                              readOnly={!isSectionEditable('work')}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                              placeholder="Salary (Yr/Mo)"
+                            />
+                          </div>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Other compensation</label>
+                          <input
+                            type="text"
+                            value={entry.otherCompensationInput}
+                            onChange={(e) => updateWorkEntry(index, { otherCompensationInput: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const value = entry.otherCompensationInput.trim();
+                                if (value) {
+                                  updateWorkEntry(index, {
+                                    otherCompensation: [...entry.otherCompensation, value],
+                                    otherCompensationInput: '',
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={!isSectionEditable('work')}
+                            readOnly={!isSectionEditable('work')}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                            placeholder="Type and press Enter to add (e.g. Stock, HMD)"
+                          />
+                          {entry.otherCompensation.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {entry.otherCompensation.map((chip, i) => (
+                                <span
+                                  key={`${chip}-${i}`}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm bg-brand-100 text-brand-800"
+                                >
+                                  {chip}
+                                  {isSectionEditable('work') && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updateWorkEntry(index, {
+                                          otherCompensation: entry.otherCompensation.filter((_, j) => j !== i),
+                                        })
+                                      }
+                                      className="hover:bg-brand-200 rounded-full p-0.5"
+                                      aria-label="Remove"
+                                    >
+                                      <HiX className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={entry.selfDeclared}
+                              onChange={(e) => updateWorkEntry(index, { selfDeclared: e.target.checked })}
+                              disabled={!isSectionEditable('work')}
+                              className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                            />
+                            <span className="text-sm font-medium text-gray-700">Self declared</span>
+                          </label>
+                        </div>
+                        {!entry.selfDeclared && (
+                          <>
+                            <div className="md:col-span-2">
+                              <p className="text-sm font-medium text-gray-700 mb-2">Verify information</p>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Website</label>
+                              <input
+                                type="url"
+                                value={entry.verifyWebsite}
+                                onChange={(e) => updateWorkEntry(index, { verifyWebsite: e.target.value })}
+                                disabled={!isSectionEditable('work')}
+                                readOnly={!isSectionEditable('work')}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                                placeholder="e.g. https://company.com"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">HR email</label>
+                              <input
+                                type="email"
+                                value={entry.verifyHrEmail}
+                                onChange={(e) => updateWorkEntry(index, { verifyHrEmail: e.target.value })}
+                                disabled={!isSectionEditable('work')}
+                                readOnly={!isSectionEditable('work')}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                                placeholder="e.g. hr@company.com"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addWorkEntry}
+                    disabled={!isSectionEditable('work')}
+                    className="flex items-center gap-2 text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <HiPlus className="w-4 h-4" />
+                    Add more
+                  </button>
+                </div>
+                {isSectionEditable('work') && (
+                  <button
+                    type="button"
+                    onClick={() => openPasswordModal('work')}
+                    disabled={workSaving}
+                    className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
+                  >
+                    <HiSave className="w-4 h-4" />
+                    {workSaving ? 'Saving...' : 'Save'}
+                  </button>
                 )}
               </div>
             )}
 
           {activeTab === 'certification' && (
               <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.certification?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.certification?.completed ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                      Pending verification
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.certification?.completed && !verificationStatus.certification?.verified && !isSectionEditable('certification') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, certification: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-6">
                   {certList.map((cert, index) => (
                     <div key={index} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-4">
@@ -1675,32 +1824,65 @@ export default function VerificationCenter() {
                     Add certificate
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleVerifyCertification}
-                  className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
-                >
-                  <HiShieldCheck className="w-4 h-4" />
-                  Verify
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openPasswordModal('certification')}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
+                  >
+                    <HiSave className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleVerifyCertification}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                    <HiShieldCheck className="w-4 h-4" />
+                    Verify
+                  </button>
+                </div>
               </div>
             )}
 
           {activeTab === 'family' && (
               <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.family?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.family?.completed ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                      Pending verification
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.family?.completed && !verificationStatus.family?.verified && !isSectionEditable('family') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, family: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Marital status</label>
-                    <select
+                    <SearchableList
                       value={maritalStatus}
-                      onChange={(e) => setMaritalStatus(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    >
-                      <option value="">Select</option>
-                      {MARITAL_STATUS_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
+                      onChange={setMaritalStatus}
+                      options={[{ value: '', label: 'Select' }, ...MARITAL_STATUS_OPTIONS]}
+                      placeholder="Select"
+                      className=""
+                    />
                   </div>
                   {maritalStatus === 'married' && (
                     <div>
@@ -1721,16 +1903,13 @@ export default function VerificationCenter() {
                     <div key={index} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 flex flex-wrap items-end gap-4">
                       <div className="flex-1 min-w-[120px]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Relation</label>
-                        <select
+                        <SearchableList
                           value={rel.relationType}
-                          onChange={(e) => updateFamilyRelation(index, { relationType: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"
-                        >
-                          <option value="">Select</option>
-                          {RELATION_TYPE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
+                          onChange={(relationType) => updateFamilyRelation(index, { relationType })}
+                          options={[{ value: '', label: 'Select' }, ...RELATION_TYPE_OPTIONS]}
+                          placeholder="Select"
+                          className=""
+                        />
                       </div>
                       <div className="flex-1 min-w-[160px]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Full name</label>
@@ -1763,55 +1942,9 @@ export default function VerificationCenter() {
                     Add more
                   </button>
                 </div>
-              </div>
-            )}
-
-          {activeTab === 'social' && (
-              <div className="space-y-4">
-                {[
-                  { key: 'linkedin' as const, label: 'LinkedIn', hasOtp: true },
-                  { key: 'twitter' as const, label: 'X (Twitter)' },
-                  { key: 'facebook' as const, label: 'Facebook' },
-                  { key: 'instagram' as const, label: 'Instagram' },
-                  { key: 'tiktok' as const, label: 'TikTok' },
-                  { key: 'snapchat' as const, label: 'Snapchat' },
-                ].map(({ key, label, hasOtp }) => (
-                  <div key={key} className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                    <span className="w-28 font-medium text-gray-700">{label}</span>
-                    <input
-                      type="url"
-                      value={social[key]}
-                      onChange={(e) => setSocial((s) => ({ ...s, [key]: e.target.value }))}
-                      placeholder={`${label} URL`}
-                      className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"
-                    />
-                    {hasOtp && (
-                      <>
-                        <input
-                          type="text"
-                          value={linkedInOtp}
-                          onChange={(e) => setLinkedInOtp(e.target.value)}
-                          placeholder="OTP code"
-                          className="w-28 px-3 py-2 border border-gray-300 rounded-lg"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSendOtp}
-                          disabled={sendingOtp}
-                          className="px-3 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 text-sm disabled:opacity-50"
-                        >
-                          {sendingOtp ? 'Sending...' : 'Send OTP'}
-                        </button>
-                      </>
-                    )}
-                    <span className="text-sm text-gray-500">
-                      {social[key] ? 'Linked' : 'Not linked'}
-                    </span>
-                  </div>
-                ))}
                 <button
                   type="button"
-                  onClick={() => openPasswordModal('social')}
+                  onClick={() => openPasswordModal('family')}
                   disabled={saving}
                   className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                 >
@@ -1820,9 +1953,78 @@ export default function VerificationCenter() {
                 </button>
               </div>
             )}
+
+          {activeTab === 'social' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {verificationStatus.social?.verified ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Verified
+                    </span>
+                  ) : verificationStatus.social?.completed ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                      Pending verification
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Not completed
+                    </span>
+                  )}
+                  {verificationStatus.social?.completed && !verificationStatus.social?.verified && !isSectionEditable('social') && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionEditMode((prev) => ({ ...prev, social: true }))}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
+                    >
+                      <HiPencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { key: 'linkedin' as const, label: 'LinkedIn' },
+                    { key: 'twitter' as const, label: 'X (Twitter)' },
+                    { key: 'facebook' as const, label: 'Facebook' },
+                    { key: 'instagram' as const, label: 'Instagram' },
+                    { key: 'tiktok' as const, label: 'TikTok' },
+                    { key: 'snapchat' as const, label: 'Snapchat' },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="p-4 rounded-lg border border-gray-200 bg-gray-50/50 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-sm font-medium text-gray-700">{label}</label>
+                        <span className="text-xs text-gray-500">{social[key] ? 'Linked' : 'Not linked'}</span>
+                      </div>
+                      <input
+                        type="url"
+                        value={social[key]}
+                        onChange={(e) => setSocial((s) => ({ ...s, [key]: e.target.value }))}
+                        disabled={!isSectionEditable('social')}
+                        readOnly={!isSectionEditable('social')}
+                        placeholder={`${label} URL`}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {isSectionEditable('social') && (
+                  <button
+                    type="button"
+                    onClick={() => openPasswordModal('social')}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
+                  >
+                    <HiSave className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                )}
+              </div>
+            )}
         </div>
 
-        <div className="mt-8 flex justify-end">
+        {/* <div className="mt-8 flex justify-end">
           <button
             type="button"
             onClick={() => openPasswordModal('save_all')}
@@ -1832,7 +2034,7 @@ export default function VerificationCenter() {
             <HiSave className="w-5 h-5" />
             Save all
           </button>
-        </div>
+        </div> */}
       </div>
 
       {/* Password verification modal */}
