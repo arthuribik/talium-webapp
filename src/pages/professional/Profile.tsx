@@ -9,17 +9,18 @@ import {
   HiLocationMarker, 
   HiAcademicCap, 
   HiBriefcase,
+  HiBadgeCheck,
   HiCalendar,
-  HiGlobe
 } from 'react-icons/hi';
-import { COUNTRIES } from '@/utils/countries';
-
 export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [editing, setEditing] = useState(false);
+  const [editingAbout, setEditingAbout] = useState(false);
+  const [savingAbout, setSavingAbout] = useState(false);
   const [formData, setFormData] = useState({
+    profession: '',
     description: '',
     country: '',
     nationality: '',
@@ -48,6 +49,7 @@ export default function Profile() {
       
       // Populate form with data from verification module
       setFormData({
+        profession: data.profession || '',
         description: data.description || '',
         country: data.country || '',
         nationality: data.nationality || '',
@@ -66,6 +68,23 @@ export default function Profile() {
       toast.error('Failed to load profile');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveAbout = async () => {
+    setSavingAbout(true);
+    try {
+      await api.put('/v1/professional/profile', {
+        profession: formData.profession,
+        description: formData.description,
+      });
+      toast.success('About updated');
+      setEditingAbout(false);
+      await fetchProfile();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update summary');
+    } finally {
+      setSavingAbout(false);
     }
   };
 
@@ -152,7 +171,7 @@ export default function Profile() {
               Your profile information (80% from Verification Center)
             </p>
           </div>
-          {!editing && (
+          {/* {!editing && (
             <button
               onClick={() => setEditing(true)}
               className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
@@ -160,7 +179,7 @@ export default function Profile() {
               <HiPencil className="w-4 h-4" />
               Edit Profile
             </button>
-          )}
+          )} */}
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
@@ -174,16 +193,18 @@ export default function Profile() {
               </div>
               <div className="flex-1">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">{fullName}</h2>
-                <p className="text-gray-600 mb-4">{profile.user?.email}</p>
+                <p className="text-gray-600 mb-4">
+                  {profile.workExperience?.[0]?.role || 'Professional'}
+                </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  {profile.user?.id && (
+                  {/* {profile.user?.id && (
                     <div className="flex items-center text-gray-600">
                       <HiUser className="w-5 h-5 mr-2 text-gray-400" />
                       <span className="text-sm">
                         <span className="font-medium">User ID:</span> {profile.user.id}
                       </span>
                     </div>
-                  )}
+                  )} */}
                   {profile.user?.createdAt && (
                     <div className="flex items-center text-gray-600">
                       <HiCalendar className="w-5 h-5 mr-2 text-gray-400" />
@@ -205,19 +226,114 @@ export default function Profile() {
                       <span>{location}</span>
                     </div>
                   )}
-                  {profile.nationality && (
+                  {/* {profile.nationality && (
                     <div className="flex items-center text-gray-600">
                       <HiGlobe className="w-5 h-5 mr-2 text-gray-400" />
                       <span>Nationality: {profile.nationality}</span>
                     </div>
-                  )}
+                  )} */}
                 </div>
+                {(profile.socialMedia && Object.keys(profile.socialMedia).length > 0) && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-gray-100">
+                    {Object.entries(profile.socialMedia).map(([key, value]) => {
+                      const url = typeof value === 'string' ? value.trim() : '';
+                      if (!url) return null;
+                      const label = key === 'github' ? 'GitHub' : key.charAt(0).toUpperCase() + key.slice(1);
+                      return (
+                        <a
+                          key={key}
+                          href={url.startsWith('http') ? url : `https://${url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-brand-600 hover:text-brand-700 hover:underline"
+                        >
+                          {label}
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Personal Information Section */}
+          {/* About Section - Professional summary (bio) */}
           <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">About</h3>
+              {!editingAbout ? (
+                <button
+                  type="button"
+                  onClick={() => setEditingAbout(true)}
+                  className="p-2 text-gray-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                  aria-label="Edit professional summary"
+                >
+                  <HiPencil className="w-5 h-5" />
+                </button>
+              ) : null}
+            </div>
+            {editingAbout ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Profession</label>
+                  <input
+                    type="text"
+                    value={formData.profession}
+                    onChange={(e) => setFormData({ ...formData, profession: e.target.value })}
+                    placeholder="e.g. Senior Software Engineer"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Professional summary</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={6}
+                    placeholder="Tell us about yourself..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData((f) => ({
+                      ...f,
+                      profession: profile?.profession ?? '',
+                      description: profile?.description ?? '',
+                    }));
+                      setEditingAbout(false);
+                    }}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveAbout}
+                    disabled={savingAbout}
+                    className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+                  >
+                    <HiSave className="w-4 h-4" />
+                    {savingAbout ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {profile.profession && (
+                  <p className="text-gray-600 font-medium">{profile.profession}</p>
+                )}
+                <p className="text-gray-700 whitespace-pre-line">
+                  {profile.description || 'No description provided.'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Personal Information Section */}
+          {/* <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -248,7 +364,7 @@ export default function Profile() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
                     <option value="">Select Nationality</option>
-                    {COUNTRIES.map((country) => (
+                    {countryOptions.map((country) => (
                       <option key={country} value={country}>
                         {country}
                       </option>
@@ -271,7 +387,7 @@ export default function Profile() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                   >
                     <option value="">Select Country</option>
-                    {COUNTRIES.map((country) => (
+                    {countryOptions.map((country) => (
                       <option key={country} value={country}>
                         {country}
                       </option>
@@ -308,7 +424,7 @@ export default function Profile() {
                 )}
               </div>
             </div>
-          </div>
+          </div> */}
 
           {/* Educational Information (from Verification) */}
           <div className="bg-white rounded-xl shadow-sm p-6">
@@ -390,52 +506,45 @@ export default function Profile() {
             )}
           </div>
 
-          {/* About Section */}
+          {/* Certifications (from Verification) */}
           <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">About</h3>
-            {editing ? (
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={6}
-                placeholder="Tell us about yourself..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            ) : (
-              <p className="text-gray-700 whitespace-pre-line">
-                {profile.description || 'No description provided.'}
-              </p>
-            )}
-          </div>
-
-          {/* Social Media */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Social Media</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(formData.socialMedia).map(([key, value]) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 capitalize">
-                    {key === 'github' ? 'GitHub' : key}
-                  </label>
-                  {editing ? (
-                    <input
-                      type="url"
-                      value={value}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, [key]: e.target.value }
-                      })}
-                      placeholder={`https://${key}.com/username`}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                  ) : (
-                    <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                      {value || 'Not set'}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <HiBadgeCheck className="w-5 h-5 mr-2 text-brand-600" />
+                Certifications (from Verification)
+              </h3>
+              <button
+                type="button"
+                onClick={() => window.location.href = '/professional/verification?tab=certification'}
+                className="text-sm text-brand-600 hover:text-brand-700"
+              >
+                Manage in Verification Center
+              </button>
             </div>
+            {profile.certifications && profile.certifications.length > 0 ? (
+              <div className="space-y-4">
+                {profile.certifications.map((cert: any) => (
+                  <div key={cert.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900">{cert.name}</h4>
+                        {cert.issuedBy && (
+                          <p className="text-sm text-gray-600">{cert.issuedBy}</p>
+                        )}
+                        {(cert.issuedDate || cert.credentialId) && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {cert.issuedDate && new Date(cert.issuedDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                            {cert.credentialId && (cert.issuedDate ? ` • ${cert.credentialId}` : cert.credentialId)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No certifications. Add in Verification Center.</p>
+            )}
           </div>
 
           {/* Action Buttons */}
