@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import {
@@ -101,7 +103,109 @@ interface SearchFilters {
   minExperience: string;
 }
 
+const SCOUT_PARAM_KEYS = [
+  'jobTitle', 'searchType', 'location', 'domicile', 'workMode', 'employmentType',
+  'currency', 'salaryMin', 'salaryMax', 'salaryPeriod', 'benefits',
+] as const;
+
+export type ScoutCriteria = {
+  jobTitle: string;
+  searchType: 'strict' | 'fuzzy';
+  location: string;
+  domicile: string;
+  workMode: string;
+  employmentType: string;
+  currency: string;
+  salaryMin: string;
+  salaryMax: string;
+  salaryPeriod?: 'weekly' | 'monthly' | 'annually';
+  benefits: string[];
+  description: string;
+};
+
+export type ScoutListEntry = {
+  id: string;
+  name: string;
+  createdAt: number;
+  peopleFound?: number;
+  criteria: ScoutCriteria;
+};
+
+export type ScoutResponseEntry = {
+  professionalId: string;
+  name: string;
+  profession: string;
+  status: 'interested' | 'not_interested' | 'pending';
+  respondedAt?: string;
+};
+
+const SCOUT_LISTS_STORAGE_KEY = 'taldium_org_scout_lists';
+
+const WORK_MODE_LABELS: Record<string, string> = {
+  remote: 'Remote',
+  hybrid: 'Hybrid',
+  on_site: 'On-site',
+  local_remote: 'Local Remote',
+  global_remote: 'Global Remote',
+  '': '—',
+};
+
+const SALARY_PERIOD_LABELS: Record<string, string> = {
+  weekly: 'Weekly',
+  monthly: 'Monthly',
+  annually: 'Annually',
+};
+
+function scoutFormFromSearchParams(searchParams: URLSearchParams) {
+  const get = (k: string) => searchParams.get(k) ?? '';
+  const benefitsParam = get('benefits').trim();
+  return {
+    jobTitle: get('jobTitle'),
+    searchType: (searchParams.get('searchType') === 'fuzzy' ? 'fuzzy' : 'strict') as 'strict' | 'fuzzy',
+    location: get('location') || 'Global',
+    domicile: get('domicile'),
+    workMode: get('workMode'),
+    employmentType: get('employmentType'),
+    currency: get('currency') || 'USD',
+    salaryMin: get('salaryMin'),
+    salaryMax: get('salaryMax'),
+    salaryPeriod: (get('salaryPeriod') === 'weekly' || get('salaryPeriod') === 'monthly' ? get('salaryPeriod') : 'annually') as 'weekly' | 'monthly' | 'annually',
+    benefits: benefitsParam ? benefitsParam.split(',').map((b) => b.trim()).filter(Boolean) : [] as string[],
+    benefitInput: '',
+    description: '',
+  };
+}
+
+function scoutFormToSearchParams(form: {
+  jobTitle: string;
+  searchType: string;
+  location: string;
+  domicile: string;
+  workMode: string;
+  employmentType: string;
+  currency: string;
+  salaryMin: string;
+  salaryMax: string;
+  salaryPeriod?: string;
+  benefits: string[];
+}) {
+  const params = new URLSearchParams();
+  if (form.jobTitle.trim()) params.set('jobTitle', form.jobTitle.trim());
+  if (form.searchType && form.searchType !== 'strict') params.set('searchType', form.searchType);
+  if (form.location && form.location !== 'Global') params.set('location', form.location);
+  if (form.domicile.trim()) params.set('domicile', form.domicile.trim());
+  if (form.workMode) params.set('workMode', form.workMode);
+  if (form.employmentType) params.set('employmentType', form.employmentType);
+  if (form.currency && form.currency !== 'USD') params.set('currency', form.currency);
+  if (form.salaryMin) params.set('salaryMin', form.salaryMin);
+  if (form.salaryMax) params.set('salaryMax', form.salaryMax);
+  if (form.salaryPeriod && form.salaryPeriod !== 'annually') params.set('salaryPeriod', form.salaryPeriod);
+  if (form.benefits.length) params.set('benefits', form.benefits.join(','));
+  return params;
+}
+
 export default function ViewProfessionals() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHireModal, setShowHireModal] = useState(false);
@@ -131,6 +235,28 @@ export default function ViewProfessionals() {
   const [totalPages, setTotalPages] = useState(1);
   const [showScoutModal, setShowScoutModal] = useState(false);
   const [scoutSearchActive, setScoutSearchActive] = useState(false);
+  const [professionalsTab, setProfessionalsTab] = useState<'all' | 'scouted'>('scouted');
+  const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem(SCOUT_LISTS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as ScoutListEntry[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeScoutId, setActiveScoutId] = useState<string | null>(null);
+  const [scoutViewTab, setScoutViewTab] = useState<'request' | 'response'>('request');
+  const [scoutResponses, setScoutResponses] = useState<ScoutResponseEntry[]>([]);
+  const [editingScoutId, setEditingScoutId] = useState<string | null>(null);
+  const [scoutActionMenuId, setScoutActionMenuId] = useState<string | null>(null);
+  const scoutActionMenuRef = useRef<HTMLDivElement>(null);
+  const [scoutMenuPosition, setScoutMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [profMenuPosition, setProfMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const scoutMenuPortalRef = useRef<HTMLDivElement>(null);
+  const profMenuPortalRef = useRef<HTMLDivElement>(null);
+  const scoutIdFromUserClickRef = useRef<string | null>(null);
   const [scoutForm, setScoutForm] = useState({
     jobTitle: '',
     searchType: 'strict' as 'strict' | 'fuzzy',
@@ -141,28 +267,168 @@ export default function ViewProfessionals() {
     currency: 'USD',
     salaryMin: '',
     salaryMax: '',
+    salaryPeriod: 'annually' as 'weekly' | 'monthly' | 'annually',
     benefits: [] as string[],
     benefitInput: '',
     description: '',
   });
+  const isFirstMount = useRef(true);
+
+  // Sync URL → scoutForm on mount and when user navigates back/forward
+  useEffect(() => {
+    const fromUrl = scoutFormFromSearchParams(searchParams);
+    setScoutForm((prev) => ({ ...prev, ...fromUrl, benefitInput: prev.benefitInput, description: prev.description }));
+  }, [searchParams]);
+
+  // Write tab + scout + view to URL when they change
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', professionalsTab);
+    if (activeScoutId) {
+      next.set('scout', activeScoutId);
+      next.set('view', scoutViewTab);
+    } else {
+      next.delete('scout');
+      next.delete('view');
+    }
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+  }, [professionalsTab, activeScoutId, scoutViewTab]);
+
+  // Write scoutForm to URL whenever it changes (merge with existing params)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    const next = scoutFormToSearchParams(scoutForm);
+    const existing = new URLSearchParams(searchParams);
+    SCOUT_PARAM_KEYS.forEach((k) => existing.delete(k));
+    next.forEach((value, key) => existing.set(key, value));
+    if (existing.toString() !== searchParams.toString()) {
+      setSearchParams(existing, { replace: true });
+    }
+  }, [scoutForm]);
   const [scoutSearchLoading, setScoutSearchLoading] = useState(false);
   const [profileDrawerId, setProfileDrawerId] = useState<string | null>(null);
   const [profileDetail, setProfileDetail] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
 
   useEffect(() => {
-    if (!scoutSearchActive) fetchProfessionals();
-  }, [filters, page, scoutSearchActive]);
+    if (professionalsTab === 'all' && !scoutSearchActive) fetchProfessionals();
+  }, [filters, page, scoutSearchActive, professionalsTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCOUT_LISTS_STORAGE_KEY, JSON.stringify(scoutLists));
+    } catch {
+      // ignore
+    }
+  }, [scoutLists]);
+
+  const runScoutSearchWithCriteria = useCallback(async (criteria: ScoutCriteria) => {
+    setLoading(true);
+    try {
+      const jobTitle = criteria.jobTitle.trim() || undefined;
+      const res = await api.post('/v1/organisation/professionals/scout-search', {
+        jobTitle,
+        searchType: criteria.searchType,
+        location: criteria.location || undefined,
+        domicile: criteria.domicile.trim() || undefined,
+        workMode: criteria.workMode || undefined,
+        employmentType: criteria.employmentType || undefined,
+        currency: criteria.currency || undefined,
+        salaryMin: criteria.salaryMin ? Number(criteria.salaryMin) : undefined,
+        salaryMax: criteria.salaryMax ? Number(criteria.salaryMax) : undefined,
+        benefits: criteria.benefits?.length ? criteria.benefits : undefined,
+        description: criteria.description?.trim() || undefined,
+      });
+      const data = res.data?.data;
+      setProfessionals(data?.professionals || []);
+      setTotalPages(data?.pagination?.totalPages || 1);
+      setPage(1);
+      setScoutSearchActive(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Scout search failed');
+      setProfessionals([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Read tab + scout + view from URL on mount and when URL changes (e.g. back/forward)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'scouted' || tab === 'all') setProfessionalsTab(tab);
+    const scoutId = searchParams.get('scout');
+    const view = searchParams.get('view');
+    if (view === 'request' || view === 'response') setScoutViewTab(view);
+    else if (scoutId) setScoutViewTab('request'); // default to Request when opening scout link without view=
+    if (scoutId) {
+      const entry = scoutLists.find((e) => e.id === scoutId);
+      if (entry) {
+        setActiveScoutId(scoutId);
+        // Skip running search if URL was just updated by our row click (avoid double run)
+        if (scoutIdFromUserClickRef.current !== scoutId) runScoutSearchWithCriteria(entry.criteria);
+        scoutIdFromUserClickRef.current = null;
+      } else setActiveScoutId(null);
+    } else setActiveScoutId(null);
+  }, [searchParams, scoutLists, runScoutSearchWithCriteria]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
-        setActionMenuId(null);
-      }
+      const target = e.target as Node;
+      const hitProfTrigger = actionMenuRef.current?.contains(target);
+      const hitProfMenu = profMenuPortalRef.current?.contains(target);
+      if (actionMenuId && !hitProfTrigger && !hitProfMenu) setActionMenuId(null);
+      const hitScoutTrigger = scoutActionMenuRef.current?.contains(target);
+      const hitScoutMenu = scoutMenuPortalRef.current?.contains(target);
+      if (scoutActionMenuId && !hitScoutTrigger && !hitScoutMenu) setScoutActionMenuId(null);
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [actionMenuId, scoutActionMenuId]);
+
+  // Position scout action dropdown above overflow (fixed, measured from trigger)
+  useEffect(() => {
+    if (!scoutActionMenuId) {
+      setScoutMenuPosition(null);
+      return;
+    }
+    const el = scoutActionMenuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const menuWidth = 192;
+    setScoutMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8),
+    });
+  }, [scoutActionMenuId]);
+
+  // Position professional action dropdown above overflow (fixed, measured from trigger)
+  useEffect(() => {
+    if (!actionMenuId) {
+      setProfMenuPosition(null);
+      return;
+    }
+    const el = actionMenuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const menuWidth = 192;
+    setProfMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8),
+    });
+  }, [actionMenuId]);
+
+  // When viewing a scout, load responses for Response tab (placeholder: empty; replace with API when ready)
+  useEffect(() => {
+    if (!activeScoutId) {
+      setScoutResponses([]);
+      return;
+    }
+    // TODO: api.get(`/v1/organisation/scouts/${activeScoutId}/responses`).then(r => setScoutResponses(r.data?.data ?? [])).catch(() => setScoutResponses([]));
+    setScoutResponses([]);
+  }, [activeScoutId]);
 
   const fetchProfessionals = async () => {
     setLoading(true);
@@ -245,10 +511,6 @@ export default function ViewProfessionals() {
     }).catch(() => setOrgProfile(null));
   };
 
-  const handleStartDirectScout = () => {
-    setShowScoutModal(true);
-  };
-
   const handleScoutSearchSubmit = async () => {
     const jobTitle = scoutForm.jobTitle.trim() || undefined;
     setScoutSearchLoading(true);
@@ -271,19 +533,53 @@ export default function ViewProfessionals() {
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
-      setShowScoutModal(false);
-      toast.success(`Found ${(data?.professionals || []).length} professional(s).`);
+      const criteria: ScoutCriteria = {
+        jobTitle: scoutForm.jobTitle,
+        searchType: scoutForm.searchType,
+        location: scoutForm.location,
+        domicile: scoutForm.domicile,
+        workMode: scoutForm.workMode,
+        employmentType: scoutForm.employmentType,
+        currency: scoutForm.currency,
+        salaryMin: scoutForm.salaryMin,
+        salaryMax: scoutForm.salaryMax,
+        salaryPeriod: scoutForm.salaryPeriod,
+        benefits: [...scoutForm.benefits],
+        description: scoutForm.description,
+      };
+      const name = [scoutForm.jobTitle || 'Scout', scoutForm.location || 'Global'].filter(Boolean).join(' · ') || 'Scout list';
+      const peopleFound = (data?.professionals || []).length;
+      if (editingScoutId) {
+        setScoutLists((prev) =>
+          prev.map((e) =>
+            e.id === editingScoutId
+              ? { ...e, name, peopleFound, criteria, createdAt: e.createdAt }
+              : e
+          )
+        );
+        setActiveScoutId(editingScoutId);
+        setEditingScoutId(null);
+        setShowScoutModal(false);
+        toast.success(`Scout list updated: ${peopleFound} professional(s) found.`);
+      } else {
+        const entry: ScoutListEntry = {
+          id: crypto.randomUUID(),
+          name,
+          createdAt: Date.now(),
+          peopleFound,
+          criteria,
+        };
+        setScoutLists((prev) => [entry, ...prev]);
+        setActiveScoutId(entry.id);
+        setProfessionalsTab('scouted');
+        setShowScoutModal(false);
+        toast.success(`Created scout list: ${peopleFound} professional(s) found.`);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Scout search failed');
     } finally {
       setScoutSearchLoading(false);
     }
-  };
-
-  const clearScoutSearch = () => {
-    setScoutSearchActive(false);
-    setPage(1);
-    fetchProfessionals();
   };
 
   const addBenefit = () => {
@@ -301,7 +597,9 @@ export default function ViewProfessionals() {
   };
 
   const handleHireSubmit = async () => {
-    if (!selectedProfessional) return;
+    const isBulk = selectedIds.size > 0 && !selectedProfessional;
+    const idsToSend = isBulk ? Array.from(selectedIds) : selectedProfessional ? [selectedProfessional.id] : [];
+    if (idsToSend.length === 0) return;
     if (!hireForm.jobTitle.trim()) {
       toast.error('Role title is required');
       return;
@@ -314,24 +612,43 @@ export default function ViewProfessionals() {
       toast.error('Work mode is required');
       return;
     }
+    const payload = {
+      jobTitle: hireForm.jobTitle.trim(),
+      employmentType: hireForm.employmentType,
+      workMode: hireForm.workMode,
+      location: hireForm.roleLocationOffice.trim() || undefined,
+      description: hireForm.description.trim() || undefined,
+    };
     try {
-      await api.post(`/v1/organisation/professionals/${selectedProfessional.id}/hire`, {
-        jobTitle: hireForm.jobTitle.trim(),
-        employmentType: hireForm.employmentType,
-        workMode: hireForm.workMode,
-        location: hireForm.roleLocationOffice.trim() || undefined,
-        description: hireForm.description.trim() || undefined,
-      });
-      toast.success('Scout request sent successfully!');
+      if (isBulk) {
+        let success = 0;
+        let failed = 0;
+        for (const id of idsToSend) {
+          try {
+            await api.post(`/v1/organisation/professionals/${id}/hire`, payload);
+            success++;
+          } catch {
+            failed++;
+          }
+        }
+        if (failed === 0) {
+          toast.success(`Scout request sent to ${success} professional${success === 1 ? '' : 's'}!`);
+        } else {
+          toast.success(`Sent to ${success}; ${failed} failed.`);
+        }
+        setSelectedIds(new Set());
+      } else {
+        await api.post(`/v1/organisation/professionals/${idsToSend[0]}/hire`, payload);
+        toast.success('Scout request sent successfully!');
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(idsToSend[0]);
+          return next;
+        });
+      }
       setShowHireModal(false);
       setSelectedProfessional(null);
       setHireForm({ jobTitle: '', employmentType: '', workMode: '', roleLocationOffice: '', description: '' });
-      setSelectedIds((prev) => {
-        if (!selectedProfessional) return prev;
-        const next = new Set(prev);
-        next.delete(selectedProfessional.id);
-        return next;
-      });
       fetchProfessionals();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to send scout request');
@@ -371,10 +688,10 @@ export default function ViewProfessionals() {
     const isVerified = statusText === 'Verified with Gov ID';
     const isPending = statusText === 'Pending';
     const bg = isVerified
-      ? 'bg-blue-800 text-white'
+      ? 'bg-brand-600 text-white'
       : isPending
         ? 'bg-gray-200 text-gray-700'
-        : 'bg-blue-100 text-blue-800';
+        : 'bg-brand-100 text-brand-700';
     return (
       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${bg}`}>
         {percentage}% - {statusText}
@@ -385,14 +702,15 @@ export default function ViewProfessionals() {
   return (
     <OrganisationLayout>
       <div className="p-6 max-w-6xl mx-auto">
-        {/* Header + Start Direct Scout */}
+        {/* Header + Tabs + Start Direct Scout */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Professionals</h1>
             <p className="text-gray-500 text-sm md:text-base mt-0.5">Browse and scout verified professionals on Trudium.</p>
           </div>
           <button
-            onClick={handleStartDirectScout}
+            type="button"
+            onClick={() => { setEditingScoutId(null); setShowScoutModal(true); }}
             className="flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium shrink-0"
           >
             <HiBriefcase className="w-5 h-5" />
@@ -400,30 +718,325 @@ export default function ViewProfessionals() {
           </button>
         </div>
 
-        {scoutSearchActive && (
-          <div className="mb-4 flex items-center justify-between rounded-lg bg-teal-50 border border-teal-200 px-4 py-2">
-            <span className="text-sm text-teal-800">Showing scout search results.</span>
-            <button onClick={clearScoutSearch} className="text-sm font-medium text-teal-700 hover:text-teal-900 underline">
-              Clear and show all
+        {/* Tabs: Scouted List | All Professionals */}
+        <div className="mb-4 border-b border-gray-200">
+          <nav className="flex gap-6" aria-label="Tabs">
+            <button
+              type="button"
+              onClick={() => {
+                setProfessionalsTab('scouted');
+                setActiveScoutId(null);
+              }}
+              className={`pb-3 px-0.5 text-sm font-medium border-b-2 transition-colors ${
+                professionalsTab === 'scouted'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Scouted List
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setProfessionalsTab('all');
+                setScoutSearchActive(false);
+                setActiveScoutId(null);
+                setPage(1);
+                fetchProfessionals();
+              }}
+              className={`pb-3 px-0.5 text-sm font-medium border-b-2 transition-colors ${
+                professionalsTab === 'all'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              All Professionals
+            </button>
+          </nav>
+        </div>
+
+        {/* All Professionals: search bar */}
+        {professionalsTab === 'all' && (
+          <div className="mb-4">
+            <div className="relative flex-1 min-w-[200px] max-w-xl">
+              <HiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by name, profession, location..."
+                value={filters.search}
+                onChange={(e) => handleFilterChange('search', e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Scouted List tab: list of saved scouts or back + table */}
+        {professionalsTab === 'scouted' && (
+          <>
+            {activeScoutId ? (
+              <div className="mb-4">
+                <div className="flex items-center justify-between gap-4 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setActiveScoutId(null)}
+                    className="text-sm font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                  >
+                    ← Back to scout lists
+                  </button>
+                  {scoutViewTab === 'request' && (
+                    <p className="text-sm text-gray-600">
+                      {loading ? 'Searching...' : `${professionals.length} professional${professionals.length === 1 ? '' : 's'} in this list`}
+                    </p>
+                  )}
+                  {scoutViewTab === 'response' && (
+                    <p className="text-sm text-gray-600">
+                      {scoutResponses.length} response{scoutResponses.length === 1 ? '' : 's'} from candidates
+                    </p>
+                  )}
+                </div>
+                <nav className="flex gap-6 border-b border-gray-200" aria-label="Scout view">
+                  <button
+                    type="button"
+                    onClick={() => setScoutViewTab('request')}
+                    className={`pb-3 px-0.5 text-sm font-medium border-b-2 transition-colors ${
+                      scoutViewTab === 'request'
+                        ? 'border-brand-500 text-brand-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Request
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScoutViewTab('response')}
+                    className={`pb-3 px-0.5 text-sm font-medium border-b-2 transition-colors ${
+                      scoutViewTab === 'response'
+                        ? 'border-brand-500 text-brand-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Response
+                  </button>
+                </nav>
+              </div>
+            ) : (
+              <div className="mb-4">
+                {scoutLists.length === 0 ? (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-8 text-center">
+                    <HiBriefcase className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-gray-600 font-medium">No scout lists yet</p>
+                    <p className="text-sm text-gray-500 mt-1">Create one with Start Direct Scout to save filtered lists here.</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowScoutModal(true)}
+                      className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
+                    >
+                      <HiBriefcase className="w-5 h-5" />
+                      Start Direct Scout
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Job Title</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Location</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Work Mode</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">People found</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Pay Range</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Created at</th>
+                            <th className="w-12 px-4 py-3"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {scoutLists.map((entry) => {
+                            const c = entry.criteria;
+                            const hasMin = c.salaryMin && !Number.isNaN(Number(c.salaryMin));
+                            const hasMax = c.salaryMax && !Number.isNaN(Number(c.salaryMax));
+                            const curr = c.currency || 'USD';
+                            const sym = curr === 'USD' ? '$' : curr === 'EUR' ? '€' : curr === 'GBP' ? '£' : curr + ' ';
+                            const fmt = (v: string) => sym + Number(v).toLocaleString();
+                            const period = c.salaryPeriod ?? 'annually';
+                            const periodLabel = SALARY_PERIOD_LABELS[period] ?? 'Annually';
+                            const payRange = hasMin && hasMax
+                              ? `${fmt(c.salaryMin)} - ${fmt(c.salaryMax)} / ${periodLabel}`
+                              : hasMin
+                                ? `${fmt(c.salaryMin)} / ${periodLabel}`
+                                : hasMax
+                                  ? `${fmt(c.salaryMax)} / ${periodLabel}`
+                                  : '—';
+                            const workModeLabel = WORK_MODE_LABELS[c.workMode] ?? (c.workMode || '—');
+                            return (
+                              <tr
+                                key={entry.id}
+                                onClick={() => {
+                                  if (scoutActionMenuId === entry.id) return;
+                                  scoutIdFromUserClickRef.current = entry.id;
+                                  setActiveScoutId(entry.id);
+                                  runScoutSearchWithCriteria(entry.criteria);
+                                }}
+                                className="hover:bg-brand-50 cursor-pointer"
+                              >
+                                <td className="px-4 py-3 font-medium text-gray-900">{c.jobTitle || '—'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{c.location || '—'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{workModeLabel}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{entry.peopleFound ?? '—'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{payRange}</td>
+                                <td className="px-4 py-3 text-sm text-gray-500">{new Date(entry.createdAt).toLocaleString()}</td>
+                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                  <div className="relative" ref={scoutActionMenuId === entry.id ? scoutActionMenuRef : null}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setScoutActionMenuId(scoutActionMenuId === entry.id ? null : entry.id);
+                                      }}
+                                      className="p-1.5 rounded hover:bg-gray-200 text-gray-500"
+                                    >
+                                      <HiDotsVertical className="w-5 h-5" />
+                                    </button>
+                                    {/* Dropdown rendered in portal - see below */}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Scout list action dropdown (portal so not clipped by overflow) */}
+        {scoutActionMenuId && scoutMenuPosition && (() => {
+          const entry = scoutLists.find((e) => e.id === scoutActionMenuId);
+          if (!entry) return null;
+          return createPortal(
+            <div
+              ref={scoutMenuPortalRef}
+              className="fixed w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-[100]"
+              style={{ top: scoutMenuPosition.top, left: scoutMenuPosition.left }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setScoutForm({
+                    ...entry.criteria,
+                    salaryPeriod: entry.criteria.salaryPeriod ?? 'annually',
+                    benefitInput: '',
+                    description: entry.criteria.description ?? '',
+                  });
+                  setEditingScoutId(entry.id);
+                  setShowScoutModal(true);
+                  setScoutActionMenuId(null);
+                }}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                Edit Parameter
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScoutLists((prev) => prev.filter((e) => e.id !== entry.id));
+                  if (activeScoutId === entry.id) setActiveScoutId(null);
+                  setScoutActionMenuId(null);
+                }}
+                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+              >
+                Remove
+              </button>
+            </div>,
+            document.body
+          );
+        })()}
+
+        {/* Professional row action dropdown (portal so not clipped by overflow) */}
+        {actionMenuId && profMenuPosition && (() => {
+          const prof = professionals.find((p) => p.id === actionMenuId);
+          if (!prof) return null;
+          return createPortal(
+            <div
+              ref={profMenuPortalRef}
+              className="fixed w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-[100]"
+              style={{ top: profMenuPosition.top, left: profMenuPosition.left }}
+            >
+              <button
+                type="button"
+                onClick={() => handleViewProfile(prof.id)}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <HiEye className="w-4 h-4" /> View Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendMessage(prof)}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <HiMail className="w-4 h-4" /> Message
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScout(prof)}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              >
+                <HiBriefcase className="w-4 h-4" /> Hire
+              </button>
+            </div>,
+            document.body
+          );
+        })()}
+
+        {/* Results count (All Professionals or Scout Request tab) */}
+        {(professionalsTab === 'all' || (professionalsTab === 'scouted' && activeScoutId && scoutViewTab === 'request')) && (
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm text-gray-600">
+              {loading ? (
+                <span>Searching...</span>
+              ) : (
+                <span>
+                  {professionals.length === 0
+                    ? 'No professionals'
+                    : `${professionals.length} professional${professionals.length === 1 ? '' : 's'} found`}
+                </span>
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Selection bar: Send Scout Request when any row selected */}
+        {(professionalsTab === 'all' || (professionalsTab === 'scouted' && activeScoutId && scoutViewTab === 'request')) && !loading && professionals.length > 0 && selectedIds.size > 0 && (
+          <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-brand-300 bg-brand-50 px-4 py-3">
+            <span className="text-sm font-medium text-brand-700">
+              {selectedIds.size} professional{selectedIds.size === 1 ? '' : 's'} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedProfessional(null);
+                setShowHireModal(true);
+                api.get('/v1/organisation/profile').then((r) => {
+                  const o = r.data?.data;
+                  if (o) setOrgProfile({ companyName: o.companyName, industry: o.industry });
+                }).catch(() => setOrgProfile(null));
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
+            >
+              <HiPaperAirplane className="w-5 h-5" />
+              Send Scout Request
             </button>
           </div>
         )}
 
-        {/* Search */}
-        <div className="mb-4">
-          <div className="relative max-w-xl">
-            <HiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Search by name, profession, location..."
-              value={filters.search}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-            />
-          </div>
-        </div>
-
-        {/* Table */}
+        {/* Table (All Professionals or Scout Request tab) */}
+        {(professionalsTab === 'all' || (professionalsTab === 'scouted' && activeScoutId && scoutViewTab === 'request')) && (
+          <>
         {loading ? (
           <div className="text-center text-gray-600 py-16">Loading professionals...</div>
         ) : professionals.length === 0 ? (
@@ -431,9 +1044,11 @@ export default function ViewProfessionals() {
             <HiUser className="w-14 h-14 text-gray-300 mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">No Professionals Found</h3>
             <p className="text-sm text-gray-500 text-center max-w-md">
-              {filters.search || filters.jobTitle || filters.country || filters.city
-                ? 'No professionals match your search. Try different filters.'
-                : 'No professionals available at the moment.'}
+              {professionalsTab === 'scouted'
+                ? 'No professionals match this scout list.'
+                : filters.search || filters.jobTitle || filters.country || filters.city
+                  ? 'No professionals match your search. Try different filters.'
+                  : 'No professionals available at the moment.'}
             </p>
           </div>
         ) : (
@@ -447,7 +1062,7 @@ export default function ViewProfessionals() {
                         type="checkbox"
                         checked={professionals.length > 0 && selectedIds.size === professionals.length}
                         onChange={toggleSelectAll}
-                        className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                        className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                       />
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
@@ -467,7 +1082,7 @@ export default function ViewProfessionals() {
                           type="checkbox"
                           checked={selectedIds.has(prof.id)}
                           onChange={() => toggleSelectOne(prof.id)}
-                          className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                          className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -502,31 +1117,7 @@ export default function ViewProfessionals() {
                           >
                             <HiDotsVertical className="w-5 h-5" />
                           </button>
-                          {actionMenuId === prof.id && (
-                            <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
-                              <button
-                                type="button"
-                                onClick={() => handleViewProfile(prof.id)}
-                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                              >
-                                <HiEye className="w-4 h-4" /> View Profile
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSendMessage(prof)}
-                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                              >
-                                <HiMail className="w-4 h-4" /> Message
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleScout(prof)}
-                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                              >
-                                <HiBriefcase className="w-4 h-4" /> Hire
-                              </button>
-                            </div>
-                          )}
+                          {/* Dropdown rendered in portal - see below */}
                         </div>
                       </td>
                     </tr>
@@ -557,6 +1148,56 @@ export default function ViewProfessionals() {
             )}
           </div>
         )}
+          </>
+        )}
+
+        {/* Response tab: candidates declare interest for the job or not */}
+        {professionalsTab === 'scouted' && activeScoutId && scoutViewTab === 'response' && (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            {scoutResponses.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6">
+                <HiUser className="w-14 h-14 text-gray-300 mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No responses yet</h3>
+                <p className="text-sm text-gray-500 text-center max-w-md">
+                  When candidates declare interest (or not) for this scout, their responses will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Profession</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Interest</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Responded at</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {scoutResponses.map((r) => (
+                      <tr key={r.professionalId} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{r.name}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{r.profession}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${
+                            r.status === 'interested'
+                              ? 'bg-green-100 text-green-800'
+                              : r.status === 'not_interested'
+                                ? 'bg-gray-100 text-gray-700'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {r.status === 'interested' ? 'Interested' : r.status === 'not_interested' ? 'Not interested' : 'Pending'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{r.respondedAt ? new Date(r.respondedAt).toLocaleString() : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* View Profile Drawer */}
         {profileDrawerId && (
@@ -577,7 +1218,7 @@ export default function ViewProfessionals() {
                   </div>
 
                   <div className="flex gap-4 mb-6">
-                    <div className="w-16 h-16 rounded-full bg-teal-100 flex items-center justify-center flex-shrink-0 text-teal-700 text-xl font-bold">
+                    <div className="w-16 h-16 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-brand-700 text-xl font-bold">
                       {profileDetail.name
                         ?.split(' ')
                         .map((s: string) => s[0])
@@ -611,7 +1252,7 @@ export default function ViewProfessionals() {
                         </li>
                       </ul>
                       {profileDetail.verificationStatus && (
-                        <span className="inline-flex mt-2 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-800 text-white">
+                        <span className="inline-flex mt-2 px-2.5 py-1 rounded-full text-xs font-medium bg-brand-600 text-white">
                           {profileDetail.verificationStatus.percentage}% - {profileDetail.verificationStatus.status}
                         </span>
                       )}
@@ -715,7 +1356,7 @@ export default function ViewProfessionals() {
                           if (o) setOrgProfile({ companyName: o.companyName, industry: o.industry });
                         }).catch(() => setOrgProfile(null));
                       }}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
                     >
                       Send Scout Request
                     </button>
@@ -746,7 +1387,7 @@ export default function ViewProfessionals() {
               ) : (
                 <div className="p-8 text-center text-gray-500">
                   <p>Could not load profile.</p>
-                  <button type="button" onClick={closeProfileDrawer} className="mt-4 text-teal-600 hover:underline">
+                  <button type="button" onClick={closeProfileDrawer} className="mt-4 text-brand-600 hover:underline">
                     Close
                   </button>
                 </div>
@@ -775,77 +1416,87 @@ export default function ViewProfessionals() {
               <div className="p-6 flex-1 overflow-y-auto">
 
                 <div className="space-y-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">What Job Title are you Scouting for?</label>
-                    <SearchableList
-                      value={scoutForm.jobTitle}
-                      onChange={(v) => setScoutForm({ ...scoutForm, jobTitle: v })}
-                      options={[
-                        { value: '', label: 'Select or type a title' },
-                        { value: 'Software Engineer', label: 'Software Engineer' },
-                        { value: 'Product Manager', label: 'Product Manager' },
-                        { value: 'UX Designer', label: 'UX Designer' },
-                        { value: 'Data Scientist', label: 'Data Scientist' },
-                        { value: 'AI Engineer', label: 'AI Engineer' },
-                        { value: 'Ambassador', label: 'Ambassador' },
-                        { value: 'Operations Manager', label: 'Operations Manager' },
-                        { value: 'Financial Analyst', label: 'Financial Analyst' },
-                        { value: 'Customer Specialist', label: 'Customer Specialist' },
-                      ]}
-                      placeholder="Select or type a title"
-                      className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
-                      allowCustom
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">What Job Title are you Scouting for?</label>
+                      <SearchableList
+                        value={scoutForm.jobTitle}
+                        onChange={(v) => setScoutForm({ ...scoutForm, jobTitle: v })}
+                        options={[
+                          { value: '', label: 'Select or type a title' },
+                          { value: 'Software Engineer', label: 'Software Engineer' },
+                          { value: 'Product Manager', label: 'Product Manager' },
+                          { value: 'UX Designer', label: 'UX Designer' },
+                          { value: 'Data Scientist', label: 'Data Scientist' },
+                          { value: 'AI Engineer', label: 'AI Engineer' },
+                          { value: 'Ambassador', label: 'Ambassador' },
+                          { value: 'Operations Manager', label: 'Operations Manager' },
+                          { value: 'Financial Analyst', label: 'Financial Analyst' },
+                          { value: 'Customer Specialist', label: 'Customer Specialist' },
+                        ]}
+                        placeholder="Select or type a title"
+                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"
+                        allowCustom
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Search Type</label>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-600">Strict</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={scoutForm.searchType === 'fuzzy'}
+                          onClick={() => setScoutForm({ ...scoutForm, searchType: scoutForm.searchType === 'strict' ? 'fuzzy' : 'strict' })}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${scoutForm.searchType === 'fuzzy' ? 'bg-brand-500' : 'bg-gray-200'}`}
+                        >
+                          <span className="sr-only">Use fuzzy search</span>
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition translate-y-0.5 ${scoutForm.searchType === 'fuzzy' ? 'translate-x-5' : 'translate-x-0.5'}`}
+                          />
+                        </button>
+                        <span className="text-sm text-gray-600">Fuzzy</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1.5">
+                        {scoutForm.searchType === 'strict'
+                          ? 'Only returns candidates with the exact job title.'
+                          : 'Returns candidates whose job title contains all search words (in any order).'}
+                      </p>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Search Type</label>
-                    <select
-                      value={scoutForm.searchType}
-                      onChange={(e) => setScoutForm({ ...scoutForm, searchType: e.target.value as 'strict' | 'fuzzy' })}
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      <option value="strict">Strict Search</option>
-                      <option value="fuzzy">Fuzzy Search</option>
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {scoutForm.searchType === 'strict'
-                        ? 'Only returns candidates with the exact job title.'
-                        : 'Returns candidates whose job title contains all search words (in any order).'}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">What Location are you Looking to Scout?</label>
-                    <SearchableList
-                      value={scoutForm.location}
-                      onChange={(v) => setScoutForm({ ...scoutForm, location: v })}
-                      options={[
-                        { value: 'Global', label: 'Global' },
-                        { value: 'Nigeria', label: 'Nigeria' },
-                        { value: 'Ghana', label: 'Ghana' },
-                        { value: 'Kenya', label: 'Kenya' },
-                        { value: 'Rwanda', label: 'Rwanda' },
-                        { value: 'United Kingdom', label: 'United Kingdom' },
-                        { value: 'United States', label: 'United States' },
-                        ...COUNTRIES.filter(
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">What Location are you Looking to Scout?</label>
+                      <select
+                        value={scoutForm.location}
+                        onChange={(e) => setScoutForm({ ...scoutForm, location: e.target.value })}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        <option value="Global">Global</option>
+                        <option value="Nigeria">Nigeria</option>
+                        <option value="Ghana">Ghana</option>
+                        <option value="Kenya">Kenya</option>
+                        <option value="Rwanda">Rwanda</option>
+                        <option value="United Kingdom">United Kingdom</option>
+                        <option value="United States">United States</option>
+                        {COUNTRIES.filter(
                           (c) => !['Nigeria', 'Ghana', 'Kenya', 'Rwanda', 'United Kingdom', 'United States'].includes(c),
-                        ).map((c) => ({ value: c, label: c })),
-                      ]}
-                      placeholder="Select location"
-                      className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Where would this Role be Domiciled?</label>
-                    <input
-                      type="text"
-                      value={scoutForm.domicile}
-                      onChange={(e) => setScoutForm({ ...scoutForm, domicile: e.target.value })}
-                      placeholder="e.g. Lagos, Nigeria"
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    />
+                        ).map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">Where would this Role be Domiciled?</label>
+                      <input
+                        type="text"
+                        value={scoutForm.domicile}
+                        onChange={(e) => setScoutForm({ ...scoutForm, domicile: e.target.value })}
+                        placeholder="e.g. Lagos, Nigeria"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -854,7 +1505,7 @@ export default function ViewProfessionals() {
                       <select
                         value={scoutForm.workMode}
                         onChange={(e) => setScoutForm({ ...scoutForm, workMode: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       >
                         <option value="">Select work mode</option>
                         <option value="remote">Remote</option>
@@ -869,7 +1520,7 @@ export default function ViewProfessionals() {
                       <select
                         value={scoutForm.employmentType}
                         onChange={(e) => setScoutForm({ ...scoutForm, employmentType: e.target.value })}
-                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       >
                         <option value="">Select employment type</option>
                         <option value="full_time">Full Time</option>
@@ -881,33 +1532,41 @@ export default function ViewProfessionals() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Salary</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Pay Range</label>
                     <div className="flex flex-wrap items-center gap-2">
-                      <SearchableList
+                      <select
                         value={scoutForm.currency}
-                        onChange={(v) => setScoutForm({ ...scoutForm, currency: v })}
-                        options={[
-                          { value: 'USD', label: 'USD' },
-                          { value: 'EUR', label: 'EUR' },
-                          { value: 'GBP', label: 'GBP' },
-                        ]}
-                        placeholder="Currency"
-                        className="min-w-[7rem] border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
-                      />
+                        onChange={(e) => setScoutForm({ ...scoutForm, currency: e.target.value })}
+                        className="min-w-[7rem] px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        <option value="NGN">NGN</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="GBP">GBP</option>
+                      </select>
                       <input
                         type="number"
                         value={scoutForm.salaryMin}
                         onChange={(e) => setScoutForm({ ...scoutForm, salaryMin: e.target.value })}
                         placeholder="Min"
-                        className="w-28 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-28 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       />
                       <input
                         type="number"
                         value={scoutForm.salaryMax}
                         onChange={(e) => setScoutForm({ ...scoutForm, salaryMax: e.target.value })}
                         placeholder="Max"
-                        className="w-28 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="w-28 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       />
+                      <select
+                        value={scoutForm.salaryPeriod}
+                        onChange={(e) => setScoutForm({ ...scoutForm, salaryPeriod: e.target.value as 'weekly' | 'monthly' | 'annually' })}
+                        className="min-w-[7rem] px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      >
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="annually">Annually</option>
+                      </select>
                     </div>
                   </div>
 
@@ -920,7 +1579,7 @@ export default function ViewProfessionals() {
                         onChange={(e) => setScoutForm({ ...scoutForm, benefitInput: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addBenefit())}
                         placeholder="e.g. Health insurance, Stock options"
-                        className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       />
                       <button
                         type="button"
@@ -946,18 +1605,19 @@ export default function ViewProfessionals() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Job Description</label>
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 bg-gray-50">
-                        <button type="button" className="p-1.5 rounded hover:bg-gray-200 text-gray-600 text-sm font-bold">B</button>
-                        <button type="button" className="p-1.5 rounded hover:bg-gray-200 text-gray-600 italic text-sm">I</button>
-                        <button type="button" className="p-1.5 rounded hover:bg-gray-200 text-gray-600 text-sm underline">U</button>
-                      </div>
-                      <textarea
+                    <div className="rounded-lg border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500 [&_.ql-toolbar]:border-0 [&_.ql-toolbar]:bg-gray-50 [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[120px] [&_.ql-editor.ql-blank::before]:text-gray-400">
+                      <ReactQuill
+                        theme="snow"
                         value={scoutForm.description}
-                        onChange={(e) => setScoutForm({ ...scoutForm, description: e.target.value })}
-                        rows={4}
+                        onChange={(html) => setScoutForm({ ...scoutForm, description: html })}
                         placeholder="Describe the role..."
-                        className="w-full px-3 py-2.5 border-0 focus:outline-none focus:ring-0 resize-none"
+                        modules={{
+                          toolbar: [
+                            ['bold', 'italic', 'underline'],
+                            [{ list: 'ordered' }, { list: 'bullet' }],
+                            ['clean'],
+                          ],
+                        }}
                       />
                     </div>
                   </div>
@@ -968,7 +1628,7 @@ export default function ViewProfessionals() {
                     type="button"
                     onClick={handleScoutSearchSubmit}
                     disabled={scoutSearchLoading}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                   >
                     <HiSearch className="w-5 h-5" />
                     {scoutSearchLoading ? 'Searching...' : 'Start Search'}
@@ -979,24 +1639,35 @@ export default function ViewProfessionals() {
           </div>
         )}
 
-        {/* Send Scout Request Modal */}
-        {showHireModal && selectedProfessional && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-4">
+        {/* Send Scout Request Drawer (right to left) */}
+        {showHireModal && (selectedProfessional || selectedIds.size > 0) && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => { setShowHireModal(false); setSelectedProfessional(null); }}
+              aria-hidden
+            />
+            <div className="relative w-full max-w-2xl h-full bg-white shadow-xl overflow-y-auto flex flex-col">
+              <div className="p-6 flex-shrink-0 border-b border-gray-200">
+                <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-gray-900">Send Scout Request</h2>
-                  <button onClick={() => { setShowHireModal(false); setSelectedProfessional(null); }} className="p-2 hover:bg-gray-100 rounded-lg">
+                  <button type="button" onClick={() => { setShowHireModal(false); setSelectedProfessional(null); }} className="p-2 hover:bg-gray-100 rounded-lg">
                     <HiX className="w-6 h-6 text-gray-500" />
                   </button>
                 </div>
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-gray-600 mt-2">
                   You have been headhunted by <strong>{orgProfile?.companyName || 'your organisation'}</strong>, {orgProfile?.industry ? `a ${orgProfile.industry} company` : 'a company'} operating globally for the position:
                 </p>
-                <div className="mb-4">
+                <div className="mt-4">
                   <label className="block text-sm font-medium text-gray-500 mb-1">Sending to</label>
-                  <p className="text-gray-900 font-medium">{selectedProfessional.name} – {selectedProfessional.profession}</p>
+                  {selectedProfessional ? (
+                    <p className="text-gray-900 font-medium">{selectedProfessional.name} – {selectedProfessional.profession}</p>
+                  ) : (
+                    <p className="text-gray-900 font-medium">{selectedIds.size} professional{selectedIds.size === 1 ? '' : 's'}</p>
+                  )}
                 </div>
+              </div>
+              <div className="p-6 flex-1 overflow-y-auto">
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Role Title *</label>
@@ -1005,7 +1676,7 @@ export default function ViewProfessionals() {
                       value={hireForm.jobTitle}
                       onChange={(e) => setHireForm({ ...hireForm, jobTitle: e.target.value })}
                       placeholder="e.g. Senior Software Engineer"
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1022,7 +1693,7 @@ export default function ViewProfessionals() {
                           { value: 'internship', label: 'Internship' },
                         ]}
                         placeholder="Select employment type"
-                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"
                       />
                     </div>
                     <div>
@@ -1038,7 +1709,7 @@ export default function ViewProfessionals() {
                           { value: 'global_remote', label: 'Global Remote' },
                         ]}
                         placeholder="Select work mode"
-                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                        className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"
                       />
                     </div>
                   </div>
@@ -1049,32 +1720,46 @@ export default function ViewProfessionals() {
                       value={hireForm.roleLocationOffice}
                       onChange={(e) => setHireForm({ ...hireForm, roleLocationOffice: e.target.value })}
                       placeholder="e.g. Lagos, Nigeria"
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
-                    <textarea
-                      rows={6}
-                      value={hireForm.description}
-                      onChange={(e) => setHireForm({ ...hireForm, description: e.target.value })}
-                      placeholder="Describe the role, responsibilities, and requirements..."
-                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 resize-y"
-                    />
+                    <div className="rounded-lg border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500 [&_.ql-toolbar]:border-0 [&_.ql-toolbar]:bg-gray-50 [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[160px] [&_.ql-editor.ql-blank::before]:text-gray-400">
+                      <ReactQuill
+                        theme="snow"
+                        value={hireForm.description}
+                        onChange={(html) => setHireForm({ ...hireForm, description: html })}
+                        placeholder="Describe the role, responsibilities, and requirements..."
+                        modules={{
+                          toolbar: [
+                            [{ header: [1, 2, 3, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ list: 'ordered' }, { list: 'bullet' }],
+                            [{ indent: '-1' }, { indent: '+1' }],
+                            ['blockquote'],
+                            ['link'],
+                            ['clean'],
+                          ],
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
                 <p className="text-sm text-gray-500 mt-2 mb-4">Please review the offer and Job description and respond as soon as possible.</p>
                 <div className="flex gap-3">
                   <button
+                    type="button"
                     onClick={() => { setShowHireModal(false); setSelectedProfessional(null); }}
                     className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={handleHireSubmit}
                     disabled={!hireForm.jobTitle.trim() || !hireForm.employmentType || !hireForm.workMode}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium disabled:opacity-50"
                   >
                     <HiPaperAirplane className="w-5 h-5" />
                     Send Request
@@ -1109,7 +1794,7 @@ export default function ViewProfessionals() {
                       value={messageForm.jobTitle}
                       onChange={(e) => setMessageForm({ ...messageForm, jobTitle: e.target.value })}
                       placeholder="e.g. Ambassador, AI Engineer"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
                   <div>
@@ -1119,12 +1804,12 @@ export default function ViewProfessionals() {
                       value={messageForm.subject}
                       onChange={(e) => setMessageForm({ ...messageForm, subject: e.target.value })}
                       placeholder="Subject"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Message *</label>
-                    <div className="rounded-lg border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-teal-500 [&_.ql-toolbar]:border-0 [&_.ql-toolbar]:bg-gray-50 [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[140px] [&_.ql-editor.ql-blank::before]:text-gray-400">
+                    <div className="rounded-lg border border-gray-300 overflow-hidden focus-within:ring-2 focus-within:ring-brand-500 focus-within:border-brand-500 [&_.ql-toolbar]:border-0 [&_.ql-toolbar]:bg-gray-50 [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[140px] [&_.ql-editor.ql-blank::before]:text-gray-400">
                       <ReactQuill
                         theme="snow"
                         value={messageForm.message}
@@ -1155,7 +1840,7 @@ export default function ViewProfessionals() {
                   <button
                     onClick={handleMessageSubmit}
                     disabled={isRichTextEmpty(messageForm.message)}
-                    className="flex-1 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                    className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
                   >
                     Send Message
                   </button>

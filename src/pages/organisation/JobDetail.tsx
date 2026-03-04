@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiClock, HiStar, HiPause, HiPlay } from 'react-icons/hi';
+import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiClock, HiStar, HiPause, HiPlay, HiDotsVertical } from 'react-icons/hi';
 
 export default function OrganisationJobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +14,8 @@ export default function OrganisationJobDetail() {
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (id) {
@@ -27,6 +29,16 @@ export default function OrganisationJobDetail() {
       fetchApplications();
     }
   }, [statusFilter]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+        setStatusMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const fetchJobDetail = async () => {
     setLoading(true);
@@ -179,11 +191,11 @@ export default function OrganisationJobDetail() {
             </div>
             <div className="flex items-center gap-3">
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                job.status === 'published' 
-                  ? 'bg-green-100 text-green-800' 
+                job.status === 'published'
+                  ? 'bg-green-100 text-green-800'
                   : job.status === 'paused'
-                  ? 'bg-yellow-100 text-yellow-800'
-                  : 'bg-gray-100 text-gray-800'
+                    ? 'bg-yellow-100 text-yellow-800'
+                    : 'bg-gray-100 text-gray-800'
               }`}>
                 {job.status === 'published' ? (
                   <span className="flex items-center">
@@ -199,35 +211,55 @@ export default function OrganisationJobDetail() {
                   'Draft'
                 )}
               </span>
-              {job.status === 'published' ? (
+              <div className="relative" ref={statusMenuRef}>
                 <button
-                  onClick={() => handleUpdateJobStatus('draft')}
+                  type="button"
+                  onClick={() => setStatusMenuOpen((v) => !v)}
                   disabled={updatingJobStatus}
-                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center"
+                  className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  aria-expanded={statusMenuOpen}
+                  aria-haspopup="true"
                 >
-                  <HiPause className="w-4 h-4 mr-1" />
-                  {updatingJobStatus ? 'Unpublishing...' : 'Unpublish'}
+                  <HiDotsVertical className="w-5 h-5" />
                 </button>
-              ) : (
-                <button
-                  onClick={() => handleUpdateJobStatus('published')}
-                  disabled={updatingJobStatus}
-                  className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center"
-                >
-                  <HiPlay className="w-4 h-4 mr-1" />
-                  {updatingJobStatus ? 'Publishing...' : 'Publish'}
-                </button>
-              )}
-              {job.status === 'published' && (
-                <button
-                  onClick={() => handleUpdateJobStatus('paused')}
-                  disabled={updatingJobStatus}
-                  className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center"
-                >
-                  <HiPause className="w-4 h-4 mr-1" />
-                  {updatingJobStatus ? 'Pausing...' : 'Pause'}
-                </button>
-              )}
+                {statusMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                    {job.status !== 'published' && (
+                      <button
+                        type="button"
+                        onClick={() => { handleUpdateJobStatus('published'); setStatusMenuOpen(false); }}
+                        disabled={updatingJobStatus}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <HiPlay className="w-4 h-4" />
+                        {updatingJobStatus ? 'Publishing...' : 'Publish'}
+                      </button>
+                    )}
+                    {job.status === 'published' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { handleUpdateJobStatus('paused'); setStatusMenuOpen(false); }}
+                          disabled={updatingJobStatus}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <HiPause className="w-4 h-4" />
+                          {updatingJobStatus ? 'Pausing...' : 'Pause'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { handleUpdateJobStatus('draft'); setStatusMenuOpen(false); }}
+                          disabled={updatingJobStatus}
+                          className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+                        >
+                          <HiXCircle className="w-4 h-4" />
+                          {updatingJobStatus ? 'Unpublishing...' : 'Unpublish'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
