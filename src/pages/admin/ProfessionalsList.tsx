@@ -25,6 +25,10 @@ interface Professional {
   profileCompleteness: number;
   createdAt: string;
   updatedAt: string;
+  profession?: string | null;
+  yearsOfExperience?: number | null;
+  city?: string | null;
+  address?: unknown;
   user: {
     id: string;
     email: string;
@@ -195,6 +199,18 @@ export default function ProfessionalsList() {
                       Email
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Nationality
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Location
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Profession
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Experience
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Identity Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -226,6 +242,22 @@ export default function ProfessionalsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-500">{prof.user.email}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">{prof.nationality ?? '—'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">
+                            {[prof.city, prof.country].filter(Boolean).join(', ') || '—'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">{prof.profession ?? '—'}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">
+                            {prof.yearsOfExperience != null ? `${prof.yearsOfExperience} yrs` : '—'}
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           {(() => {

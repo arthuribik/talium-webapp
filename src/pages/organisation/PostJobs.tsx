@@ -47,13 +47,14 @@ function statusLabel(status: string): string {
 }
 
 function statusBadgeClass(status: string): string {
+  // Match design: Paused = amber, Under Review = blue, Active = emerald (light bg + darker text)
   const map: Record<string, string> = {
-    published: 'bg-green-600 text-white',
-    draft: 'bg-blue-600 text-white',
-    paused: 'bg-amber-500 text-white',
-    closed: 'bg-gray-500 text-white',
+    published: 'bg-[#ECFDF5] text-[#10B981]',   // Active - light green / emerald
+    draft: 'bg-[#EFF6FF] text-[#3B82F6]',      // Under Review - light blue / blue
+    paused: 'bg-[#FFFBEB] text-[#D97706]',      // Paused - light yellow / amber
+    closed: 'bg-gray-100 text-gray-700',
   };
-  return map[status] || 'bg-gray-200 text-gray-800';
+  return map[status] || 'bg-gray-100 text-gray-700';
 }
 
 function formatPosted(dateStr: string): string {

@@ -100,7 +100,8 @@ export default function JobsList() {
       statusFilter === 'all' ||
       (statusFilter === 'published' && job.status === 'published') ||
       (statusFilter === 'draft' && job.status === 'draft') ||
-      (statusFilter === 'paused' && job.status === 'paused');
+      (statusFilter === 'paused' && job.status === 'paused') ||
+      (statusFilter === 'closed' && job.status === 'closed');
 
     return matchesSearch && matchesStatus;
   });
@@ -109,23 +110,21 @@ export default function JobsList() {
     navigate(`/admin/jobs/${jobId}`);
   };
 
-  const handleJobAction = async (jobId: string, action: 'publish' | 'pause' | 'draft') => {
+  const handleJobAction = async (jobId: string, action: 'publish' | 'pause' | 'draft' | 'closed') => {
     setActionMenuOpen(null);
     try {
-      let status: 'published' | 'paused' | 'draft' = 'draft';
-      if (action === 'publish') {
-        status = 'published';
-      } else if (action === 'pause') {
-        status = 'paused';
-      } else if (action === 'draft') {
-        status = 'draft';
-      }
+      let status: 'published' | 'paused' | 'draft' | 'closed' = 'draft';
+      if (action === 'publish') status = 'published';
+      else if (action === 'pause') status = 'paused';
+      else if (action === 'closed') status = 'closed';
+      else status = 'draft';
 
       await api.put(`/v1/admin/jobs/${jobId}/status`, { status });
-      toast.success(`Job ${action === 'publish' ? 'published' : action === 'pause' ? 'paused' : 'returned to draft'} successfully!`);
+      const msg = action === 'publish' ? 'published' : action === 'pause' ? 'paused' : action === 'closed' ? 'closed' : 'returned to draft';
+      toast.success(`Job ${msg} successfully!`);
       fetchJobs();
     } catch (err: any) {
-      const errorMsg = err.response?.data?.message || `Failed to ${action} job`;
+      const errorMsg = err.response?.data?.message || `Failed to update job`;
       toast.error(errorMsg);
     }
   };
@@ -323,9 +322,10 @@ export default function JobsList() {
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
               <option value="all">All Status</option>
-              <option value="published">Published</option>
-              <option value="draft">Draft</option>
+              <option value="published">Active</option>
+              <option value="draft">Under Review</option>
               <option value="paused">Paused</option>
+              <option value="closed">Closed</option>
             </select>
           </div>
         </div>
@@ -421,18 +421,22 @@ export default function JobsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           {job.status === 'published' ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#ECFDF5] text-[#10B981]">
                               <HiCheckCircle className="w-4 h-4 mr-1" />
-                              Published
+                              Active
                             </span>
                           ) : job.status === 'paused' ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#FFFBEB] text-[#D97706]">
                               <HiPause className="w-4 h-4 mr-1" />
                               Paused
                             </span>
+                          ) : job.status === 'closed' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                              Closed
+                            </span>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                              Draft
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#EFF6FF] text-[#3B82F6]">
+                              Under Review
                             </span>
                           )}
                         </td>
@@ -502,7 +506,18 @@ export default function JobsList() {
                                     </button>
                                   </>
                                 )}
-                                {job.status !== 'draft' && (
+                                {(job.status === 'published' || job.status === 'paused') && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleJobAction(job.id, 'closed');
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                  >
+                                    Close
+                                  </button>
+                                )}
+                                {job.status !== 'draft' && job.status !== 'closed' && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();

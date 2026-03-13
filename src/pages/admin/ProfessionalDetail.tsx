@@ -14,14 +14,16 @@ import {
   HiBadgeCheck,
   HiUsers,
   HiDotsVertical,
+  HiLocationMarker,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
-type TabKey = 'personal' | 'education' | 'social' | 'work' | 'certification' | 'family';
+type TabKey = 'personal' | 'location' | 'education' | 'social' | 'work' | 'certification' | 'family';
 type SectionStatus = 'verified' | 'pending' | 'rejected' | 'empty' | 'view_only';
 
 const SIDE_TABS: { key: TabKey; label: string; icon: any }[] = [
   { key: 'personal', label: 'Personal Information', icon: HiUser },
+  { key: 'location', label: 'Location', icon: HiLocationMarker },
   { key: 'education', label: 'Educational Information', icon: HiAcademicCap },
   { key: 'social', label: 'Social Media Profiles', icon: HiShare },
   { key: 'work', label: 'Work Experience', icon: HiBriefcase },
@@ -201,6 +203,13 @@ export default function ProfessionalDetail() {
   const socialMedia = professional.socialMedia || {};
   const identityVerification = professional.identityVerification;
   const addressData = professional.address && typeof professional.address === 'object' ? professional.address : {};
+  const locationsList: Array<{ country?: string; address?: string; city?: string; state?: string; documentType?: string; documentUrl?: string }> = Array.isArray(professional.locations) && professional.locations.length > 0
+    ? professional.locations
+    : professional.country || addressData.address || addressData.city || addressData.state
+      ? [{ country: professional.country || addressData.country, address: addressData.address ?? (typeof professional.address === 'string' ? professional.address : ''), city: addressData.city ?? professional.city, state: addressData.state ?? professional.state, documentType: (professional as any).locationDocumentType, documentUrl: (professional as any).locationDocumentUrl }]
+      : [];
+  const certifications = professional.certifications || [];
+  const familyRelations = professional.familyRelations || professional.family || [];
 
   const hasPersonalData =
     user.firstName ||
@@ -222,6 +231,8 @@ export default function ProfessionalDetail() {
         if (s === 'pending' || s === 'under_review') return 'pending';
         return 'empty';
       }
+      case 'location':
+        return locationsList.length > 0 ? 'view_only' : 'empty';
       case 'education': {
         if (education.length === 0) return 'empty';
         const hasPending = education.some((e: any) => e.verificationStatus === 'pending' || e.verificationStatus === 'under_review');
@@ -245,8 +256,9 @@ export default function ProfessionalDetail() {
         return 'empty';
       }
       case 'certification':
+        return certifications.length > 0 ? 'view_only' : 'empty';
       case 'family':
-        return 'empty';
+        return familyRelations.length > 0 ? 'view_only' : 'empty';
       default:
         return 'empty';
     }
@@ -538,6 +550,46 @@ export default function ProfessionalDetail() {
                         )}
                       </div>
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* Location — matches VerificationCenter */}
+              {activeTab === 'location' && (
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3">
+                    <h2 className="text-lg font-semibold text-gray-900">Location</h2>
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusBadgeClass[getSectionStatus('location')]}`}>
+                      {statusLabel[getSectionStatus('location')]}
+                    </span>
+                  </div>
+                  {locationsList.length === 0 ? (
+                    <EmptyState
+                      icon={HiLocationMarker}
+                      title="No location data"
+                      description="This professional has not added location or address information yet."
+                    />
+                  ) : (
+                    <div className="space-y-6">
+                      {locationsList.map((loc, index) => (
+                        <div key={index} className="p-4 border border-gray-200 rounded-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FieldRow label="Country" value={loc.country} />
+                            <FieldRow label="Address" value={loc.address} />
+                            <FieldRow label="City" value={loc.city} />
+                            <FieldRow label="State / Region" value={loc.state} />
+                            {(loc.documentType || loc.documentUrl) && (
+                              <>
+                                <FieldRow label="Document type" value={loc.documentType} />
+                                <div className="md:col-span-2">
+                                  <FieldRow label="Document" value={loc.documentUrl ? <a href={loc.documentUrl} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">View document</a> : null} />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}
@@ -852,7 +904,7 @@ export default function ProfessionalDetail() {
                 </div>
               )}
 
-              {/* Certification — dot-to-dot fields, empty state */}
+              {/* Certification — show when professional has certifications */}
               {activeTab === 'certification' && (
                 <div className="space-y-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3">
@@ -863,24 +915,43 @@ export default function ProfessionalDetail() {
                       {statusLabel[getSectionStatus('certification')]}
                     </span>
                   </div>
-                  <EmptyState
-                    icon={HiBadgeCheck}
-                    title="No certification data"
-                    description="Certification fields (name of certificate, issued by, issued date, expiration date, credential ID, reporting URL, supporting media) are not stored yet. This section will be available when the professional verification flow supports certifications."
-                  />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
-                    <p>Name of certificate</p>
-                    <p>Issued by</p>
-                    <p>Issued date</p>
-                    <p>Expiration date</p>
-                    <p>Credential ID</p>
-                    <p>Reporting URL</p>
-                    <p className="md:col-span-2">Supporting media</p>
-                  </div>
+                  {certifications.length === 0 ? (
+                    <EmptyState
+                      icon={HiBadgeCheck}
+                      title="No certification data"
+                      description="This professional has not added any certifications yet."
+                    />
+                  ) : (
+                    <div className="space-y-6">
+                      {certifications.map((cert: any, idx: number) => (
+                        <div key={cert.id || idx} className="p-4 border border-gray-200 rounded-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FieldRow label="Name of certificate" value={cert.name} />
+                            <FieldRow label="Issued by" value={cert.issuedBy} />
+                            <FieldRow
+                              label="Issued date"
+                              value={cert.issuedDate ? new Date(cert.issuedDate).toLocaleDateString() : null}
+                            />
+                            <FieldRow
+                              label="Expiration date"
+                              value={cert.expirationDate ? new Date(cert.expirationDate).toLocaleDateString() : null}
+                            />
+                            <FieldRow label="Credential ID" value={cert.credentialId} />
+                            <FieldRow label="Reporting URL" value={cert.reportingUrl ? <a href={cert.reportingUrl} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">Link</a> : null} />
+                            {(cert.supportingMediaUrl || cert.documentUrl) && (
+                              <div className="md:col-span-2">
+                                <FieldRow label="Supporting media" value={(cert.supportingMediaUrl || cert.documentUrl) ? <a href={cert.supportingMediaUrl || cert.documentUrl} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">View</a> : null} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Family & Relationship — empty state */}
+              {/* Family & Relationship — show when professional has family relations */}
               {activeTab === 'family' && (
                 <div className="space-y-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3">
@@ -891,11 +962,24 @@ export default function ProfessionalDetail() {
                       {statusLabel[getSectionStatus('family')]}
                     </span>
                   </div>
-                  <EmptyState
-                    icon={HiUsers}
-                    title="No family data"
-                    description="Family and relationship information is not collected yet. This section will be available when the professional verification flow includes family & relationship."
-                  />
+                  {familyRelations.length === 0 ? (
+                    <EmptyState
+                      icon={HiUsers}
+                      title="No family data"
+                      description="This professional has not added any family or relationship information yet."
+                    />
+                  ) : (
+                    <div className="space-y-4">
+                      {familyRelations.map((rel: any, idx: number) => (
+                        <div key={rel.id || idx} className="p-4 border border-gray-200 rounded-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FieldRow label="Relation type" value={rel.relationType?.replace(/_/g, ' ')} />
+                            <FieldRow label="Full name" value={rel.fullName} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

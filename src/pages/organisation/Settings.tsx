@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
@@ -12,7 +12,13 @@ import {
   HiLink,
   HiCalendar,
   HiLocationMarker,
-  HiDocumentText
+  HiDocumentText,
+  HiPencil,
+  HiExternalLink,
+  HiCheckCircle,
+  HiDotsVertical,
+  HiPlus,
+  HiTrash
 } from 'react-icons/hi';
 import { 
   FaFacebook, 
@@ -58,9 +64,19 @@ const INDUSTRIES = [
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'profile';
+  const tabParam = searchParams.get('tab') || 'overview';
+  const activeTab = tabParam === 'profile' ? 'overview' : tabParam;
+  const [profileEditMode, setProfileEditMode] = useState(false);
 
   const [loading, setLoading] = useState(true);
+  const [employees, setEmployees] = useState<Array<{ id: string; firstName: string; lastName: string; name: string; title: string; bio?: string | null; email?: string | null; linkedInUrl?: string | null }>>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeeModalOpen, setEmployeeModalOpen] = useState(false);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [employeeMenuOpen, setEmployeeMenuOpen] = useState<string | null>(null);
+  const [savingEmployee, setSavingEmployee] = useState(false);
+  const [employeeForm, setEmployeeForm] = useState({ firstName: '', lastName: '', title: '', bio: '', email: '', linkedInUrl: '' });
+  const employeeMenuRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [organization, setOrganization] = useState<any>(null);
   const [formData, setFormData] = useState({
@@ -134,6 +150,22 @@ export default function Settings() {
   useEffect(() => {
     fetchOrganization();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'employees') fetchEmployees();
+  }, [activeTab]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (employeeMenuRef.current && !employeeMenuRef.current.contains(e.target as Node)) {
+        setEmployeeMenuOpen(null);
+      }
+    };
+    if (employeeMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [employeeMenuOpen]);
 
   const fetchOrganization = async () => {
     setLoading(true);
@@ -209,6 +241,70 @@ export default function Settings() {
     }
   };
 
+  const fetchEmployees = async () => {
+    setEmployeesLoading(true);
+    try {
+      const res = await api.get('/v1/organisation/employees');
+      setEmployees(res.data?.data?.employees ?? []);
+    } catch {
+      setEmployees([]);
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
+  const openAddEmployee = () => {
+    setEditingEmployeeId(null);
+    setEmployeeForm({ firstName: '', lastName: '', title: '', bio: '', email: '', linkedInUrl: '' });
+    setEmployeeModalOpen(true);
+  };
+
+  const openEditEmployee = (emp: typeof employees[0]) => {
+    setEditingEmployeeId(emp.id);
+    setEmployeeForm({
+      firstName: emp.firstName,
+      lastName: emp.lastName,
+      title: emp.title,
+      bio: emp.bio ?? '',
+      email: emp.email ?? '',
+      linkedInUrl: emp.linkedInUrl ?? '',
+    });
+    setEmployeeMenuOpen(null);
+    setEmployeeModalOpen(true);
+  };
+
+  const saveEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingEmployee(true);
+    try {
+      if (editingEmployeeId) {
+        await api.put(`/v1/organisation/employees/${editingEmployeeId}`, employeeForm);
+        toast.success('Employee updated');
+      } else {
+        await api.post('/v1/organisation/employees', employeeForm);
+        toast.success('Employee added');
+      }
+      setEmployeeModalOpen(false);
+      fetchEmployees();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message ?? 'Failed to save employee');
+    } finally {
+      setSavingEmployee(false);
+    }
+  };
+
+  const deleteEmployee = async (id: string) => {
+    if (!window.confirm('Remove this employee from the list?')) return;
+    setEmployeeMenuOpen(null);
+    try {
+      await api.delete(`/v1/organisation/employees/${id}`);
+      toast.success('Employee removed');
+      fetchEmployees();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message ?? 'Failed to remove employee');
+    }
+  };
+
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -216,6 +312,7 @@ export default function Settings() {
       await api.put('/v1/organisation/profile', formData);
       toast.success('Organization profile updated successfully!');
       await fetchOrganization();
+      setProfileEditMode(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update organization profile');
     } finally {
@@ -253,9 +350,29 @@ export default function Settings() {
   };
 
   const tabs = [
-    { id: 'profile', label: 'Manage Org Profile', icon: HiOfficeBuilding },
+    { id: 'overview', label: 'Organisation Overview', icon: HiOfficeBuilding },
+    { id: 'employees', label: 'Employees / Associates', icon: FaUsers },
+    { id: 'public', label: 'Public Page', icon: HiGlobe },
     { id: 'security', label: 'Security', icon: HiLockClosed },
   ];
+
+  const setTab = (id: string) => setSearchParams({ tab: id === 'overview' ? 'overview' : id });
+
+  const displayName = formData.companyName || formData.legalName || formData.organisationName || organization?.companyName || '';
+  const alsoKnownAs = formData.otherName || organization?.otherName || '';
+  const categoryLabel = CATEGORIES.find((c) => c.id === formData.category)?.label || formData.category || 'Company';
+  const onTrudiumSince = organization?.createdAt ? new Date(organization.createdAt).getFullYear() : new Date().getFullYear();
+  const locationStr = [formData.headquartersCity || formData.address?.city, formData.headquartersCountry || formData.address?.country].filter(Boolean).join(', ') || '—';
+  const physicalAddress = [
+    formData.address?.buildingName,
+    formData.address?.streetNumber,
+    formData.address?.street,
+    formData.address?.city,
+    formData.address?.state,
+    formData.address?.country,
+  ].filter(Boolean).join(', ') || '—';
+  const foundedYear = formData.foundedDate ? new Date(formData.foundedDate).getFullYear() : null;
+  const yearOfIncorporation = foundedYear || (formData.countryOfIncorporation ? new Date().getFullYear() : null);
 
   if (loading) {
     return (
@@ -287,29 +404,41 @@ export default function Settings() {
 
   return (
     <OrganisationLayout>
-      <div className="p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Settings</h1>
-          <p className="text-gray-600">Manage your organization profile and security settings</p>
+      <div className="min-h-screen bg-[#F7F7F7] p-6">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">Organisation Profile</h1>
+            <p className="text-gray-600 text-sm">Manage your organisation&apos;s public profile and team</p>
+          </div>
+          {activeTab === 'overview' && !profileEditMode && (
+            <button
+              type="button"
+              onClick={() => setProfileEditMode(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] transition-colors text-sm font-medium shrink-0"
+            >
+              <HiPencil className="w-4 h-4" />
+              Edit Profile
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="flex space-x-8">
+        <div className="bg-white rounded-t-xl border border-b-0 border-gray-200 px-4 pt-2">
+          <nav className="flex gap-1">
             {tabs.map((tab) => {
               const IconComponent = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setSearchParams({ tab: tab.id })}
-                  className={`flex items-center px-1 py-4 border-b-2 font-medium text-sm transition-colors ${
+                  onClick={() => { setTab(tab.id); if (tab.id !== 'overview') setProfileEditMode(false); }}
+                  className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm transition-colors -mb-px ${
                     isActive
-                      ? 'border-brand-500 text-brand-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                      ? 'border-[#1e3a5f] text-[#1e3a5f] bg-gray-50/80'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  <IconComponent className="w-5 h-5 mr-2" />
+                  <IconComponent className="w-4 h-4" />
                   {tab.label}
                 </button>
               );
@@ -317,11 +446,181 @@ export default function Settings() {
           </nav>
         </div>
 
-        {/* Profile Tab */}
-        {activeTab === 'profile' && (
-          <form onSubmit={handleProfileSubmit} className="space-y-6">
+        {/* Organisation Overview — view mode: five cards */}
+        {activeTab === 'overview' && !profileEditMode && (
+          <div className="space-y-6 pb-8">
+            {/* Card 1: Organisation Overview */}
+            <div className="bg-white rounded-b-xl rounded-t-none shadow-sm border border-t-0 border-gray-200 p-6">
+              <div className="flex flex-wrap items-start gap-6">
+                <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                  <HiOfficeBuilding className="w-8 h-8 text-gray-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">{displayName || '—'}</h2>
+                  {alsoKnownAs && (
+                    <p className="text-sm text-gray-500 mb-3">Also known as: {alsoKnownAs}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">
+                      {categoryLabel}
+                    </span>
+                    {formData.industry && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">
+                        {formData.industry}
+                      </span>
+                    )}
+                    {(organization?.verificationStatus === 'verified' || organization?.verified) && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                        <HiCheckCircle className="w-3.5 h-3.5 mr-1" />
+                        Verified
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-500 flex items-center gap-1">
+                    <HiCalendar className="w-4 h-4 text-gray-400" />
+                    On Trudium since {onTrudiumSince}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 2: Incorporation Details */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Incorporation Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Incorporation Number</p>
+                  <p className="text-gray-900 font-semibold">{formData.incorporationNumber || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Country of Incorporation</p>
+                  <p className="text-gray-900 font-semibold">{formData.countryOfIncorporation || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Year of Incorporation</p>
+                  <p className="text-gray-900 font-semibold">{yearOfIncorporation ?? '—'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 3: About */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-3">About</h3>
+              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{formData.description || '—'}</p>
+            </div>
+
+            {/* Card 4: Location & Contact */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Location & Contact</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <HiLocationMarker className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Location</p>
+                      <p className="text-gray-900 font-medium">{locationStr}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <FaEnvelope className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Email</p>
+                      <p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <HiCalendar className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Founded</p>
+                      <p className="text-gray-900 font-medium">{foundedYear ? `Founded ${foundedYear}` : '—'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <HiOfficeBuilding className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Physical Address</p>
+                      <p className="text-gray-900 font-medium">{physicalAddress}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 5: Website & Social Media */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Website & Social Media</h3>
+              <div className="flex flex-wrap gap-3">
+                {formData.website && (
+                  <a
+                    href={formData.website.startsWith('http') ? formData.website : `https://${formData.website}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
+                  >
+                    <HiGlobe className="w-4 h-4 text-gray-500" />
+                    Website
+                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {formData.socialMedia?.linkedin && (
+                  <a
+                    href={formData.socialMedia.linkedin.startsWith('http') ? formData.socialMedia.linkedin : `https://${formData.socialMedia.linkedin}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
+                  >
+                    <FaLinkedin className="w-4 h-4 text-[#0A66C2]" />
+                    LinkedIn
+                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {formData.socialMedia?.twitter && (
+                  <a
+                    href={formData.socialMedia.twitter.startsWith('http') ? formData.socialMedia.twitter : `https://${formData.socialMedia.twitter}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
+                  >
+                    <FaTwitter className="w-4 h-4 text-gray-600" />
+                    Twitter / X
+                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {(!formData.website && !formData.socialMedia?.linkedin && !formData.socialMedia?.twitter) && (
+                  <p className="text-sm text-gray-500">No website or social links added yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Organisation Overview — edit mode: form */}
+        {activeTab === 'overview' && profileEditMode && (
+          <form onSubmit={handleProfileSubmit} className="space-y-6 pb-8">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
+              <p className="text-gray-600 text-sm">Edit your organisation details below, then save.</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setProfileEditMode(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] disabled:opacity-50 text-sm font-medium flex items-center gap-2"
+                >
+                  <HiSave className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
             {/* Basic Information Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <HiOfficeBuilding className="w-5 h-5 mr-2 text-brand-600" />
                 Basic Information
@@ -950,24 +1249,307 @@ export default function Settings() {
                 </div>
               </div>
             </div>
-
-            {/* Submit Button */}
-            <div className="flex items-center justify-end pt-6">
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-6 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-              >
-                <HiSave className="w-5 h-5 mr-2" />
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
           </form>
+        )}
+
+        {/* Employees / Associates Tab */}
+        {activeTab === 'employees' && (
+          <div className="pb-8">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">Key Employees & Associates</h2>
+                  <p className="text-gray-600 text-sm">Add bios for founders, executives, and key team members.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openAddEmployee}
+                  className="flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] text-sm font-medium shrink-0"
+                >
+                  <HiPlus className="w-4 h-4" />
+                  Add Employee
+                </button>
+              </div>
+
+              {employeesLoading ? (
+                <div className="text-center text-gray-500 py-12">Loading...</div>
+              ) : employees.length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg">
+                  <p className="text-gray-500 mb-4">No key employees or associates yet.</p>
+                  <button
+                    type="button"
+                    onClick={openAddEmployee}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] text-sm font-medium"
+                  >
+                    <HiPlus className="w-4 h-4" />
+                    Add Employee
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {employees.map((emp) => (
+                    <div
+                      key={emp.id}
+                      className="border border-gray-200 rounded-xl p-6 bg-white shadow-sm"
+                    >
+                      <div className="flex flex-wrap gap-4">
+                        <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center shrink-0 text-xl font-semibold text-gray-600">
+                          {(emp.firstName || emp.name || '?')[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">{emp.name || `${emp.firstName} ${emp.lastName}`.trim() || '—'}</h3>
+                              <span className="inline-flex mt-1 px-3 py-0.5 rounded-full text-xs font-medium bg-[#EFF6FF] text-[#1e3a5f]">
+                                {emp.title}
+                              </span>
+                            </div>
+                            <div className="relative shrink-0" ref={employeeMenuOpen === emp.id ? employeeMenuRef : undefined}>
+                              <button
+                                type="button"
+                                onClick={() => setEmployeeMenuOpen(employeeMenuOpen === emp.id ? null : emp.id)}
+                                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100"
+                                aria-label="Actions"
+                              >
+                                <HiDotsVertical className="w-5 h-5" />
+                              </button>
+                              {employeeMenuOpen === emp.id && (
+                                <div className="absolute right-0 top-full mt-1 w-44 py-1 bg-white rounded-lg border border-gray-200 shadow-lg z-10">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditEmployee(emp)}
+                                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <HiPencil className="w-4 h-4" />
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteEmployee(emp.id)}
+                                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                  >
+                                    <HiTrash className="w-4 h-4" />
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {emp.bio && <p className="mt-3 text-gray-700 text-sm leading-relaxed">{emp.bio}</p>}
+                          <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                            {emp.email && (
+                              <a href={`mailto:${emp.email}`} className="flex items-center gap-1.5 text-gray-600 hover:text-[#1e3a5f]">
+                                <FaEnvelope className="w-4 h-4" />
+                                {emp.email}
+                              </a>
+                            )}
+                            {emp.linkedInUrl && (
+                              <a
+                                href={emp.linkedInUrl.startsWith('http') ? emp.linkedInUrl : `https://${emp.linkedInUrl}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 text-gray-600 hover:text-[#0A66C2]"
+                              >
+                                <FaLinkedin className="w-4 h-4" />
+                                LinkedIn
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Add/Edit Employee Modal */}
+        {employeeModalOpen && (
+          <>
+            <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setEmployeeModalOpen(false)} aria-hidden />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-bold text-gray-900">{editingEmployeeId ? 'Edit Employee' : 'Add Employee'}</h3>
+                </div>
+                <form onSubmit={saveEmployee} className="p-6 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
+                      <input
+                        type="text"
+                        required
+                        value={employeeForm.firstName}
+                        onChange={(e) => setEmployeeForm((f) => ({ ...f, firstName: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                        placeholder="John"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+                      <input
+                        type="text"
+                        required
+                        value={employeeForm.lastName}
+                        onChange={(e) => setEmployeeForm((f) => ({ ...f, lastName: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                        placeholder="Adeyemi"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Title / Role</label>
+                    <input
+                      type="text"
+                      required
+                      value={employeeForm.title}
+                      onChange={(e) => setEmployeeForm((f) => ({ ...f, title: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                      placeholder="Founder & CEO"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
+                    <textarea
+                      rows={4}
+                      value={employeeForm.bio}
+                      onChange={(e) => setEmployeeForm((f) => ({ ...f, bio: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                      placeholder="Short background and experience..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={employeeForm.email}
+                      onChange={(e) => setEmployeeForm((f) => ({ ...f, email: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                      placeholder="john@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
+                    <input
+                      type="url"
+                      value={employeeForm.linkedInUrl}
+                      onChange={(e) => setEmployeeForm((f) => ({ ...f, linkedInUrl: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
+                      placeholder="https://linkedin.com/in/..."
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => setEmployeeModalOpen(false)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingEmployee}
+                      className="px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {savingEmployee ? 'Saving...' : editingEmployeeId ? 'Save changes' : 'Add Employee'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Public Page Tab */}
+        {activeTab === 'public' && (
+          <div className="space-y-6 pb-8">
+            <p className="text-sm text-gray-600 mb-4">This is how your organisation profile appears to the public.</p>
+            {/* Same five cards as overview view mode — reuse same layout */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex flex-wrap items-start gap-6">
+                <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                  <HiOfficeBuilding className="w-8 h-8 text-gray-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">{displayName || '—'}</h2>
+                  {alsoKnownAs && <p className="text-sm text-gray-500 mb-3">Also known as: {alsoKnownAs}</p>}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">{categoryLabel}</span>
+                    {formData.industry && <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">{formData.industry}</span>}
+                    {(organization?.verificationStatus === 'verified' || organization?.verified) && (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"><HiCheckCircle className="w-3.5 h-3.5 mr-1" />Verified</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-500 flex items-center gap-1"><HiCalendar className="w-4 h-4 text-gray-400" />On Trudium since {onTrudiumSince}</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Incorporation Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Incorporation Number</p><p className="text-gray-900 font-semibold">{formData.incorporationNumber || '—'}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Country of Incorporation</p><p className="text-gray-900 font-semibold">{formData.countryOfIncorporation || '—'}</p></div>
+                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Year of Incorporation</p><p className="text-gray-900 font-semibold">{yearOfIncorporation ?? '—'}</p></div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-3">About</h3>
+              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{formData.description || '—'}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Location & Contact</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <HiLocationMarker className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Location</p><p className="text-gray-900 font-medium">{locationStr}</p></div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <FaEnvelope className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Email</p><p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p></div>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <HiCalendar className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Founded</p><p className="text-gray-900 font-medium">{foundedYear ? `Founded ${foundedYear}` : '—'}</p></div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <HiOfficeBuilding className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Physical Address</p><p className="text-gray-900 font-medium">{physicalAddress}</p></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-4">Website & Social Media</h3>
+              <div className="flex flex-wrap gap-3">
+                {formData.website && (
+                  <a href={formData.website.startsWith('http') ? formData.website : `https://${formData.website}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
+                    <HiGlobe className="w-4 h-4 text-gray-500" />Website <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {formData.socialMedia?.linkedin && (
+                  <a href={formData.socialMedia.linkedin.startsWith('http') ? formData.socialMedia.linkedin : `https://${formData.socialMedia.linkedin}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
+                    <FaLinkedin className="w-4 h-4 text-[#0A66C2]" />LinkedIn <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {formData.socialMedia?.twitter && (
+                  <a href={formData.socialMedia.twitter.startsWith('http') ? formData.socialMedia.twitter : `https://${formData.socialMedia.twitter}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
+                    <FaTwitter className="w-4 h-4 text-gray-600" />Twitter / X <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                  </a>
+                )}
+                {(!formData.website && !formData.socialMedia?.linkedin && !formData.socialMedia?.twitter) && <p className="text-sm text-gray-500">No website or social links added yet.</p>}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Security Tab */}
         {activeTab === 'security' && (
-          <form onSubmit={handlePasswordChange} className="bg-white rounded-xl shadow-sm p-6">
+          <form onSubmit={handlePasswordChange} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 pb-8">
             <div className="space-y-6">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
