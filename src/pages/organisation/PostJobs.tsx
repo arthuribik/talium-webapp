@@ -66,6 +66,31 @@ function formatPosted(dateStr: string): string {
   }
 }
 
+const REQUIRED_APPLICANT_DATA_OPTIONS: { id: string; label: string }[] = [
+  { id: 'full_name', label: 'Full Name' },
+  { id: 'email', label: 'Email' },
+  { id: 'nationality', label: 'Nationality' },
+  { id: 'location', label: 'Location' },
+  { id: 'phone', label: 'Phone Number' },
+  { id: 'government_id', label: 'Government ID' },
+  { id: 'academic_data', label: 'Academic Data' },
+  { id: 'work_data', label: 'Work Data' },
+  { id: 'skill_set', label: 'Skill Set Data' },
+  { id: 'social_media', label: 'Social Media' },
+  { id: 'financial_data', label: 'Financial Data' },
+  { id: 'reference_data', label: 'Reference Data' },
+];
+
+const DISTRIBUTION_CHANNELS: { id: string; label: string; subtitle: string; isDefault?: boolean }[] = [
+  { id: 'taldium_network', label: 'Taldium Network', subtitle: 'Organisation page & Taldium Professional Network', isDefault: true },
+  { id: 'google_search', label: 'Google Search', subtitle: 'Index on Google Jobs' },
+  { id: 'monday_com', label: 'Monday.com', subtitle: 'Post to Monday.com job board' },
+  { id: 'lensa', label: 'Lensa', subtitle: 'Distribute via Lensa' },
+  { id: 'linkedin', label: 'LinkedIn', subtitle: 'Share on LinkedIn Jobs' },
+  { id: 'indeed', label: 'Indeed', subtitle: 'Post to Indeed' },
+  { id: 'glassdoor', label: 'Glassdoor', subtitle: 'List on Glassdoor' },
+];
+
 export default function PostJobs() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobCardData[]>([]);
@@ -88,6 +113,9 @@ export default function PostJobs() {
     locationInput: '',
     pay: { currency: 'USD', min: '', max: '', period: 'Per annum' },
     description: '',
+    qualifyingQuestions: [] as Array<{ question: string }>,
+    requiredApplicantData: ['full_name', 'email'] as string[],
+    distributionChannels: ['taldium_network'] as string[],
   });
   const [formLoading, setFormLoading] = useState(false);
 
@@ -184,6 +212,11 @@ export default function PostJobs() {
         employmentType: formData.employmentType,
         description: formData.description || '',
         requirements: [],
+        qualifyingQuestions: formData.qualifyingQuestions.filter((q) => (q.question || '').trim()).length
+          ? formData.qualifyingQuestions.filter((q) => (q.question || '').trim()).map((q) => ({ question: (q.question || '').trim() }))
+          : undefined,
+        requiredApplicantData: formData.requiredApplicantData,
+        distributionChannels: formData.distributionChannels.length ? formData.distributionChannels : ['taldium_network'],
       };
       if (formData.locations.length > 0) {
         payload.locations = formData.locations;
@@ -209,6 +242,9 @@ export default function PostJobs() {
         locationInput: '',
         pay: { currency: 'USD', min: '', max: '', period: 'Per annum' },
         description: '',
+        qualifyingQuestions: [],
+        requiredApplicantData: ['full_name', 'email'],
+        distributionChannels: ['taldium_network'],
       });
       setSidebarOpen(false);
       toast.success('Job role created successfully!');
@@ -680,6 +716,122 @@ export default function PostJobs() {
                       placeholder="Describe the role, responsibilities, and requirements..."
                       className="w-full px-3 py-2.5 border-0 focus:outline-none focus:ring-0 resize-none"
                     />
+                  </div>
+                </div>
+
+                {/* Qualifying Questions */}
+                <div className="border-t border-gray-200 pt-5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Qualifying Questions</h3>
+                      <p className="text-xs text-gray-500 mt-0.5">Add screening questions for applicants</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData((f) => ({ ...f, qualifyingQuestions: [...f.qualifyingQuestions, { question: '' }] }))}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg"
+                    >
+                      <HiPlus className="w-4 h-4" />
+                      Add Question
+                    </button>
+                  </div>
+                  {formData.qualifyingQuestions.length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      {formData.qualifyingQuestions.map((q, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input
+                            type="text"
+                            value={q.question}
+                            onChange={(e) => {
+                              const next = [...formData.qualifyingQuestions];
+                              next[i] = { question: e.target.value };
+                              setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                            }}
+                            placeholder="e.g. How many years of experience do you have?"
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setFormData((f) => ({ ...f, qualifyingQuestions: f.qualifyingQuestions.filter((_, j) => j !== i) }))}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                          >
+                            <HiX className="w-5 h-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Required Applicant Data */}
+                <div className="border-t border-gray-200 pt-5">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-0.5">Required Applicant Data</h3>
+                  <p className="text-xs text-gray-500 mb-3">Select the information applicants must share when applying. This will notify professionals what data they are sharing.</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {REQUIRED_APPLICANT_DATA_OPTIONS.map((opt) => {
+                      const checked = formData.requiredApplicantData.includes(opt.id);
+                      return (
+                        <label
+                          key={opt.id}
+                          className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                            checked ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData((f) => ({ ...f, requiredApplicantData: [...f.requiredApplicantData, opt.id] }));
+                              } else {
+                                setFormData((f) => ({ ...f, requiredApplicantData: f.requiredApplicantData.filter((id) => id !== opt.id) }));
+                              }
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-gray-800">{opt.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Job Distribution Channels */}
+                <div className="border-t border-gray-200 pt-5">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-0.5">Job Distribution Channels</h3>
+                  <p className="text-xs text-gray-500 mb-3">Choose where this job will be published</p>
+                  <div className="space-y-2">
+                    {DISTRIBUTION_CHANNELS.map((ch) => {
+                      const selected = formData.distributionChannels.includes(ch.id);
+                      return (
+                        <label
+                          key={ch.id}
+                          className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                            selected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFormData((f) => ({ ...f, distributionChannels: [...f.distributionChannels, ch.id] }));
+                              } else {
+                                setFormData((f) => ({ ...f, distributionChannels: f.distributionChannels.filter((id) => id !== ch.id) }));
+                              }
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm font-medium text-gray-900">{ch.label}</span>
+                            <p className="text-xs text-gray-500 truncate">{ch.subtitle}</p>
+                          </div>
+                          {ch.isDefault && (
+                            <span className="text-xs font-medium text-gray-500 shrink-0">Default</span>
+                          )}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

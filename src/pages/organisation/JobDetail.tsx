@@ -3,7 +3,22 @@ import { useNavigate, useParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiClock, HiStar, HiPause, HiPlay, HiDotsVertical } from 'react-icons/hi';
+import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiX, HiClock, HiStar, HiPause, HiPlay, HiDotsVertical, HiAcademicCap, HiBriefcase } from 'react-icons/hi';
+
+// Simple flag helper for profile drawer
+const getFlag = (name: string | null | undefined): string => {
+  if (!name) return '🌐';
+  const n = (name || '').trim();
+  if (n.toLowerCase().includes('nigeria') || n.toLowerCase().includes('nigerian')) return '🇳🇬';
+  if (n.toLowerCase().includes('united states') || n.toLowerCase().includes('usa') || n.toLowerCase().includes('american')) return '🇺🇸';
+  if (n.toLowerCase().includes('united kingdom') || n.toLowerCase().includes('uk') || n.toLowerCase().includes('british')) return '🇬🇧';
+  if (n.toLowerCase().includes('germany') || n.toLowerCase().includes('german')) return '🇩🇪';
+  if (n.toLowerCase().includes('india') || n.toLowerCase().includes('indian')) return '🇮🇳';
+  if (n.toLowerCase().includes('canada') || n.toLowerCase().includes('canadian')) return '🇨🇦';
+  if (n.toLowerCase().includes('australia') || n.toLowerCase().includes('australian')) return '🇦🇺';
+  if (n.toLowerCase().includes('france') || n.toLowerCase().includes('french')) return '🇫🇷';
+  return '🌐';
+};
 
 export default function OrganisationJobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +31,10 @@ export default function OrganisationJobDetail() {
   const [updatingJobStatus, setUpdatingJobStatus] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const statusMenuRef = useRef<HTMLDivElement>(null);
+  const [selectedApplication, setSelectedApplication] = useState<any>(null);
+  const [profileDetail, setProfileDetail] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -78,10 +97,51 @@ export default function OrganisationJobDetail() {
   const handleUpdateStatus = async (applicationId: string, newStatus: string) => {
     try {
       await api.put(`/v1/organisation/applications/${applicationId}/status`, { status: newStatus });
-      toast.success(`Application ${newStatus === 'shortlisted' ? 'shortlisted' : 'status updated'} successfully`);
+      toast.success(`Application ${newStatus === 'shortlisted' ? 'shortlisted' : newStatus === 'rejected' ? 'declined' : 'status updated'} successfully`);
       fetchApplications();
+      if (selectedApplication?.id === applicationId) {
+        setSelectedApplication((prev: any) => (prev ? { ...prev, status: newStatus, hiringStatus: newStatus } : null));
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update application status');
+    }
+  };
+
+  const handleApplicantClick = async (application: any) => {
+    const professionalId = application.professionalId;
+    if (!professionalId) return;
+    setSelectedApplication(application);
+    setProfileDetail(null);
+    setProfileLoading(true);
+    try {
+      const res = await api.get(`/v1/organisation/professionals/${professionalId}`);
+      setProfileDetail(res.data?.data || null);
+    } catch (err) {
+      console.error('Failed to load profile:', err);
+      toast.error('Failed to load profile');
+      setSelectedApplication(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const closeApplicantDrawer = () => {
+    setSelectedApplication(null);
+    setProfileDetail(null);
+  };
+
+  const handleDrawerAction = async (newStatus: string) => {
+    if (!selectedApplication?.id) return;
+    setUpdatingStatus(true);
+    try {
+      await api.put(`/v1/organisation/applications/${selectedApplication.id}/status`, { status: newStatus });
+      toast.success(newStatus === 'shortlisted' ? 'Shortlisted' : newStatus === 'rejected' ? 'Declined' : 'Status updated');
+      fetchApplications();
+      closeApplicantDrawer();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update');
+    } finally {
+      setUpdatingStatus(false);
     }
   };
 
@@ -403,7 +463,14 @@ export default function OrganisationJobDetail() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredApplications.map((application) => (
-                    <tr key={application.id} className="hover:bg-gray-50">
+                    <tr
+                      key={application.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => application.professionalId && handleApplicantClick(application)}
+                      onKeyDown={(e) => e.key === 'Enter' && application.professionalId && handleApplicantClick(application)}
+                      className="hover:bg-gray-50 cursor-pointer"
+                    >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3">
@@ -453,11 +520,12 @@ export default function OrganisationJobDetail() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         {getStatusBadge(application.hiringStatus || application.status)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2">
                           {application.status !== 'shortlisted' && application.status !== 'accepted' && application.status !== 'hired' && (
                             <button
-                              onClick={() => handleUpdateStatus(application.id, 'shortlisted')}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'shortlisted'); }}
                               className="px-3 py-1 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 transition-colors"
                             >
                               Shortlist
@@ -465,7 +533,8 @@ export default function OrganisationJobDetail() {
                           )}
                           {application.status !== 'rejected' && application.status !== 'hired' && (
                             <button
-                              onClick={() => handleUpdateStatus(application.id, 'rejected')}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'rejected'); }}
                               className="px-3 py-1 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 transition-colors"
                             >
                               Reject
@@ -473,7 +542,8 @@ export default function OrganisationJobDetail() {
                           )}
                           {application.status === 'shortlisted' && (
                             <button
-                              onClick={() => handleUpdateStatus(application.id, 'accepted')}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'accepted'); }}
                               className="px-3 py-1 bg-green-500 text-white rounded text-xs font-medium hover:bg-green-600 transition-colors"
                             >
                               Accept
@@ -481,7 +551,8 @@ export default function OrganisationJobDetail() {
                           )}
                           {application.status === 'accepted' && (
                             <button
-                              onClick={() => handleUpdateStatus(application.id, 'hired')}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'hired'); }}
                               className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors"
                             >
                               Hire
@@ -496,6 +567,177 @@ export default function OrganisationJobDetail() {
             </div>
           )}
         </div>
+
+        {/* Applicant profile drawer */}
+        {selectedApplication && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/50" onClick={closeApplicantDrawer} aria-hidden />
+            <div className="relative w-full max-w-lg bg-white shadow-xl overflow-y-auto">
+              {profileLoading ? (
+                <div className="p-8 flex items-center justify-center min-h-[200px]">
+                  <div className="text-gray-500">Loading profile...</div>
+                </div>
+              ) : profileDetail ? (
+                <div className="p-6 pb-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-bold text-gray-900">{profileDetail.name}</h2>
+                    <button type="button" onClick={closeApplicantDrawer} className="p-2 hover:bg-gray-100 rounded-lg">
+                      <HiX className="w-6 h-6 text-gray-500" />
+                    </button>
+                  </div>
+
+                  <div className="flex gap-4 mb-6">
+                    <div className="w-16 h-16 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0 text-brand-700 text-xl font-bold">
+                      {profileDetail.name
+                        ?.split(' ')
+                        .map((s: string) => s[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase() || '?'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <ul className="space-y-1.5 text-sm text-gray-600">
+                        {profileDetail.nationality && (
+                          <li className="flex items-center gap-2">
+                            <span className="text-lg">{getFlag(profileDetail.nationality)}</span>
+                            {profileDetail.nationality}
+                          </li>
+                        )}
+                        {(profileDetail.location?.city || profileDetail.location?.country) && (
+                          <li className="flex items-center gap-2">
+                            <HiLocationMarker className="w-4 h-4 text-gray-400 shrink-0" />
+                            {[profileDetail.location.city, profileDetail.location.country].filter(Boolean).join(', ')}
+                          </li>
+                        )}
+                        {profileDetail.profession && (
+                          <li className="flex items-center gap-2">
+                            <HiBriefcase className="w-4 h-4 text-gray-400 shrink-0" />
+                            {profileDetail.profession}
+                          </li>
+                        )}
+                        <li className="flex items-center gap-2">
+                          <span className="text-gray-400">🕐</span>
+                          {profileDetail.yearsOfExperience ?? 0} years of experience
+                        </li>
+                      </ul>
+                      {profileDetail.verificationStatus && (
+                        <span className="inline-flex mt-2 px-2.5 py-1 rounded-full text-xs font-medium bg-brand-600 text-white">
+                          {profileDetail.verificationStatus.percentage}% — {profileDetail.verificationStatus.status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <section className="mb-6">
+                    <h3 className="text-sm font-bold text-gray-900 mb-2">Skills</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {profileDetail.skills?.length > 0 ? (
+                        profileDetail.skills.map((s: string, i: number) => (
+                          <span key={i} className="px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-sm">
+                            {s}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-gray-500">—</span>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="mb-6">
+                    <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <HiBriefcase className="w-4 h-4" />
+                      Work Experience
+                    </h3>
+                    {profileDetail.workExperience?.length > 0 ? (
+                      <ul className="space-y-3">
+                        {profileDetail.workExperience.map((exp: any) => (
+                          <li key={exp.id}>
+                            <p className="font-medium text-gray-900">{exp.role || exp.jobTitle}</p>
+                            <p className="text-sm text-gray-600">{exp.organisationName || exp.companyName}</p>
+                            <p className="text-xs text-gray-500">
+                              {exp.startDate} — {exp.currentlyWorking ? 'Present' : exp.endDate || '—'}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-500">—</p>
+                    )}
+                  </section>
+
+                  <section className="mb-6">
+                    <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <HiAcademicCap className="w-4 h-4" />
+                      Academic Qualifications
+                    </h3>
+                    {profileDetail.education?.length > 0 ? (
+                      <ul className="space-y-3">
+                        {profileDetail.education.map((edu: any) => (
+                          <li key={edu.id}>
+                            <p className="font-medium text-gray-900">
+                              {[edu.degreeType, edu.fieldOfStudy].filter(Boolean).join(' ') || edu.levelOfEducation || '—'}
+                            </p>
+                            <p className="text-sm text-gray-600">{edu.institutionName}</p>
+                            <p className="text-xs text-gray-500">{edu.endDate || edu.startDate || '—'}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-gray-500">—</p>
+                    )}
+                  </section>
+
+                  {/* Application status & CTAs */}
+                  <div className="border-t border-gray-200 pt-4 mt-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-sm text-gray-500">Hiring status:</span>
+                      {getStatusBadge(selectedApplication?.hiringStatus || selectedApplication?.status)}
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      {selectedApplication?.status !== 'hired' && selectedApplication?.status !== 'accepted' && (
+                        <button
+                          type="button"
+                          disabled={updatingStatus || selectedApplication?.status === 'shortlisted'}
+                          onClick={() => handleDrawerAction('shortlisted')}
+                          className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {selectedApplication?.status === 'shortlisted' ? 'Shortlisted' : 'Shortlist'}
+                        </button>
+                      )}
+                      {selectedApplication?.status !== 'hired' && (
+                        <button
+                          type="button"
+                          disabled={updatingStatus}
+                          onClick={() => handleDrawerAction('hired')}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Hire
+                        </button>
+                      )}
+                      {selectedApplication?.status !== 'rejected' && (
+                        <button
+                          type="button"
+                          disabled={updatingStatus}
+                          onClick={() => handleDrawerAction('rejected')}
+                          className="px-4 py-2 border border-red-500 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Decline
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <p>Could not load profile.</p>
+                  <button type="button" onClick={closeApplicantDrawer} className="mt-4 text-brand-600 hover:underline">
+                    Close
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </OrganisationLayout>
   );
