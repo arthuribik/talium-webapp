@@ -35,6 +35,10 @@ export default function OrganisationJobDetail() {
   const [profileDetail, setProfileDetail] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [actionMenuOpenId, setActionMenuOpenId] = useState<string | null>(null);
+  const [drawerMenuOpen, setDrawerMenuOpen] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+  const drawerMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (id) {
@@ -51,8 +55,15 @@ export default function OrganisationJobDetail() {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (statusMenuRef.current && !statusMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (statusMenuRef.current && !statusMenuRef.current.contains(target)) {
         setStatusMenuOpen(false);
+      }
+      if (actionMenuRef.current && !actionMenuRef.current.contains(target)) {
+        setActionMenuOpenId(null);
+      }
+      if (drawerMenuRef.current && !drawerMenuRef.current.contains(target)) {
+        setDrawerMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -110,6 +121,7 @@ export default function OrganisationJobDetail() {
   const handleApplicantClick = async (application: any) => {
     const professionalId = application.professionalId;
     if (!professionalId) return;
+    setActionMenuOpenId(null);
     setSelectedApplication(application);
     setProfileDetail(null);
     setProfileLoading(true);
@@ -128,6 +140,7 @@ export default function OrganisationJobDetail() {
   const closeApplicantDrawer = () => {
     setSelectedApplication(null);
     setProfileDetail(null);
+    setDrawerMenuOpen(false);
   };
 
   const handleDrawerAction = async (newStatus: string) => {
@@ -439,9 +452,6 @@ export default function OrganisationJobDetail() {
                       Applicant Name
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Role Applied
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -476,13 +486,10 @@ export default function OrganisationJobDetail() {
                           <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center mr-3">
                             <HiUser className="w-5 h-5 text-brand-600" />
                           </div>
-                          <div className="text-sm font-medium text-gray-900">
+                          <div className="text-sm font-medium text-gray-900 hover:text-brand-600 hover:underline cursor-pointer">
                             {application.applicantName || application.professional?.user?.firstName + ' ' + application.professional?.user?.lastName}
                           </div>
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{application.email || application.professional?.user?.email}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{application.roleApplied || application.job?.jobTitle || job.jobTitle}</div>
@@ -521,42 +528,47 @@ export default function OrganisationJobDetail() {
                         {getStatusBadge(application.hiringStatus || application.status)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex gap-2">
-                          {application.status !== 'shortlisted' && application.status !== 'accepted' && application.status !== 'hired' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'shortlisted'); }}
-                              className="px-3 py-1 bg-brand-500 text-white rounded text-xs font-medium hover:bg-brand-600 transition-colors"
-                            >
-                              Shortlist
-                            </button>
-                          )}
-                          {application.status !== 'rejected' && application.status !== 'hired' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'rejected'); }}
-                              className="px-3 py-1 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 transition-colors"
-                            >
-                              Reject
-                            </button>
-                          )}
-                          {application.status === 'shortlisted' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'accepted'); }}
-                              className="px-3 py-1 bg-green-500 text-white rounded text-xs font-medium hover:bg-green-600 transition-colors"
-                            >
-                              Accept
-                            </button>
-                          )}
-                          {application.status === 'accepted' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'hired'); }}
-                              className="px-3 py-1 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 transition-colors"
-                            >
-                              Hire
-                            </button>
+                        <div className="relative flex justify-end" ref={actionMenuOpenId === application.id ? actionMenuRef : undefined}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActionMenuOpenId((prev) => (prev === application.id ? null : application.id));
+                            }}
+                            className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                          >
+                            <HiDotsVertical className="w-5 h-5" />
+                          </button>
+                          {actionMenuOpenId === application.id && (
+                            <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                              {application.status !== 'shortlisted' && application.status !== 'accepted' && application.status !== 'hired' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'shortlisted'); setActionMenuOpenId(null); }}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                  Shortlist
+                                </button>
+                              )}
+                              {application.status !== 'hired' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'hired'); setActionMenuOpenId(null); }}
+                                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                  Hire
+                                </button>
+                              )}
+                              {application.status !== 'rejected' && application.status !== 'hired' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(application.id, 'rejected'); setActionMenuOpenId(null); }}
+                                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                >
+                                  Decline
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </td>
@@ -581,9 +593,54 @@ export default function OrganisationJobDetail() {
                 <div className="p-6 pb-8">
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-bold text-gray-900">{profileDetail.name}</h2>
-                    <button type="button" onClick={closeApplicantDrawer} className="p-2 hover:bg-gray-100 rounded-lg">
-                      <HiX className="w-6 h-6 text-gray-500" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <div className="relative" ref={drawerMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => setDrawerMenuOpen((v) => !v)}
+                          className="p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+                        >
+                          <HiDotsVertical className="w-6 h-6" />
+                        </button>
+                        {drawerMenuOpen && (
+                          <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                            {selectedApplication?.status !== 'shortlisted' && selectedApplication?.status !== 'accepted' && selectedApplication?.status !== 'hired' && (
+                              <button
+                                type="button"
+                                onClick={() => { handleDrawerAction('shortlisted'); setDrawerMenuOpen(false); }}
+                                disabled={updatingStatus}
+                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                Shortlist
+                              </button>
+                            )}
+                            {selectedApplication?.status !== 'hired' && (
+                              <button
+                                type="button"
+                                onClick={() => { handleDrawerAction('hired'); setDrawerMenuOpen(false); }}
+                                disabled={updatingStatus}
+                                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                Hire
+                              </button>
+                            )}
+                            {selectedApplication?.status !== 'rejected' && (
+                              <button
+                                type="button"
+                                onClick={() => { handleDrawerAction('rejected'); setDrawerMenuOpen(false); }}
+                                disabled={updatingStatus}
+                                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                Decline
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <button type="button" onClick={closeApplicantDrawer} className="p-2 hover:bg-gray-100 rounded-lg">
+                        <HiX className="w-6 h-6 text-gray-500" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex gap-4 mb-6">
@@ -687,43 +744,11 @@ export default function OrganisationJobDetail() {
                     )}
                   </section>
 
-                  {/* Application status & CTAs */}
+                  {/* Application status */}
                   <div className="border-t border-gray-200 pt-4 mt-6">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-2">
                       <span className="text-sm text-gray-500">Hiring status:</span>
                       {getStatusBadge(selectedApplication?.hiringStatus || selectedApplication?.status)}
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      {selectedApplication?.status !== 'hired' && selectedApplication?.status !== 'accepted' && (
-                        <button
-                          type="button"
-                          disabled={updatingStatus || selectedApplication?.status === 'shortlisted'}
-                          onClick={() => handleDrawerAction('shortlisted')}
-                          className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {selectedApplication?.status === 'shortlisted' ? 'Shortlisted' : 'Shortlist'}
-                        </button>
-                      )}
-                      {selectedApplication?.status !== 'hired' && (
-                        <button
-                          type="button"
-                          disabled={updatingStatus}
-                          onClick={() => handleDrawerAction('hired')}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Hire
-                        </button>
-                      )}
-                      {selectedApplication?.status !== 'rejected' && (
-                        <button
-                          type="button"
-                          disabled={updatingStatus}
-                          onClick={() => handleDrawerAction('rejected')}
-                          className="px-4 py-2 border border-red-500 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Decline
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>

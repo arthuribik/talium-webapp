@@ -8,6 +8,7 @@ import {
   HiPlus,
   HiSearch,
   HiX,
+  HiTrash,
   HiDotsVertical,
   HiLocationMarker,
   HiCurrencyDollar,
@@ -84,11 +85,11 @@ const REQUIRED_APPLICANT_DATA_OPTIONS: { id: string; label: string }[] = [
 const DISTRIBUTION_CHANNELS: { id: string; label: string; subtitle: string; isDefault?: boolean }[] = [
   { id: 'taldium_network', label: 'Taldium Network', subtitle: 'Organisation page & Taldium Professional Network', isDefault: true },
   { id: 'google_search', label: 'Google Search', subtitle: 'Index on Google Jobs' },
-  { id: 'monday_com', label: 'Monday.com', subtitle: 'Post to Monday.com job board' },
-  { id: 'lensa', label: 'Lensa', subtitle: 'Distribute via Lensa' },
-  { id: 'linkedin', label: 'LinkedIn', subtitle: 'Share on LinkedIn Jobs' },
-  { id: 'indeed', label: 'Indeed', subtitle: 'Post to Indeed' },
-  { id: 'glassdoor', label: 'Glassdoor', subtitle: 'List on Glassdoor' },
+  // { id: 'monday_com', label: 'Monday.com', subtitle: 'Post to Monday.com job board' },
+  // { id: 'lensa', label: 'Lensa', subtitle: 'Distribute via Lensa' },
+  // { id: 'linkedin', label: 'LinkedIn', subtitle: 'Share on LinkedIn Jobs' },
+  // { id: 'indeed', label: 'Indeed', subtitle: 'Post to Indeed' },
+  // { id: 'glassdoor', label: 'Glassdoor', subtitle: 'List on Glassdoor' },
 ];
 
 export default function PostJobs() {
@@ -113,7 +114,7 @@ export default function PostJobs() {
     locationInput: '',
     pay: { currency: 'USD', min: '', max: '', period: 'Per annum' },
     description: '',
-    qualifyingQuestions: [] as Array<{ question: string }>,
+    qualifyingQuestions: [] as Array<{ question: string; type?: string; optional?: boolean }>,
     requiredApplicantData: ['full_name', 'email'] as string[],
     distributionChannels: ['taldium_network'] as string[],
   });
@@ -213,7 +214,13 @@ export default function PostJobs() {
         description: formData.description || '',
         requirements: [],
         qualifyingQuestions: formData.qualifyingQuestions.filter((q) => (q.question || '').trim()).length
-          ? formData.qualifyingQuestions.filter((q) => (q.question || '').trim()).map((q) => ({ question: (q.question || '').trim() }))
+          ? formData.qualifyingQuestions
+              .filter((q) => (q.question || '').trim())
+              .map((q) => ({
+                question: (q.question || '').trim(),
+                type: q.type || 'yes_no',
+                optional: !!q.optional,
+              }))
           : undefined,
         requiredApplicantData: formData.requiredApplicantData,
         distributionChannels: formData.distributionChannels.length ? formData.distributionChannels : ['taldium_network'],
@@ -721,42 +728,91 @@ export default function PostJobs() {
 
                 {/* Qualifying Questions */}
                 <div className="border-t border-gray-200 pt-5">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-900">Qualifying Questions</h3>
-                      <p className="text-xs text-gray-500 mt-0.5">Add screening questions for applicants</p>
+                      <h3 className="text-base font-bold text-gray-900">Qualifying Questions</h3>
+                      <p className="text-sm text-gray-500 mt-0.5">Add screening questions for applicants</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setFormData((f) => ({ ...f, qualifyingQuestions: [...f.qualifyingQuestions, { question: '' }] }))}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg"
+                      onClick={() =>
+                        setFormData((f) => ({
+                          ...f,
+                          qualifyingQuestions: [...f.qualifyingQuestions, { question: '', type: 'yes_no', optional: false }],
+                        }))
+                      }
+                      className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
                       <HiPlus className="w-4 h-4" />
                       Add Question
                     </button>
                   </div>
                   {formData.qualifyingQuestions.length > 0 && (
-                    <div className="space-y-2 mt-3">
+                    <div className="space-y-4 mt-4">
                       {formData.qualifyingQuestions.map((q, i) => (
-                        <div key={i} className="flex gap-2">
-                          <input
-                            type="text"
-                            value={q.question}
-                            onChange={(e) => {
-                              const next = [...formData.qualifyingQuestions];
-                              next[i] = { question: e.target.value };
-                              setFormData((f) => ({ ...f, qualifyingQuestions: next }));
-                            }}
-                            placeholder="e.g. How many years of experience do you have?"
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setFormData((f) => ({ ...f, qualifyingQuestions: f.qualifyingQuestions.filter((_, j) => j !== i) }))}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                          >
-                            <HiX className="w-5 h-5" />
-                          </button>
+                        <div key={i} className="p-4 rounded-lg border border-gray-200 bg-gray-50/50">
+                          <div className="flex gap-3 items-start">
+                            <span className="text-sm font-medium text-gray-600 shrink-0 pt-2.5">Q{i + 1}</span>
+                            <input
+                              type="text"
+                              value={q.question}
+                              onChange={(e) => {
+                                const next = [...formData.qualifyingQuestions];
+                                next[i] = { ...next[i], question: e.target.value };
+                                setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                              }}
+                              placeholder="Enter your question..."
+                              className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFormData((f) => ({ ...f, qualifyingQuestions: f.qualifyingQuestions.filter((_, j) => j !== i) }))}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"
+                            >
+                              <HiTrash className="w-5 h-5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm text-gray-600">Type:</label>
+                              <select
+                                value={q.type || 'yes_no'}
+                                onChange={(e) => {
+                                  const next = [...formData.qualifyingQuestions];
+                                  next[i] = { ...next[i], type: e.target.value };
+                                  setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                                }}
+                                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="yes_no">Yes / No</option>
+                                <option value="text">Text</option>
+                                <option value="multiple_choice">Multiple choice</option>
+                              </select>
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <span className="text-sm text-gray-600">Optional</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={!!q.optional}
+                                onClick={() => {
+                                  const next = [...formData.qualifyingQuestions];
+                                  next[i] = { ...next[i], optional: !next[i].optional };
+                                  setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
+                                  q.optional ? 'bg-brand-500 border-brand-500' : 'bg-gray-200 border-gray-300'
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform ${
+                                    q.optional ? 'translate-x-5' : 'translate-x-0.5'
+                                  }`}
+                                  style={{ marginTop: 2 }}
+                                />
+                              </button>
+                            </label>
+                          </div>
                         </div>
                       ))}
                     </div>
