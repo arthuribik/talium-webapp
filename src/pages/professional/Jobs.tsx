@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
@@ -12,7 +12,6 @@ import {
   HiX,
   HiChevronDown,
   HiBookmark,
-  HiCheckCircle,
   HiStar
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
@@ -48,9 +47,35 @@ interface JobFilters {
   dateTo: string;
 }
 
+const TAB_PARAM = 'tab';
+const VALID_TABS = ['available', 'applications', 'saved', 'offers'] as const;
+
 export default function Jobs() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('available');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get(TAB_PARAM);
+  const initialTab = VALID_TABS.includes(tabFromUrl as any) ? tabFromUrl : 'available';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Sync tab from URL on load / when URL changes (e.g. back button)
+  useEffect(() => {
+    const t = searchParams.get(TAB_PARAM);
+    if (VALID_TABS.includes(t as any)) {
+      setActiveTab(t);
+    }
+  }, [searchParams]);
+
+  const setTab = (tab: string) => {
+    setActiveTab(tab);
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'available') {
+      next.delete(TAB_PARAM);
+    } else {
+      next.set(TAB_PARAM, tab);
+    }
+    setSearchParams(next, { replace: true });
+  };
+
   const [loading, setLoading] = useState(true);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
@@ -67,6 +92,20 @@ export default function Jobs() {
     dateFrom: '',
     dateTo: '',
   });
+
+  const fetchSavedJobIds = async () => {
+    try {
+      const res = await api.get('/v1/professional/saved-jobs');
+      const ids = res.data?.data?.jobIds ?? [];
+      setSavedJobs(Array.isArray(ids) ? ids : []);
+    } catch {
+      setSavedJobs([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchSavedJobIds();
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'available') {
@@ -128,36 +167,30 @@ export default function Jobs() {
   const fetchSavedJobs = async () => {
     setLoading(true);
     try {
-      // TODO: Implement saved jobs endpoint
-      // For now, use localStorage
-      const saved = localStorage.getItem('savedJobs');
-      if (saved) {
-        const savedIds = JSON.parse(saved);
-        setSavedJobs(savedIds);
-        // Fetch jobs for saved IDs
-        const jobsPromises = savedIds.map((id: string) => 
-          (async () => {
-            // Check if this job has been viewed before (unique view tracking)
-            const viewedJobs = JSON.parse(localStorage.getItem('viewedJobs') || '[]');
-            const isUniqueView = !viewedJobs.includes(id);
-            
-            // Add to viewed jobs if it's a unique view
-            if (isUniqueView) {
-              viewedJobs.push(id);
-              localStorage.setItem('viewedJobs', JSON.stringify(viewedJobs));
-            }
-            
-            return api.get(`/v1/jobs/${id}?isUniqueView=${isUniqueView}`);
-          })().catch(() => null)
-        );
-        const jobsResponses = await Promise.all(jobsPromises);
-        const savedJobsData = jobsResponses
-          .filter(res => res?.data?.data)
-          .map(res => res.data.data);
-        setJobs(savedJobsData);
-      } else {
+      const res = await api.get('/v1/professional/saved-jobs');
+      const savedIds: string[] = res.data?.data?.jobIds ?? [];
+      setSavedJobs(Array.isArray(savedIds) ? savedIds : []);
+      if (savedIds.length === 0) {
         setJobs([]);
+        setLoading(false);
+        return;
       }
+      const jobsPromises = savedIds.map((id: string) =>
+        (async () => {
+          const viewedJobs = JSON.parse(localStorage.getItem('viewedJobs') || '[]');
+          const isUniqueView = !viewedJobs.includes(id);
+          if (isUniqueView) {
+            viewedJobs.push(id);
+            localStorage.setItem('viewedJobs', JSON.stringify(viewedJobs));
+          }
+          return api.get(`/v1/jobs/${id}?isUniqueView=${isUniqueView}`).catch(() => null);
+        })()
+      );
+      const jobsResponses = await Promise.all(jobsPromises);
+      const savedJobsData = jobsResponses
+        .filter((r): r is NonNullable<typeof r> => !!r?.data?.data)
+        .map((r) => r.data.data);
+      setJobs(savedJobsData);
     } catch (err) {
       console.error('Failed to fetch saved jobs:', err);
       setJobs([]);
@@ -179,33 +212,22 @@ export default function Jobs() {
     }
   };
 
-  const handleApply = async (jobId: string) => {
+  const handleSaveJob = async (jobId: string) => {
+    const isCurrentlySaved = savedJobs.includes(jobId);
     try {
-      await api.post(`/v1/jobs/${jobId}/apply`, {});
-      toast.success('Application submitted successfully!');
-      await fetchJobs(); // Refresh to update hasApplied status
-      if (activeTab === 'applications') {
-        await fetchApplications();
+      if (isCurrentlySaved) {
+        await api.delete(`/v1/professional/saved-jobs/${jobId}`);
+        setSavedJobs((prev) => prev.filter((id) => id !== jobId));
+        setJobs((prev) => prev.filter((j) => j.id !== jobId));
+        toast.success('Job removed from saved');
+      } else {
+        await api.post('/v1/professional/saved-jobs', { jobId });
+        setSavedJobs((prev) => [...prev, jobId]);
+        toast.success('Job saved');
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to apply for job');
+      toast.error(err.response?.data?.message || (isCurrentlySaved ? 'Failed to unsave job' : 'Failed to save job'));
     }
-  };
-
-  const handleSaveJob = (jobId: string) => {
-    const saved = localStorage.getItem('savedJobs');
-    let savedIds = saved ? JSON.parse(saved) : [];
-    
-    if (savedIds.includes(jobId)) {
-      savedIds = savedIds.filter((id: string) => id !== jobId);
-      toast.success('Job removed from saved');
-    } else {
-      savedIds.push(jobId);
-      toast.success('Job saved successfully');
-    }
-    
-    localStorage.setItem('savedJobs', JSON.stringify(savedIds));
-    setSavedJobs(savedIds);
   };
 
   const clearFilters = () => {
@@ -259,32 +281,6 @@ export default function Jobs() {
     new Set(jobs.map(job => job.organisation.companyName))
   ).sort();
 
-  const getStatusBadge = (status: string) => {
-    switch (status?.toLowerCase()) {
-      case 'hired':
-      case 'accepted':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-            <HiCheckCircle className="w-4 h-4 mr-1" />
-            {status}
-          </span>
-        );
-      case 'rejected':
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-            Rejected
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-            <HiClock className="w-4 h-4 mr-1" />
-            {status || 'Pending'}
-          </span>
-        );
-    }
-  };
-
   return (
     <ProfessionalLayout>
       <div className="p-6">
@@ -300,7 +296,7 @@ export default function Jobs() {
         <div className="mb-6 border-b border-gray-200">
           <div className="flex space-x-4">
             <button
-              onClick={() => setActiveTab('available')}
+              onClick={() => setTab('available')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'available'
                   ? 'border-brand-500 text-brand-600'
@@ -310,7 +306,7 @@ export default function Jobs() {
               Available Jobs {activeTab === 'available' && `(${filteredJobs.length})`}
             </button>
             <button
-              onClick={() => setActiveTab('applications')}
+              onClick={() => setTab('applications')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'applications'
                   ? 'border-brand-500 text-brand-600'
@@ -320,7 +316,7 @@ export default function Jobs() {
               My Applications
             </button>
             <button
-              onClick={() => setActiveTab('saved')}
+              onClick={() => setTab('saved')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'saved'
                   ? 'border-brand-500 text-brand-600'
@@ -330,7 +326,7 @@ export default function Jobs() {
               Saved Jobs
             </button>
             <button
-              onClick={() => setActiveTab('offers')}
+              onClick={() => setTab('offers')}
               className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
                 activeTab === 'offers'
                   ? 'border-brand-500 text-brand-600'
@@ -482,75 +478,67 @@ export default function Jobs() {
                 )}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredJobs.map((job) => (
                   <div
                     key={job.id}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow flex flex-col"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">{job.jobTitle}</h3>
-                            <p className="text-gray-600 mb-2">{job.organisation.companyName}</p>
-                            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                              <div className="flex items-center">
-                                <HiLocationMarker className="w-4 h-4 mr-1" />
-                                {job.location}
-                              </div>
-                              <div className="flex items-center">
-                                <HiBriefcase className="w-4 h-4 mr-1" />
-                                {job.workMode.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
-                              </div>
-                              {job.experienceYears && (
-                                <div className="flex items-center">
-                                  <HiClock className="w-4 h-4 mr-1" />
-                                  {job.experienceYears} year{job.experienceYears > 1 ? 's' : ''} experience
-                                </div>
-                              )}
-                              <div className="flex items-center">
-                                <HiCalendar className="w-4 h-4 mr-1" />
-                                {new Date(job.createdAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleSaveJob(job.id)}
-                            className={`ml-4 p-2 transition-colors ${
-                              savedJobs.includes(job.id)
-                                ? 'text-brand-500 hover:text-brand-600'
-                                : 'text-gray-400 hover:text-brand-500'
-                            }`}
-                            title={savedJobs.includes(job.id) ? 'Unsave job' : 'Save job'}
-                          >
-                            <HiBookmark className={`w-6 h-6 ${savedJobs.includes(job.id) ? 'fill-current' : ''}`} />
-                          </button>
-                        </div>
-                        <p className="text-gray-700 mb-4 line-clamp-2">{job.description}</p>
-                        <div className="flex gap-3">
-                          {job.hasApplied ? (
-                            <div className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium">
-                              ✓ Applied
-                            </div>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => handleApply(job.id)}
-                                className="px-6 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
-                              >
-                                Apply Now
-                              </button>
-                              <button
-                                onClick={() => navigate(`/professional/jobs/${job.id}`)}
-                                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                              >
-                                View Details
-                              </button>
-                            </>
-                          )}
-                        </div>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-bold text-gray-900 mb-1 truncate" title={job.jobTitle}>
+                          {job.jobTitle}
+                        </h3>
+                        <p className="text-gray-600 text-sm truncate" title={job.organisation.companyName}>
+                          {job.organisation.companyName}
+                        </p>
                       </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSaveJob(job.id); }}
+                        className={`ml-2 p-2 shrink-0 transition-colors rounded-lg ${
+                          savedJobs.includes(job.id)
+                            ? 'text-brand-500 hover:text-brand-600 hover:bg-brand-50'
+                            : 'text-gray-400 hover:text-brand-500 hover:bg-gray-100'
+                        }`}
+                        title={savedJobs.includes(job.id) ? 'Unsave job' : 'Save job'}
+                      >
+                        <HiBookmark className={`w-5 h-5 ${savedJobs.includes(job.id) ? 'fill-current' : ''}`} />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 mb-3">
+                      <span className="flex items-center">
+                        <HiLocationMarker className="w-4 h-4 mr-1 shrink-0" />
+                        <span className="truncate">{job.location}</span>
+                      </span>
+                      <span className="flex items-center">
+                        <HiBriefcase className="w-4 h-4 mr-1 shrink-0" />
+                        {job.workMode.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}
+                      </span>
+                      {job.experienceYears && (
+                        <span className="flex items-center">
+                          <HiClock className="w-4 h-4 mr-1 shrink-0" />
+                          {job.experienceYears}y
+                        </span>
+                      )}
+                      <span className="flex items-center">
+                        <HiCalendar className="w-4 h-4 mr-1 shrink-0" />
+                        {new Date(job.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-sm line-clamp-2 mb-4 flex-1">{job.description}</p>
+                    <div className="pt-3 border-t border-gray-100">
+                      {job.hasApplied ? (
+                        <div className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium text-center text-sm">
+                          ✓ Applied
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/professional/jobs/${job.id}`)}
+                          className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
+                        >
+                          View Details
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -574,41 +562,71 @@ export default function Jobs() {
                   You haven't applied to any jobs yet.
                 </p>
                 <button
-                  onClick={() => setActiveTab('available')}
+                  onClick={() => setTab('available')}
                   className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
                 >
                   Browse Jobs
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {applications.map((app) => (
-                  <div
-                    key={app.id}
-                    onClick={() => navigate(`/professional/jobs/${app.jobId}`)}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                          {app.job?.jobTitle || 'Job Title'}
-                        </h3>
-                        <p className="text-gray-600 mb-2">{app.job?.organisation?.companyName || 'Company'}</p>
-                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
-                          <div className="flex items-center">
-                            <HiLocationMarker className="w-4 h-4 mr-1" />
-                            {app.job?.location || 'Location'}
-                          </div>
-                          <div className="flex items-center">
-                            <HiCalendar className="w-4 h-4 mr-1" />
-                            Applied {new Date(app.createdAt).toLocaleDateString()}
-                          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {applications.map((app) => {
+                  const jobTitle = app.jobTitle ?? app.job?.jobTitle ?? 'Job Title';
+                  const companyName = app.companyName ?? app.job?.organisation?.companyName ?? 'Company';
+                  const location = app.location ?? app.job?.location ?? 'Location';
+                  const appliedAt = app.appliedAt ?? app.createdAt;
+                  return (
+                    <div
+                      key={app.id}
+                      className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow flex flex-col"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-lg font-bold text-gray-900 mb-1 truncate" title={jobTitle}>
+                            {jobTitle}
+                          </h3>
+                          <p className="text-gray-600 text-sm truncate" title={companyName}>
+                            {companyName}
+                          </p>
                         </div>
-                        {getStatusBadge(app.status)}
+                        <div className="ml-2 p-2 shrink-0 text-gray-400">
+                          <HiBookmark className="w-5 h-5" />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 mb-3">
+                        <span className="flex items-center">
+                          <HiLocationMarker className="w-4 h-4 mr-1 shrink-0" />
+                          <span className="truncate">{location}</span>
+                        </span>
+                        <span className="flex items-center">
+                          <HiBriefcase className="w-4 h-4 mr-1 shrink-0" />
+                          {app.status === 'hired' || app.status === 'accepted' ? 'Hired' : app.status === 'rejected' ? 'Rejected' : 'Pending'}
+                        </span>
+                        <span className="flex items-center">
+                          <HiCalendar className="w-4 h-4 mr-1 shrink-0" />
+                          {appliedAt ? `Applied ${new Date(appliedAt).toLocaleDateString()}` : '—'}
+                        </span>
+                      </div>
+                      <p className="text-gray-700 text-sm line-clamp-2 mb-4 flex-1">
+                        {app.status === 'pending'
+                          ? 'Your application has been submitted and is under review.'
+                          : app.status === 'hired' || app.status === 'accepted'
+                            ? 'Congratulations! Your application was accepted.'
+                            : app.status === 'rejected'
+                              ? 'This application was not successful.'
+                              : `Application status: ${app.status || 'Pending'}.`}
+                      </p>
+                      <div className="pt-3 border-t border-gray-100">
+                        <button
+                          onClick={() => navigate(`/professional/jobs/${app.jobId}`)}
+                          className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
+                        >
+                          View Details
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
@@ -629,67 +647,70 @@ export default function Jobs() {
                   You haven't saved any jobs yet. Save jobs to view them here.
                 </p>
                 <button
-                  onClick={() => setActiveTab('available')}
+                  onClick={() => setTab('available')}
                   className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
                 >
                   Browse Jobs
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {jobs.map((job) => (
                   <div
                     key={job.id}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow flex flex-col"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <h3 className="text-xl font-bold text-gray-900 mb-2">{job.jobTitle}</h3>
-                            <p className="text-gray-600 mb-2">{job.organisation.companyName}</p>
-                            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                              <div className="flex items-center">
-                                <HiLocationMarker className="w-4 h-4 mr-1" />
-                                {job.location}
-                              </div>
-                              <div className="flex items-center">
-                                <HiCalendar className="w-4 h-4 mr-1" />
-                                {new Date(job.createdAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleSaveJob(job.id)}
-                            className="ml-4 p-2 text-brand-500 hover:text-brand-600 transition-colors"
-                            title="Unsave job"
-                          >
-                            <HiBookmark className="w-6 h-6 fill-current" />
-                          </button>
-                        </div>
-                        <div className="flex gap-3">
-                          {job.hasApplied ? (
-                            <div className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium">
-                              ✓ Applied
-                            </div>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => handleApply(job.id)}
-                                className="px-6 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
-                              >
-                                Apply Now
-                              </button>
-                              <button
-                                onClick={() => navigate(`/professional/jobs/${job.id}`)}
-                                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                              >
-                                View Details
-                              </button>
-                            </>
-                          )}
-                        </div>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-bold text-gray-900 mb-1 truncate" title={job.jobTitle}>
+                          {job.jobTitle}
+                        </h3>
+                        <p className="text-gray-600 text-sm truncate" title={job.organisation?.companyName}>
+                          {job.organisation?.companyName}
+                        </p>
                       </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSaveJob(job.id); }}
+                        className="ml-2 p-2 shrink-0 transition-colors rounded-lg text-brand-500 hover:text-brand-600 hover:bg-brand-50"
+                        title="Unsave job"
+                      >
+                        <HiBookmark className="w-5 h-5 fill-current" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 mb-3">
+                      <span className="flex items-center">
+                        <HiLocationMarker className="w-4 h-4 mr-1 shrink-0" />
+                        <span className="truncate">{job.location}</span>
+                      </span>
+                      <span className="flex items-center">
+                        <HiBriefcase className="w-4 h-4 mr-1 shrink-0" />
+                        {job.workMode?.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) ?? '—'}
+                      </span>
+                      {job.experienceYears && (
+                        <span className="flex items-center">
+                          <HiClock className="w-4 h-4 mr-1 shrink-0" />
+                          {job.experienceYears}y
+                        </span>
+                      )}
+                      <span className="flex items-center">
+                        <HiCalendar className="w-4 h-4 mr-1 shrink-0" />
+                        {new Date(job.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-sm line-clamp-2 mb-4 flex-1">{job.description}</p>
+                    <div className="pt-3 border-t border-gray-100">
+                      {job.hasApplied ? (
+                        <div className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium text-center text-sm">
+                          ✓ Applied
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/professional/jobs/${job.id}`)}
+                          className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
+                        >
+                          View Details
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -714,49 +735,47 @@ export default function Jobs() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {headhuntOffers.map((offer) => (
                   <div
                     key={offer.id}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow flex flex-col"
                   >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <HiStar className="w-5 h-5 text-yellow-500" />
-                          <h3 className="text-lg font-semibold text-gray-900">
-                            Headhunted by {offer.organisationName}
-                          </h3>
-                        </div>
-                        {offer.jobTitle && (
-                          <p className="text-gray-600 mb-2">
-                            Position: <span className="font-medium">{offer.jobTitle}</span>
-                          </p>
-                        )}
-                        {offer.location && (
-                          <div className="flex items-center text-sm text-gray-500 mb-3">
-                            <HiLocationMarker className="w-4 h-4 mr-1" />
-                            {offer.location}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center text-sm text-gray-500">
-                        <HiCalendar className="w-4 h-4 mr-1" />
-                        {new Date(offer.sentAt).toLocaleDateString()}
-                      </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <HiStar className="w-5 h-5 text-yellow-500 shrink-0" />
+                      <h3 className="text-lg font-bold text-gray-900 truncate" title={`Headhunted by ${offer.organisationName}`}>
+                        {offer.organisationName}
+                      </h3>
                     </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                      <p className="text-gray-700 whitespace-pre-line leading-relaxed">
+                    {offer.jobTitle && (
+                      <p className="text-gray-600 text-sm mb-2 truncate" title={offer.jobTitle}>
+                        {offer.jobTitle}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500 mb-3">
+                      {offer.location && (
+                        <span className="flex items-center">
+                          <HiLocationMarker className="w-4 h-4 mr-1 shrink-0" />
+                          <span className="truncate">{offer.location}</span>
+                        </span>
+                      )}
+                      <span className="flex items-center">
+                        <HiCalendar className="w-4 h-4 mr-1 shrink-0" />
+                        {new Date(offer.sentAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex-1 min-h-0">
+                      <p className="text-gray-700 text-sm line-clamp-3 whitespace-pre-line leading-relaxed">
                         {offer.message}
                       </p>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="pt-3 border-t border-gray-100 flex gap-2">
                       {offer.jobId ? (
                         <button
                           onClick={() => navigate(`/professional/jobs/${offer.jobId}`)}
-                          className="px-6 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
+                          className="flex-1 px-4 py-2 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors text-sm"
                         >
-                          View Job Details
+                          View Job
                         </button>
                       ) : null}
                       <button
@@ -765,7 +784,7 @@ export default function Jobs() {
                             navigate(`/organisations/${offer.organisationId}`);
                           }
                         }}
-                        className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm"
                       >
                         View Organisation
                       </button>

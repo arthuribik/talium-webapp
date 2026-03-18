@@ -138,12 +138,19 @@ initializeToken();
 // List of public endpoints that don't require authentication
 // Note: Only GET requests to these endpoints are public, POST/PUT/DELETE require auth
 const publicGetEndpoints = [
-  '/v1/jobs', // GET only - for landing page
+  '/v1/jobs', // GET list - for landing page (but GET /v1/jobs/:id sends token when logged in for hasApplied)
   '/v1/auth/', // Auth endpoints
   '/v1/admin/professionals', // GET only - Public landing page endpoint
   '/v1/admin/organisations', // GET only - Public landing page endpoint
   '/v1/admin/jobs', // GET only - Public landing page endpoint
 ];
+
+// GET /v1/jobs/:jobId should send token when user is logged in (so backend can return hasApplied)
+const isSingleJobGet = (url: string | undefined, method?: string): boolean => {
+  if (!url || method?.toUpperCase() !== 'GET') return false;
+  const path = url.split('?')[0];
+  return /\/v1\/jobs\/[^/]+$/.test(path);
+};
 
 // Check if an endpoint is public (only for GET requests)
 const isPublicEndpoint = (url: string | undefined, method?: string): boolean => {
@@ -152,6 +159,8 @@ const isPublicEndpoint = (url: string | undefined, method?: string): boolean => 
   if (method && method.toUpperCase() !== 'GET') {
     return false;
   }
+  // Single job GET: always send token when available (backend uses it for hasApplied)
+  if (isSingleJobGet(url, method)) return false;
   return publicGetEndpoints.some(endpoint => url.includes(endpoint));
 };
 

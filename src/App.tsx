@@ -42,6 +42,7 @@ import ViewProfessionals from '@/pages/organisation/ViewProfessionals';
 import OrganisationProfessionalDetail from '@/pages/organisation/ProfessionalDetail';
 import PostJobs from '@/pages/organisation/PostJobs';
 import OrganisationJobDetail from '@/pages/organisation/JobDetail';
+import OrganisationApplicantDetail from '@/pages/organisation/ApplicantDetail';
 import OrganisationSettings from '@/pages/organisation/Settings';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
 import Team from '@/pages/organisation/Team';
@@ -637,6 +638,14 @@ function AppRoutes() {
         element={
           <OrganisationRoute>
             <PostJobs />
+          </OrganisationRoute>
+        }
+      />
+      <Route
+        path="/organization/jobs/:jobId/applicants/:applicationId"
+        element={
+          <OrganisationRoute>
+            <OrganisationApplicantDetail />
           </OrganisationRoute>
         }
       />

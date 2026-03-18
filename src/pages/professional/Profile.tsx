@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
-import { 
-  HiUser, 
-  HiPencil, 
-  HiSave, 
-  HiLocationMarker, 
-  HiAcademicCap, 
+import {
+  HiUser,
+  HiPencil,
+  HiSave,
+  HiLocationMarker,
+  HiAcademicCap,
   HiBriefcase,
   HiBadgeCheck,
   HiCalendar,
+  HiShare,
+  HiUsers,
+  HiExternalLink,
 } from 'react-icons/hi';
 export default function Profile() {
   const [loading, setLoading] = useState(true);
@@ -157,6 +161,19 @@ export default function Profile() {
 
   const fullName = `${profile.user?.firstName || ''} ${profile.user?.lastName || ''}`.trim();
   const location = getLocationDisplay();
+  const addressObj = profile.address && typeof profile.address === 'object' ? profile.address : {};
+  const locationsList = Array.isArray(profile.locations) ? profile.locations : [];
+  const familyInfo = profile.familyInfo && typeof profile.familyInfo === 'object' ? profile.familyInfo : null;
+
+  const VerificationCenterLink = ({ tab, children }: { tab?: string; children: React.ReactNode }) => (
+    <Link
+      to={tab ? `/professional/verification?tab=${tab}` : '/professional/verification'}
+      className="inline-flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium"
+    >
+      {children}
+      <HiExternalLink className="w-4 h-4" />
+    </Link>
+  );
 
   return (
     <ProfessionalLayout>
@@ -332,104 +349,103 @@ export default function Profile() {
             )}
           </div>
 
-          {/* Personal Information Section */}
-          {/* <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
+          {/* Personal Information */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <HiUser className="w-5 h-5 mr-2 text-brand-600" />
+                Personal Information
+              </h3>
+              <VerificationCenterLink tab="personal">Manage in Verification Center</VerificationCenterLink>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name (from Verification)
-                </label>
-                <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                  {fullName || 'Not set'}
-                </div>
-                <p className="text-xs text-gray-500 mt-1">Update in Verification Center</p>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">First name</span>
+                <p className="text-gray-900">{profile.user?.firstName || '—'}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email
-                </label>
-                <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                  {profile.user?.email || 'Not set'}
-                </div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Last name</span>
+                <p className="text-gray-900">{profile.user?.lastName || '—'}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nationality (from Verification)
-                </label>
-                {editing ? (
-                  <SearchableList
-                    value={formData.nationality}
-                    onChange={(nationality) => setFormData({ ...formData, nationality })}
-                    options={[{ value: '', label: 'Select Nationality' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                    placeholder="Select Nationality"
-                    className="focus:ring-2 focus:ring-brand-500"
-                  />
-                ) : (
-                  <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                    {profile.nationality || 'Not set'}
-                  </div>
-                )}
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Middle name</span>
+                <p className="text-gray-900">{profile.middleName || '—'}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Current Location - Country (from Verification)
-                </label>
-                {editing ? (
-                  <SearchableList
-                    value={formData.country}
-                    onChange={(country) => setFormData({ ...formData, country })}
-                    options={[{ value: '', label: 'Select Country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                    placeholder="Select Country"
-                    className="focus:ring-2 focus:ring-brand-500"
-                  />
-                ) : (
-                  <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                    {profile.country || 'Not set'}
-                  </div>
-                )}
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Email</span>
+                <p className="text-gray-900">{profile.user?.email || '—'}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date of Birth (from Verification)
-                </label>
-                {editing ? (
-                  <input
-                    type="date"
-                    value={formData.dateOfBirth}
-                    onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
-                    max={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                ) : (
-                  <div className="px-3 py-2 bg-gray-50 rounded-lg text-gray-900">
-                    {profile.dateOfBirth 
-                      ? new Date(profile.dateOfBirth).toLocaleDateString('en-US', { 
-                          year: 'numeric', 
-                          month: 'long', 
-                          day: 'numeric' 
-                        })
-                      : 'Not set'}
-                  </div>
-                )}
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Phone</span>
+                <p className="text-gray-900">{profile.user?.phoneNumber || '—'}</p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Date of birth</span>
+                <p className="text-gray-900">
+                  {profile.dateOfBirth
+                    ? new Date(profile.dateOfBirth).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                    : '—'}
+                </p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Gender</span>
+                <p className="text-gray-900">{profile.gender || '—'}</p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Nationality</span>
+                <p className="text-gray-900">{profile.nationality || '—'}</p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Country</span>
+                <p className="text-gray-900">{profile.country || '—'}</p>
+              </div>
+              <div className="md:col-span-2">
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">Address</span>
+                <p className="text-gray-900">
+                  {[addressObj.address, addressObj.city, addressObj.state].filter(Boolean).join(', ') || profile.address || '—'}
+                </p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">ID type</span>
+                <p className="text-gray-900">{profile.idType ? profile.idType.replace(/_/g, ' ') : '—'}</p>
+              </div>
+              <div>
+                <span className="block text-sm font-medium text-gray-500 mb-0.5">ID number</span>
+                <p className="text-gray-900">{profile.idNumber ? '••••••••' : '—'}</p>
               </div>
             </div>
-          </div> */}
+          </div>
 
-          {/* Educational Information (from Verification) */}
+          {/* Location(s) */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <HiLocationMarker className="w-5 h-5 mr-2 text-brand-600" />
+                Location
+              </h3>
+              <VerificationCenterLink tab="location">Manage in Verification Center</VerificationCenterLink>
+            </div>
+            {locationsList.length > 0 ? (
+              <div className="space-y-3">
+                {locationsList.map((loc: any, i: number) => (
+                  <div key={i} className="border border-gray-100 rounded-lg p-3 text-sm">
+                    {[loc.country, loc.address, loc.city, loc.state].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No location added. Manage in Verification Center.</p>
+            )}
+          </div>
+
+          {/* Educational Information */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center">
                 <HiAcademicCap className="w-5 h-5 mr-2 text-brand-600" />
-                Educational Information (from Verification)
+                Educational Information
               </h3>
-              <button
-                type="button"
-                onClick={() => window.location.href = '/professional/verification'}
-                className="text-sm text-brand-600 hover:text-brand-700"
-              >
-                Manage in Verification Center
-              </button>
+              <VerificationCenterLink tab="education">Manage in Verification Center</VerificationCenterLink>
             </div>
             {profile.education && profile.education.length > 0 ? (
               <div className="space-y-4">
@@ -453,24 +469,51 @@ export default function Profile() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 text-sm">No educational information. Add in Verification Center.</p>
+              <p className="text-gray-500 text-sm">No educational information. Manage in Verification Center.</p>
             )}
           </div>
 
-          {/* Work Experience (from Verification) */}
+          {/* Social links */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <HiShare className="w-5 h-5 mr-2 text-brand-600" />
+                Social links
+              </h3>
+              <VerificationCenterLink tab="social">Manage in Verification Center</VerificationCenterLink>
+            </div>
+            {profile.socialMedia && Object.values(profile.socialMedia).some((v) => v && String(v).trim()) ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                {Object.entries(profile.socialMedia).map(([key, value]) => {
+                  const url = typeof value === 'string' ? value.trim() : '';
+                  if (!url) return null;
+                  const label = key.charAt(0).toUpperCase() + key.slice(1);
+                  return (
+                    <a
+                      key={key}
+                      href={url.startsWith('http') ? url : `https://${url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-brand-600 hover:text-brand-700 hover:underline"
+                    >
+                      {label}
+                    </a>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No social links. Manage in Verification Center.</p>
+            )}
+          </div>
+
+          {/* Work Experience */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center">
                 <HiBriefcase className="w-5 h-5 mr-2 text-brand-600" />
-                Work Experience (from Verification)
+                Work Experience
               </h3>
-              <button
-                type="button"
-                onClick={() => window.location.href = '/professional/verification'}
-                className="text-sm text-brand-600 hover:text-brand-700"
-              >
-                Manage in Verification Center
-              </button>
+              <VerificationCenterLink tab="work">Manage in Verification Center</VerificationCenterLink>
             </div>
             {profile.workExperience && profile.workExperience.length > 0 ? (
               <div className="space-y-4">
@@ -492,24 +535,18 @@ export default function Profile() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 text-sm">No work experience. Add in Verification Center.</p>
+              <p className="text-gray-500 text-sm">No work experience. Manage in Verification Center.</p>
             )}
           </div>
 
-          {/* Certifications (from Verification) */}
+          {/* Certifications */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center">
                 <HiBadgeCheck className="w-5 h-5 mr-2 text-brand-600" />
-                Certifications (from Verification)
+                Certifications
               </h3>
-              <button
-                type="button"
-                onClick={() => window.location.href = '/professional/verification?tab=certification'}
-                className="text-sm text-brand-600 hover:text-brand-700"
-              >
-                Manage in Verification Center
-              </button>
+              <VerificationCenterLink tab="certification">Manage in Verification Center</VerificationCenterLink>
             </div>
             {profile.certifications && profile.certifications.length > 0 ? (
               <div className="space-y-4">
@@ -533,7 +570,49 @@ export default function Profile() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-500 text-sm">No certifications. Add in Verification Center.</p>
+              <p className="text-gray-500 text-sm">No certifications. Manage in Verification Center.</p>
+            )}
+          </div>
+
+          {/* Family & Relationship */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                <HiUsers className="w-5 h-5 mr-2 text-brand-600" />
+                Family & Relationship
+              </h3>
+              <VerificationCenterLink tab="family">Manage in Verification Center</VerificationCenterLink>
+            </div>
+            {familyInfo && (familyInfo.maritalStatus || familyInfo.spouseName || (familyInfo.relations && familyInfo.relations.length > 0)) ? (
+              <div className="space-y-3">
+                {familyInfo.maritalStatus && (
+                  <div>
+                    <span className="block text-sm font-medium text-gray-500 mb-0.5">Marital status</span>
+                    <p className="text-gray-900">{familyInfo.maritalStatus}</p>
+                  </div>
+                )}
+                {familyInfo.spouseName && (
+                  <div>
+                    <span className="block text-sm font-medium text-gray-500 mb-0.5">Spouse name</span>
+                    <p className="text-gray-900">{familyInfo.spouseName}</p>
+                  </div>
+                )}
+                {familyInfo.relations && familyInfo.relations.length > 0 && (
+                  <div>
+                    <span className="block text-sm font-medium text-gray-500 mb-1">Relations</span>
+                    <ul className="space-y-1">
+                      {familyInfo.relations.map((r: any, i: number) => (
+                        <li key={i} className="text-gray-900">
+                          {r.relationType && <span className="font-medium">{r.relationType}: </span>}
+                          {r.fullName || '—'}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No family information. Manage in Verification Center.</p>
             )}
           </div>
 

@@ -113,8 +113,10 @@ export default function PostJobs() {
     locations: [] as string[],
     locationInput: '',
     pay: { currency: 'USD', min: '', max: '', period: 'Per annum' },
+    startDate: '',
+    endDate: '',
     description: '',
-    qualifyingQuestions: [] as Array<{ question: string; type?: string; optional?: boolean }>,
+    qualifyingQuestions: [] as Array<{ question: string; type?: string; optional?: boolean; options?: string[] }>,
     requiredApplicantData: ['full_name', 'email'] as string[],
     distributionChannels: ['taldium_network'] as string[],
   });
@@ -212,6 +214,8 @@ export default function PostJobs() {
         workMode: formData.workMode,
         employmentType: formData.employmentType,
         description: formData.description || '',
+        startDate: formData.startDate || undefined,
+        endDate: formData.endDate || undefined,
         requirements: [],
         qualifyingQuestions: formData.qualifyingQuestions.filter((q) => (q.question || '').trim()).length
           ? formData.qualifyingQuestions
@@ -220,6 +224,7 @@ export default function PostJobs() {
                 question: (q.question || '').trim(),
                 type: q.type || 'yes_no',
                 optional: !!q.optional,
+                ...(q.type === 'multiple_choice' && Array.isArray(q.options) ? { options: q.options.filter((o) => (o || '').trim()) } : {}),
               }))
           : undefined,
         requiredApplicantData: formData.requiredApplicantData,
@@ -248,6 +253,8 @@ export default function PostJobs() {
         locations: [],
         locationInput: '',
         pay: { currency: 'USD', min: '', max: '', period: 'Per annum' },
+        startDate: '',
+        endDate: '',
         description: '',
         qualifyingQuestions: [],
         requiredApplicantData: ['full_name', 'email'],
@@ -691,6 +698,29 @@ export default function PostJobs() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Start Date</label>
+                    <input
+                      type="date"
+                      name="startDate"
+                      value={formData.startDate}
+                      onChange={handleFormChange}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">End Date</label>
+                    <input
+                      type="date"
+                      name="endDate"
+                      value={formData.endDate}
+                      onChange={handleFormChange}
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Job Description</label>
                   <div className="border border-gray-300 rounded-lg overflow-hidden">
@@ -779,7 +809,12 @@ export default function PostJobs() {
                                 value={q.type || 'yes_no'}
                                 onChange={(e) => {
                                   const next = [...formData.qualifyingQuestions];
-                                  next[i] = { ...next[i], type: e.target.value };
+                                  const newType = e.target.value;
+                                  next[i] = {
+                                    ...next[i],
+                                    type: newType,
+                                    ...(newType === 'multiple_choice' && !Array.isArray(next[i].options) ? { options: [''] } : {}),
+                                  };
                                   setFormData((f) => ({ ...f, qualifyingQuestions: next }));
                                 }}
                                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -813,6 +848,56 @@ export default function PostJobs() {
                               </button>
                             </label>
                           </div>
+                          {(q.type || '') === 'multiple_choice' && (
+                            <div className="mt-3 pt-3 border-t border-gray-200">
+                              <p className="text-sm text-gray-600 mb-2">Options</p>
+                              <div className="space-y-2">
+                                {(q.options || ['']).map((opt, oi) => (
+                                  <div key={oi} className="flex items-center gap-2">
+                                    <span className="w-4 h-4 rounded-full border-2 border-gray-400 shrink-0" aria-hidden />
+                                    <input
+                                      type="text"
+                                      value={opt}
+                                      onChange={(e) => {
+                                        const next = [...formData.qualifyingQuestions];
+                                        const opts = [...(next[i].options || [''])];
+                                        opts[oi] = e.target.value;
+                                        next[i] = { ...next[i], options: opts };
+                                        setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                                      }}
+                                      placeholder={`Option ${oi + 1}`}
+                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = [...formData.qualifyingQuestions];
+                                        const opts = (next[i].options || ['']).filter((_, ooi) => ooi !== oi);
+                                        next[i] = { ...next[i], options: opts.length ? opts : [''] };
+                                        setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                                      }}
+                                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg shrink-0"
+                                    >
+                                      <HiX className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = [...formData.qualifyingQuestions];
+                                    const opts = [...(next[i].options || ['']), ''];
+                                    next[i] = { ...next[i], options: opts };
+                                    setFormData((f) => ({ ...f, qualifyingQuestions: next }));
+                                  }}
+                                  className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
+                                >
+                                  <HiPlus className="w-4 h-4" />
+                                  Add Option
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
