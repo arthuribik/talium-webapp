@@ -123,7 +123,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {sidebarOpen && (
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-3">
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-3 px-3">
               Main Menu
             </div>
           )}
@@ -134,13 +134,13 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className={`w-full flex items-center px-4 py-3 rounded-lg transition-colors ${
+                className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-colors text-sm ${
                   active
                     ? 'bg-brand-500 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <IconComponent className="w-5 h-5 mr-3" />
+                <IconComponent className="w-4 h-4 shrink-0 mr-3" />
                 {sidebarOpen && <span className="font-medium">{item.label}</span>}
               </button>
             );

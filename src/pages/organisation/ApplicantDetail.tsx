@@ -279,6 +279,19 @@ export default function ApplicantDetail() {
             {getStatusBadge(application.hiringStatus || application.status)}
           </div>
 
+          {appData.revokedAt != null && appData.revokedAt !== '' && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <p className="text-sm font-medium text-amber-900">
+                This professional has revoked access to their shared data. The revocation takes effect within 48 hours.
+              </p>
+              {appData.revocationReason && (
+                <p className="text-sm text-amber-800 mt-1.5">
+                  <span className="font-medium">Reason:</span> {String(appData.revocationReason)}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left column: Job, Applicant + CTAs, Qualifying answers (sticky on scroll) */}
             <div className="lg:col-span-1 space-y-6 lg:sticky lg:top-6 lg:self-start">
@@ -361,7 +374,7 @@ export default function ApplicantDetail() {
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="p-6 sm:p-8">
-                  <h2 className="text-lg font-bold text-gray-900 mb-4">Applicant data (from Verification Center)</h2>
+                  <h2 className="text-lg font-bold text-gray-900 mb-4">Applicant data</h2>
 
                   {/* Personal */}
                   {(hasPersonal || segmentKeys(PERSONAL_KEYS).length > 0) && (

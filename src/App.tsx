@@ -51,6 +51,7 @@ import ProfessionalJobs from '@/pages/professional/Jobs';
 import ProfessionalJobDetail from '@/pages/professional/JobDetail';
 import ProfessionalProfile from '@/pages/professional/Profile';
 import SharedDataHistory from '@/pages/professional/SharedDataHistory';
+import SharedDataDetail from '@/pages/professional/SharedDataDetail';
 import VerificationCenter from '@/pages/professional/VerificationCenter';
 import ProfessionalSubscription from '@/pages/professional/Subscription';
 import ProfessionalSettings from '@/pages/professional/Settings';
@@ -554,6 +555,14 @@ function AppRoutes() {
         element={
           <ProfessionalRoute>
             <ProfessionalProfile />
+          </ProfessionalRoute>
+        }
+      />
+      <Route
+        path="/professional/shared-data/:id"
+        element={
+          <ProfessionalRoute>
+            <SharedDataDetail />
           </ProfessionalRoute>
         }
       />

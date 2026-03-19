@@ -844,7 +844,12 @@ export default function OrganisationJobDetail() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(application.hiringStatus || application.status)}
+                        <div className="flex flex-col gap-1">
+                          {getStatusBadge(application.hiringStatus || application.status)}
+                          {(application.applicationData as any)?.revokedAt != null && (
+                            <span className="text-xs text-amber-700 font-medium">Access revoked by applicant</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" onClick={(e) => e.stopPropagation()}>
                         <div className="relative flex justify-end" ref={actionMenuOpenId === application.id ? actionMenuRef : undefined}>

@@ -139,7 +139,7 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1">
           {sidebarOpen && (
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4 px-3">
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-3 px-3">
               Main Menu
             </div>
           )}
@@ -150,13 +150,13 @@ export default function ProfessionalLayout({ children }: ProfessionalLayoutProps
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className={`w-full flex items-center px-3 py-3 rounded-lg transition-colors ${
+                className={`w-full flex items-center px-3 py-2.5 rounded-lg transition-colors text-sm ${
                   active
                     ? 'bg-brand-500 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${sidebarOpen ? 'mr-3' : 'mx-auto'}`} />
+                <Icon className={`w-4 h-4 shrink-0 ${sidebarOpen ? 'mr-3' : 'mx-auto'}`} />
                 {sidebarOpen && <span className="font-medium">{item.label}</span>}
               </button>
             );
