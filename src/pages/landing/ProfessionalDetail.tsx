@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { APP_NAME } from '@/constants/app';
+import { plainTextFromHtml } from '@/seo/applySeo';
+import { buildCanonicalUrl } from '@/seo/resolveRouteSeo';
+import { usePageSeo } from '@/seo/usePageSeo';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '@/services/api';
 import LandingLayout from '@/components/landing/LandingLayout';
@@ -92,7 +96,7 @@ export default function ProfessionalDetail() {
           workExperience: prof.workExperience || [],
           description: prof.description || null,
           socialMedia: prof.socialMedia || {},
-          profileImage: prof.profileImage || null,
+          profileImage: prof.profileImageUrl || prof.profileImage || null,
         });
       } else {
         setProfessional(null);
@@ -181,6 +185,21 @@ export default function ProfessionalDetail() {
     }
     return 'Not specified';
   };
+
+  usePageSeo(
+    !loading && professional
+      ? {
+          title:
+            `${professional.user?.firstName || ''} ${professional.user?.lastName || ''}`.trim() || 'Professional',
+          description:
+            plainTextFromHtml(professional.description || '') ||
+            `${getProfession(professional)} — verified professional profile on ${APP_NAME}.`,
+          canonicalUrl: buildCanonicalUrl(`/professionals/${professional.id}`, ''),
+          noIndex: false,
+        }
+      : null,
+    [loading, professional],
+  );
 
   if (loading) {
     return (

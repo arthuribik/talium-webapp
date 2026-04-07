@@ -48,13 +48,13 @@ export default function Home() {
                 <svg viewBox="0 0 400 300" className="w-full h-full">
                   <path
                     d="M50,150 Q100,100 150,150 T250,150 T350,150"
-                    stroke="#2966FF"
+                    stroke="#2a65ff"
                     strokeWidth="2"
                     fill="none"
                   />
-                  <circle cx="100" cy="100" r="3" fill="#2966FF" />
-                  <circle cx="200" cy="150" r="3" fill="#2966FF" />
-                  <circle cx="300" cy="200" r="3" fill="#2966FF" />
+                  <circle cx="100" cy="100" r="3" fill="#2a65ff" />
+                  <circle cx="200" cy="150" r="3" fill="#2a65ff" />
+                  <circle cx="300" cy="200" r="3" fill="#2a65ff" />
                 </svg>
               </div>
 
@@ -100,8 +100,8 @@ export default function Home() {
 
                 {/* Connection Lines */}
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 5 }}>
-                  <line x1="20%" y1="50%" x2="50%" y2="50%" stroke="#2966FF" strokeWidth="2" strokeDasharray="5,5" opacity="0.3" />
-                  <line x1="50%" y1="50%" x2="80%" y2="20%" stroke="#2966FF" strokeWidth="2" strokeDasharray="5,5" opacity="0.3" />
+                  <line x1="20%" y1="50%" x2="50%" y2="50%" stroke="#2a65ff" strokeWidth="2" strokeDasharray="5,5" opacity="0.3" />
+                  <line x1="50%" y1="50%" x2="80%" y2="20%" stroke="#2a65ff" strokeWidth="2" strokeDasharray="5,5" opacity="0.3" />
                 </svg>
               </div>
             </div>
@@ -194,7 +194,7 @@ export default function Home() {
           <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
             <defs>
               <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-                <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#2966FF" strokeWidth="0.5"/>
+                <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#2a65ff" strokeWidth="0.5"/>
               </pattern>
             </defs>
             <rect width="100" height="100" fill="url(#grid)" />
@@ -327,9 +327,9 @@ export default function Home() {
             <div className="relative w-full h-full" style={{ minHeight: '400px' }}>
               <svg viewBox="0 0 800 400" className="w-full h-full opacity-30">
                 {/* Simplified world map outline */}
-                <path d="M100,200 Q150,150 200,200 T300,200" stroke="#2966FF" strokeWidth="2" fill="none" />
-                <path d="M400,150 Q450,100 500,150 T600,150" stroke="#2966FF" strokeWidth="2" fill="none" />
-                <path d="M200,300 Q250,250 300,300 T400,300" stroke="#2966FF" strokeWidth="2" fill="none" />
+                <path d="M100,200 Q150,150 200,200 T300,200" stroke="#2a65ff" strokeWidth="2" fill="none" />
+                <path d="M400,150 Q450,100 500,150 T600,150" stroke="#2a65ff" strokeWidth="2" fill="none" />
+                <path d="M200,300 Q250,250 300,300 T400,300" stroke="#2a65ff" strokeWidth="2" fill="none" />
               </svg>
               {/* Map pins */}
               <div className="absolute top-1/4 left-1/4">

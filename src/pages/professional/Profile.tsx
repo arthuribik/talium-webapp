@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
@@ -8,65 +8,103 @@ import {
   HiPencil,
   HiSave,
   HiLocationMarker,
-  HiAcademicCap,
-  HiBriefcase,
-  HiBadgeCheck,
   HiCalendar,
-  HiShare,
-  HiUsers,
+  HiClock,
   HiExternalLink,
+  HiEye,
+  HiShieldCheck,
+  HiCamera,
+  HiChevronDown,
 } from 'react-icons/hi';
+import { FaLinkedin, FaTwitter, FaGithub } from 'react-icons/fa';
+import { HiGlobeAlt } from 'react-icons/hi2';
+import {
+  formatTimezoneRowDisplay,
+  getSortedTimezoneOptions,
+  type TimezoneOption,
+} from '@/utils/timezones';
+import {
+  ProfileWorkSection,
+  ProfileEducationSection,
+  ProfileLocationsSection,
+  ProfileCertificationsSection,
+  ProfileProjectsSection,
+} from '@/pages/professional/profileVerificationDisplay';
+
+type ProfileTab = 'experience' | 'education' | 'locations' | 'certifications' | 'projects';
+
+function browserDefaultIana(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 export default function Profile() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState<any>(null);
-  const [editing, setEditing] = useState(false);
-  const [editingAbout, setEditingAbout] = useState(false);
   const [savingAbout, setSavingAbout] = useState(false);
+  const [profile, setProfile] = useState<any>(null);
+  const [profileCompleteness, setProfileCompleteness] = useState(0);
+  const [editingAbout, setEditingAbout] = useState(false);
+  const [editingProfession, setEditingProfession] = useState(false);
+  const [activeTab, setActiveTab] = useState<ProfileTab>('experience');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     profession: '',
     description: '',
-    country: '',
-    nationality: '',
-    dateOfBirth: '',
-    socialMedia: {
-      linkedin: '',
-      twitter: '',
-      facebook: '',
-      instagram: '',
-      github: '',
-      portfolio: '',
-    },
   });
+  const [timezoneIana, setTimezoneIana] = useState<string>(() => browserDefaultIana());
+  /** When false and profile has a saved IANA timezone, show compact clock + IANA + edit icon. */
+  const [timezoneEditorOpen, setTimezoneEditorOpen] = useState(false);
+  const [timezoneOpen, setTimezoneOpen] = useState(false);
+  const [timezoneFilter, setTimezoneFilter] = useState('');
+  const [savingTimezone, setSavingTimezone] = useState(false);
+  const timezoneDropdownRef = useRef<HTMLDivElement>(null);
+
+  const timezoneOptions = useMemo(() => getSortedTimezoneOptions(), []);
+  const filteredTimezones = useMemo(() => {
+    const q = timezoneFilter.trim().toLowerCase();
+    if (!q) return timezoneOptions;
+    return timezoneOptions.filter(
+      (o) =>
+        o.iana.toLowerCase().includes(q) ||
+        o.regionLabel.toLowerCase().includes(q) ||
+        o.offsetLabel.toLowerCase().includes(q),
+    );
+  }, [timezoneOptions, timezoneFilter]);
 
   useEffect(() => {
-    fetchProfile();
+    fetchAll();
   }, []);
 
-  const fetchProfile = async () => {
+  useEffect(() => {
+    if (!profile) return;
+    const saved = typeof profile.timezone === 'string' ? profile.timezone.trim() : '';
+    if (!saved) setTimezoneEditorOpen(true);
+  }, [profile?.id, profile?.timezone]);
+
+  const fetchAll = async () => {
     setLoading(true);
+    setPhotoError(false);
     try {
-      // Fetch profile data (80% comes from verification module)
-      const response = await api.get('/v1/professional/profile');
-      const data = response.data.data;
+      const [profRes, dashRes] = await Promise.all([
+        api.get('/v1/professional/profile'),
+        api.get('/v1/professional/dashboard/stats').catch(() => ({ data: { data: null } })),
+      ]);
+      const data = profRes.data.data;
       setProfile(data);
-      
-      // Populate form with data from verification module
+      setProfileCompleteness(dashRes.data?.data?.profileCompleteness ?? 0);
       setFormData({
         profession: data.profession || '',
         description: data.description || '',
-        country: data.country || '',
-        nationality: data.nationality || '',
-        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth).toISOString().split('T')[0] : '',
-        socialMedia: data.socialMedia || {
-          linkedin: '',
-          twitter: '',
-          facebook: '',
-          instagram: '',
-          github: '',
-          portfolio: '',
-        },
       });
+      const savedTz = typeof data.timezone === 'string' ? data.timezone.trim() : '';
+      setTimezoneIana(savedTz || browserDefaultIana());
+      setTimezoneOpen(false);
+      setTimezoneFilter('');
     } catch (err) {
       console.error('Failed to fetch profile:', err);
       toast.error('Failed to load profile');
@@ -82,51 +120,121 @@ export default function Profile() {
         profession: formData.profession,
         description: formData.description,
       });
-      toast.success('About updated');
+      toast.success('Profile updated');
       setEditingAbout(false);
-      await fetchProfile();
+      setEditingProfession(false);
+      await fetchAll();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update summary');
+      toast.error(err.response?.data?.message || 'Failed to update');
     } finally {
       setSavingAbout(false);
     }
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
+  const handleProfilePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file (JPEG, PNG, WebP, etc.)');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be at most 5 MB');
+      return;
+    }
+    setUploadingPhoto(true);
+    setPhotoError(false);
     try {
-      // Update profile - this should NOT cause logout
-      await api.put('/v1/professional/profile', formData);
-      toast.success('Profile updated successfully!');
-      setEditing(false);
-      await fetchProfile(); // Refresh to get updated data
+      const fd = new FormData();
+      fd.append('file', file);
+      await api.post('/v1/professional/upload-profile-image', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Profile photo updated');
+      await fetchAll();
     } catch (err: any) {
-      console.error('Profile update error:', err);
-      // Check if it's a 401 (unauthorized) - this might cause logout
-      if (err.response?.status === 401) {
-        toast.error('Session expired. Please log in again.');
-      } else {
-        toast.error(err.response?.data?.message || 'Failed to update profile');
-      }
+      toast.error(err.response?.data?.message || 'Failed to upload photo');
     } finally {
-      setSaving(false);
+      setUploadingPhoto(false);
+    }
+  };
+
+  const clearProfilePhoto = async () => {
+    setUploadingPhoto(true);
+    try {
+      await api.put('/v1/professional/profile', { profileImageUrl: '' });
+      toast.success('Profile photo removed');
+      setPhotoError(false);
+      await fetchAll();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to remove photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!timezoneOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const el = timezoneDropdownRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setTimezoneOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [timezoneOpen]);
+
+  const saveTimezone = async () => {
+    setSavingTimezone(true);
+    try {
+      await api.put('/v1/professional/profile', { timezone: timezoneIana });
+      toast.success('Timezone saved');
+      setTimezoneOpen(false);
+      setTimezoneEditorOpen(false);
+      await fetchAll();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save timezone');
+    } finally {
+      setSavingTimezone(false);
+    }
+  };
+
+  const storedTimezoneIana = profile?.timezone?.trim() || null;
+  const timezoneBaseline = storedTimezoneIana || browserDefaultIana();
+  const timezoneDirty = timezoneIana !== timezoneBaseline;
+  const showTimezoneEditor = !storedTimezoneIana || timezoneEditorOpen;
+
+  const selectTimezone = (opt: TimezoneOption) => {
+    setTimezoneIana(opt.iana);
+    setTimezoneOpen(false);
+    setTimezoneFilter('');
+  };
+
+  const saveProfessionOnly = async () => {
+    setSavingAbout(true);
+    try {
+      await api.put('/v1/professional/profile', { profession: formData.profession });
+      toast.success('Role updated');
+      setEditingProfession(false);
+      await fetchAll();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update');
+    } finally {
+      setSavingAbout(false);
     }
   };
 
   const getLocationDisplay = () => {
-    if (profile?.workExperience && profile.workExperience.length > 0) {
-      const latestExp = profile.workExperience[profile.workExperience.length - 1];
-      const location = latestExp.location;
-      if (location) {
-        if (typeof location === 'object') {
-          const parts = [];
-          if (location.city) parts.push(location.city);
-          if (location.country) parts.push(location.country);
-          return parts.length > 0 ? parts.join(', ') : null;
-        }
-        return location;
+    if (profile?.workExperience?.length > 0) {
+      const latest = profile.workExperience[profile.workExperience.length - 1];
+      const loc = latest.location;
+      if (loc && typeof loc === 'object') {
+        const parts = [loc.city, loc.country].filter(Boolean);
+        if (parts.length) return parts.join(', ');
       }
+      if (typeof loc === 'string' && loc) return loc;
     }
     return profile?.country || null;
   };
@@ -134,8 +242,8 @@ export default function Profile() {
   if (loading) {
     return (
       <ProfessionalLayout>
-        <div className="p-6">
-          <div className="text-center text-gray-600 py-16">Loading profile...</div>
+        <div className="min-h-[50vh] bg-gray-50 px-4 py-8 sm:px-6">
+          <div className="mx-auto max-w-4xl text-center text-gray-500">Loading profile…</div>
         </div>
       </ProfessionalLayout>
     );
@@ -144,185 +252,432 @@ export default function Profile() {
   if (!profile) {
     return (
       <ProfessionalLayout>
-        <div className="p-6">
-          <div className="flex flex-col items-center justify-center py-16 px-6 bg-white rounded-xl shadow-sm">
-            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-              <HiUser className="w-12 h-12 text-gray-400" />
+        <div className="min-h-[50vh] bg-gray-50 px-4 py-8 sm:px-6">
+          <div className="mx-auto max-w-4xl rounded-2xl border border-gray-200 bg-white px-6 py-16 text-center shadow-sm">
+            <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
+              <HiUser className="h-10 w-10 text-gray-400" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Profile Not Found</h3>
-            <p className="text-sm text-gray-500 text-center max-w-md">
-              Unable to load your profile. Please try again later.
-            </p>
+            <h3 className="text-lg font-semibold text-gray-900">Profile not found</h3>
+            <p className="mt-2 text-sm text-gray-500">Try again later.</p>
           </div>
         </div>
       </ProfessionalLayout>
     );
   }
 
-  const fullName = `${profile.user?.firstName || ''} ${profile.user?.lastName || ''}`.trim();
+  const fullName =
+    `${profile.user?.firstName || ''} ${profile.user?.lastName || ''}`.trim() || 'Professional';
   const location = getLocationDisplay();
-  const addressObj = profile.address && typeof profile.address === 'object' ? profile.address : {};
   const locationsList = Array.isArray(profile.locations) ? profile.locations : [];
-  const familyInfo = profile.familyInfo && typeof profile.familyInfo === 'object' ? profile.familyInfo : null;
+  const projectsList = Array.isArray(profile.projects)
+    ? profile.projects
+    : Array.isArray(profile.professionalProjects)
+      ? profile.professionalProjects
+      : [];
+  const certificationsList = Array.isArray(profile.certifications)
+    ? profile.certifications
+    : profile.certifications && typeof profile.certifications === 'object'
+      ? Object.values(profile.certifications)
+      : [];
+  const social = profile.socialMedia || {};
+  const identityOk = profile.identityStatus === 'verified' || profile.identityVerified;
+  const verifiedAt = profile.identityVerification?.verifiedAt
+    ? new Date(profile.identityVerification.verifiedAt)
+    : null;
+  const updatedLabel = profile.updatedAt
+    ? new Date(profile.updatedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
-  const VerificationCenterLink = ({ tab, children }: { tab?: string; children: React.ReactNode }) => (
+  const VerificationLink = ({ tab, children }: { tab?: string; children: React.ReactNode }) => (
     <Link
       to={tab ? `/professional/verification?tab=${tab}` : '/professional/verification'}
-      className="inline-flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 font-medium"
+      className="font-medium text-brand-600 hover:text-brand-700"
     >
       {children}
-      <HiExternalLink className="w-4 h-4" />
     </Link>
   );
 
+  const tabs: { id: ProfileTab; label: string }[] = [
+    { id: 'experience', label: 'Experience' },
+    { id: 'education', label: 'Education' },
+    { id: 'locations', label: 'Locations' },
+    { id: 'certifications', label: 'Certifications' },
+    { id: 'projects', label: 'Projects' },
+  ];
+
+  const socialLinks: { key: string; href: string; Icon: React.ComponentType<{ className?: string }> }[] =
+    [];
+  const add = (key: string, url: string, Icon: React.ComponentType<{ className?: string }>) => {
+    const u = typeof url === 'string' ? url.trim() : '';
+    if (!u) return;
+    socialLinks.push({
+      key,
+      href: u.startsWith('http') ? u : `https://${u}`,
+      Icon,
+    });
+  };
+  add('linkedin', social.linkedin, FaLinkedin);
+  add('twitter', social.twitter, FaTwitter);
+  add('github', social.github, FaGithub);
+  add('portfolio', social.portfolio, HiGlobeAlt);
+
+  const viewPublic = () => {
+    window.open(`/professionals/${profile.id}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const profilePhotoUrl =
+    (profile.profileImageUrl || profile.profileImage) as string | undefined;
+
   return (
     <ProfessionalLayout>
-      <div className="p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2 flex items-center">
-              <HiUser className="w-6 h-6 mr-2 text-brand-600" />
-              My Profile
-            </h1>
-            <p className="text-gray-600">
-              Your profile information (80% from Verification Center)
-            </p>
-          </div>
-          {/* {!editing && (
+      <div className="min-h-full bg-gray-50 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-4xl space-y-6">
+          {/* Page header */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
             <button
-              onClick={() => setEditing(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
+              type="button"
+              onClick={viewPublic}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50"
             >
-              <HiPencil className="w-4 h-4" />
-              Edit Profile
+              <HiEye className="h-4 w-4 text-gray-500" />
+              View as Public
             </button>
-          )} */}
-        </div>
+          </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
-          {/* Profile Header Card */}
-          <div className="bg-white rounded-xl shadow-sm p-8">
-            <div className="flex items-start gap-6">
-              <div className="w-24 h-24 bg-brand-500 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-3xl">
-                  {fullName.charAt(0).toUpperCase()}
-                </span>
+          {/* Hero card */}
+          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {/* Banner + avatar: avatar is layered on top (z-index) at banner bottom */}
+            <div className="relative isolate">
+              <div className="relative z-0 h-44 overflow-hidden rounded-t-2xl border-b border-brand-100/60 bg-brand-50">
+                <div className="pointer-events-none absolute inset-0 z-0">
+                  <div className="absolute -right-12 -top-20 h-64 w-64 rounded-full bg-brand-200/35" />
+                  <div className="absolute left-10 top-8 h-24 w-24 rounded-full bg-brand-300/25" />
+                  <div className="absolute bottom-0 right-1/4 h-40 w-40 translate-y-1/4 rounded-full bg-white/80" />
+                  <div className="absolute -left-10 bottom-4 h-32 w-32 rounded-full bg-brand-400/20" />
+                  <div className="absolute right-20 top-16 h-3 w-24 rotate-[-20deg] rounded-full bg-brand-500/10" />
+                </div>
               </div>
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">{fullName}</h2>
-                <p className="text-gray-600 mb-4">
-                  {profile.workExperience?.[0]?.role || 'Professional'}
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  {/* {profile.user?.id && (
-                    <div className="flex items-center text-gray-600">
-                      <HiUser className="w-5 h-5 mr-2 text-gray-400" />
-                      <span className="text-sm">
-                        <span className="font-medium">User ID:</span> {profile.user.id}
-                      </span>
-                    </div>
-                  )} */}
-                  {profile.user?.createdAt && (
-                    <div className="flex items-center text-gray-600">
-                      <HiCalendar className="w-5 h-5 mr-2 text-gray-400" />
-                      <span className="text-sm">
-                        <span className="font-medium">Date Joined:</span>{' '}
-                        {new Date(profile.user.createdAt).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                        })}
-                      </span>
-                    </div>
-                  )}
+              <div className="absolute bottom-0 left-5 z-20 translate-y-1/2 sm:left-8">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-label="Upload profile photo"
+                  onChange={handleProfilePhotoChange}
+                  disabled={uploadingPhoto}
+                />
+                <div className="relative flex flex-col items-start">
+                  <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-lg ring-4 ring-white sm:h-32 sm:w-32">
+                    {profilePhotoUrl && !photoError ? (
+                      <img
+                        src={profilePhotoUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        onError={() => setPhotoError(true)}
+                      />
+                    ) : (
+                      <HiUser className="h-14 w-14 text-gray-400 sm:h-16 sm:w-16" />
+                    )}
+                    <button
+                      type="button"
+                      disabled={uploadingPhoto}
+                      onClick={() => photoInputRef.current?.click()}
+                      className="absolute bottom-0.5 right-0.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-white/80 bg-brand-500 text-white shadow-md hover:bg-brand-600 disabled:opacity-50 sm:bottom-1 sm:right-1"
+                      aria-label={profilePhotoUrl ? 'Change profile photo' : 'Add profile photo'}
+                      title={profilePhotoUrl ? 'Change photo' : 'Add photo'}
+                    >
+                      <HiCamera className="h-4 w-4 sm:h-5 sm:w-5" />
+                    </button>
+                    {uploadingPhoto ? (
+                      <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-xs font-medium text-gray-700">
+                        Uploading…
+                      </div>
+                    ) : null}
+                  </div>
+                  {profilePhotoUrl ? (
+                    <button
+                      type="button"
+                      disabled={uploadingPhoto}
+                      onClick={clearProfilePhoto}
+                      className="mt-1.5 max-w-[7rem] text-left text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50 sm:max-w-none"
+                    >
+                      Remove photo
+                    </button>
+                  ) : null}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {location && (
-                    <div className="flex items-center text-gray-600">
-                      <HiLocationMarker className="w-5 h-5 mr-2 text-gray-400" />
-                      <span>{location}</span>
+              </div>
+            </div>
+
+            <div className="px-5 pb-5 pt-[4.75rem] sm:px-8 sm:pb-8 sm:pt-8 sm:pl-[10.5rem]">
+              <div className="min-w-0">
+                  <h2 className="text-2xl font-bold tracking-tight text-gray-900">{fullName}</h2>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    {editingProfession ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="text"
+                          value={formData.profession}
+                          onChange={(e) => setFormData((f) => ({ ...f, profession: e.target.value }))}
+                          placeholder="Role / title"
+                          className="min-w-[12rem] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                        />
+                        <button
+                          type="button"
+                          onClick={saveProfessionOnly}
+                          disabled={savingAbout}
+                          className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData((f) => ({ ...f, profession: profile.profession || '' }));
+                            setEditingProfession(false);
+                          }}
+                          className="text-xs text-gray-500 hover:text-gray-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-base text-gray-600">
+                          {profile.profession || profile.workExperience?.[0]?.role || 'Add your role'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingProfession(true)}
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-600"
+                          aria-label="Edit role"
+                        >
+                          <HiPencil className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {location ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <HiLocationMarker className="h-4 w-4 shrink-0 text-gray-400" />
+                        {location}
+                      </div>
+                    ) : null}
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+                      {!showTimezoneEditor && storedTimezoneIana ? (
+                        <span className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                          <HiClock className="h-4 w-4 shrink-0 text-gray-400" />
+                          <span>{storedTimezoneIana.replace(/_/g, ' ')}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTimezoneIana(storedTimezoneIana);
+                              setTimezoneEditorOpen(true);
+                              setTimezoneOpen(false);
+                              setTimezoneFilter('');
+                            }}
+                            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-600"
+                            aria-label="Edit timezone"
+                          >
+                            <HiPencil className="h-4 w-4" />
+                          </button>
+                        </span>
+                      ) : null}
+                      {showTimezoneEditor ? (
+                        <>
+                          <div
+                            className="relative min-w-[min(100%,12rem)] max-w-lg flex-1 basis-[min(100%,18rem)]"
+                            ref={timezoneDropdownRef}
+                          >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTimezoneOpen((o) => !o);
+                              setTimezoneFilter('');
+                            }}
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700 shadow-sm transition-colors hover:border-gray-300"
+                            aria-expanded={timezoneOpen}
+                            aria-haspopup="listbox"
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <HiClock className="h-4 w-4 shrink-0 text-gray-400" />
+                              <span className="truncate text-gray-600">
+                                {formatTimezoneRowDisplay(timezoneIana)}
+                              </span>
+                            </span>
+                            <HiChevronDown
+                              className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${timezoneOpen ? 'rotate-180' : ''}`}
+                            />
+                          </button>
+                          {timezoneOpen ? (
+                            <div
+                              className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+                              role="listbox"
+                            >
+                              <input
+                                type="search"
+                                value={timezoneFilter}
+                                onChange={(e) => setTimezoneFilter(e.target.value)}
+                                placeholder="Search timezones…"
+                                className="w-full border-b border-gray-100 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                                autoFocus
+                              />
+                              <ul className="max-h-56 overflow-y-auto py-1">
+                                {filteredTimezones.length === 0 ? (
+                                  <li className="px-3 py-2 text-sm text-gray-500">No matches</li>
+                                ) : (
+                                  filteredTimezones.map((opt) => (
+                                    <li key={opt.iana}>
+                                      <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={opt.iana === timezoneIana}
+                                        onClick={() => selectTimezone(opt)}
+                                        className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                                          opt.iana === timezoneIana
+                                            ? 'bg-brand-50 text-brand-900'
+                                            : 'text-gray-800'
+                                        }`}
+                                      >
+                                        <span className="font-medium">{opt.regionLabel}</span>
+                                        <span className="text-xs text-gray-500">
+                                          {opt.offsetLabel} · {opt.iana.replace(/_/g, ' ')}
+                                        </span>
+                                      </button>
+                                    </li>
+                                  ))
+                                )}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={saveTimezone}
+                            disabled={!timezoneDirty || savingTimezone}
+                            className="shrink-0 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {savingTimezone ? 'Saving…' : 'Save'}
+                          </button>
+                          {storedTimezoneIana ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTimezoneEditorOpen(false);
+                                setTimezoneIana(storedTimezoneIana);
+                                setTimezoneOpen(false);
+                                setTimezoneFilter('');
+                              }}
+                              className="text-xs font-medium text-gray-500 hover:text-gray-800"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                        </div>
+                      </>
+                      ) : null}
                     </div>
-                  )}
-                  {/* {profile.nationality && (
-                    <div className="flex items-center text-gray-600">
-                      <HiGlobe className="w-5 h-5 mr-2 text-gray-400" />
-                      <span>Nationality: {profile.nationality}</span>
-                    </div>
-                  )} */}
-                </div>
-                {(profile.socialMedia && Object.keys(profile.socialMedia).length > 0) && (
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-gray-100">
-                    {Object.entries(profile.socialMedia).map(([key, value]) => {
-                      const url = typeof value === 'string' ? value.trim() : '';
-                      if (!url) return null;
-                      const label = key === 'github' ? 'GitHub' : key.charAt(0).toUpperCase() + key.slice(1);
-                      return (
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {socialLinks.length === 0 ? (
+                      <span className="text-sm text-gray-400">No social links yet</span>
+                    ) : (
+                      socialLinks.map(({ key, href, Icon }) => (
                         <a
                           key={key}
-                          href={url.startsWith('http') ? url : `https://${url}`}
+                          href={href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-sm text-brand-600 hover:text-brand-700 hover:underline"
+                          className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-brand-600"
+                          aria-label={key}
                         >
-                          {label}
+                          <Icon className="h-4 w-4" />
                         </a>
-                      );
-                    })}
+                      ))
+                    )}
                   </div>
-                )}
+              </div>
+
+              {!identityOk ? (
+                <div className="mt-6 flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  <HiShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <p>
+                    Verify your Personal Identity in the{' '}
+                    <VerificationLink>Verification Center</VerificationLink> to upload a profile picture
+                    and banner.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                <HiShieldCheck className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">
+                  {Math.min(100, profileCompleteness)}/100
+                </p>
+                <p className="text-sm text-gray-500">ID Score · Updated {updatedLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-800">
+                <HiCalendar className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-gray-900">
+                  {identityOk ? 'Profile valid' : 'Action required'}
+                </p>
+                <p className="text-sm text-gray-500">
+                  {identityOk && verifiedAt
+                    ? `Since ${verifiedAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : identityOk
+                      ? 'Identity verified'
+                      : 'Complete verification to unlock full trust'}
+                </p>
               </div>
             </div>
           </div>
 
-          {/* About Section - Professional summary (bio) */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">About</h3>
+          {/* About */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">About Me</h3>
               {!editingAbout ? (
                 <button
                   type="button"
                   onClick={() => setEditingAbout(true)}
-                  className="p-2 text-gray-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
-                  aria-label="Edit professional summary"
+                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-brand-600"
+                  aria-label="Edit about"
                 >
-                  <HiPencil className="w-5 h-5" />
+                  <HiPencil className="h-5 w-5" />
                 </button>
               ) : null}
             </div>
             {editingAbout ? (
               <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Profession</label>
-                  <input
-                    type="text"
-                    value={formData.profession}
-                    onChange={(e) => setFormData({ ...formData, profession: e.target.value })}
-                    placeholder="e.g. Senior Software Engineer"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Professional summary</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    rows={6}
-                    placeholder="Tell us about yourself..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))}
+                  rows={5}
+                  placeholder="Tell others about your experience and focus areas…"
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                />
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setFormData((f) => ({
-                      ...f,
-                      profession: profile?.profession ?? '',
-                      description: profile?.description ?? '',
-                    }));
+                      setFormData((f) => ({ ...f, description: profile?.description ?? '' }));
                       setEditingAbout(false);
                     }}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
                     Cancel
                   </button>
@@ -330,318 +685,115 @@ export default function Profile() {
                     type="button"
                     onClick={handleSaveAbout}
                     disabled={savingAbout}
-                    className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 transition-colors flex items-center gap-2"
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
-                    <HiSave className="w-4 h-4" />
-                    {savingAbout ? 'Saving...' : 'Save'}
+                    <HiSave className="h-4 w-4" />
+                    {savingAbout ? 'Saving…' : 'Save'}
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
-                {profile.profession && (
-                  <p className="text-gray-600 font-medium">{profile.profession}</p>
-                )}
-                <p className="text-gray-700 whitespace-pre-line">
-                  {profile.description || 'No description provided.'}
-                </p>
-              </div>
+              <p className="text-sm leading-relaxed text-gray-700">
+                {profile.description?.trim()
+                  ? profile.description
+                  : 'Add a short summary so organisations understand your background.'}
+              </p>
             )}
           </div>
 
-          {/* Personal Information */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiUser className="w-5 h-5 mr-2 text-brand-600" />
-                Personal Information
-              </h3>
-              <VerificationCenterLink tab="personal">Manage in Verification Center</VerificationCenterLink>
+          {/* Tabs */}
+          <div>
+            <div className="inline-flex w-full flex-wrap rounded-xl bg-gray-100 p-1 sm:w-auto">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                    activeTab === t.id
+                      ? 'border border-gray-200 bg-white text-gray-900 shadow-sm'
+                      : 'border border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">First name</span>
-                <p className="text-gray-900">{profile.user?.firstName || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Last name</span>
-                <p className="text-gray-900">{profile.user?.lastName || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Middle name</span>
-                <p className="text-gray-900">{profile.middleName || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Email</span>
-                <p className="text-gray-900">{profile.user?.email || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Phone</span>
-                <p className="text-gray-900">{profile.user?.phoneNumber || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Date of birth</span>
-                <p className="text-gray-900">
-                  {profile.dateOfBirth
-                    ? new Date(profile.dateOfBirth).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-                    : '—'}
-                </p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Gender</span>
-                <p className="text-gray-900">{profile.gender || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Nationality</span>
-                <p className="text-gray-900">{profile.nationality || '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Country</span>
-                <p className="text-gray-900">{profile.country || '—'}</p>
-              </div>
-              <div className="md:col-span-2">
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">Address</span>
-                <p className="text-gray-900">
-                  {[addressObj.address, addressObj.city, addressObj.state].filter(Boolean).join(', ') || profile.address || '—'}
-                </p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">ID type</span>
-                <p className="text-gray-900">{profile.idType ? profile.idType.replace(/_/g, ' ') : '—'}</p>
-              </div>
-              <div>
-                <span className="block text-sm font-medium text-gray-500 mb-0.5">ID number</span>
-                <p className="text-gray-900">{profile.idNumber ? '••••••••' : '—'}</p>
-              </div>
-            </div>
-          </div>
 
-          {/* Location(s) */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiLocationMarker className="w-5 h-5 mr-2 text-brand-600" />
-                Location
-              </h3>
-              <VerificationCenterLink tab="location">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {locationsList.length > 0 ? (
-              <div className="space-y-3">
-                {locationsList.map((loc: any, i: number) => (
-                  <div key={i} className="border border-gray-100 rounded-lg p-3 text-sm">
-                    {[loc.country, loc.address, loc.city, loc.state].filter(Boolean).join(' · ') || '—'}
-                  </div>
+            <div className="mt-4 min-h-[200px] rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
+              {activeTab === 'experience' &&
+                (profile.workExperience?.length > 0 ? (
+                  <ProfileWorkSection items={profile.workExperience} />
+                ) : (
+                  <EmptyTab
+                    message="No work experience added yet. Add data in the Verification Center."
+                    tab="work"
+                  />
                 ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No location added. Manage in Verification Center.</p>
-            )}
-          </div>
 
-          {/* Educational Information */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiAcademicCap className="w-5 h-5 mr-2 text-brand-600" />
-                Educational Information
-              </h3>
-              <VerificationCenterLink tab="education">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {profile.education && profile.education.length > 0 ? (
-              <div className="space-y-4">
-                {profile.education.map((edu: any) => (
-                  <div key={edu.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900">{edu.institutionName}</h4>
-                        <p className="text-sm text-gray-600">
-                          {edu.levelOfEducation && `${edu.levelOfEducation} in `}
-                          {edu.fieldOfStudy}
-                          {edu.degreeType && ` - ${edu.degreeType}`}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(edu.startDate).getFullYear()} - {edu.endDate ? new Date(edu.endDate).getFullYear() : 'Present'}
-                          {edu.country && ` • ${edu.country}`}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+              {activeTab === 'education' &&
+                (profile.education?.length > 0 ? (
+                  <ProfileEducationSection items={profile.education} />
+                ) : (
+                  <EmptyTab
+                    message="No education added yet. Add data in the Verification Center."
+                    tab="education"
+                  />
                 ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No educational information. Manage in Verification Center.</p>
-            )}
-          </div>
 
-          {/* Social links */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiShare className="w-5 h-5 mr-2 text-brand-600" />
-                Social links
-              </h3>
-              <VerificationCenterLink tab="social">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {profile.socialMedia && Object.values(profile.socialMedia).some((v) => v && String(v).trim()) ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {Object.entries(profile.socialMedia).map(([key, value]) => {
-                  const url = typeof value === 'string' ? value.trim() : '';
-                  if (!url) return null;
-                  const label = key.charAt(0).toUpperCase() + key.slice(1);
-                  return (
-                    <a
-                      key={key}
-                      href={url.startsWith('http') ? url : `https://${url}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-brand-600 hover:text-brand-700 hover:underline"
-                    >
-                      {label}
-                    </a>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No social links. Manage in Verification Center.</p>
-            )}
-          </div>
-
-          {/* Work Experience */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiBriefcase className="w-5 h-5 mr-2 text-brand-600" />
-                Work Experience
-              </h3>
-              <VerificationCenterLink tab="work">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {profile.workExperience && profile.workExperience.length > 0 ? (
-              <div className="space-y-4">
-                {profile.workExperience.map((exp: any) => (
-                  <div key={exp.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900">{exp.role}</h4>
-                        <p className="text-sm text-gray-600">{exp.organisationName}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(exp.startDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} - {exp.endDate ? new Date(exp.endDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Present'}
-                          {exp.location && typeof exp.location === 'object' && (
-                            <span> • {exp.location.city || ''} {exp.location.country || ''}</span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+              {activeTab === 'locations' &&
+                (locationsList.length > 0 ? (
+                  <ProfileLocationsSection items={locationsList} />
+                ) : (
+                  <EmptyTab
+                    message="No locations added yet. Add data in the Verification Center."
+                    tab="location"
+                  />
                 ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No work experience. Manage in Verification Center.</p>
-            )}
-          </div>
 
-          {/* Certifications */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiBadgeCheck className="w-5 h-5 mr-2 text-brand-600" />
-                Certifications
-              </h3>
-              <VerificationCenterLink tab="certification">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {profile.certifications && profile.certifications.length > 0 ? (
-              <div className="space-y-4">
-                {profile.certifications.map((cert: any) => (
-                  <div key={cert.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900">{cert.name}</h4>
-                        {cert.issuedBy && (
-                          <p className="text-sm text-gray-600">{cert.issuedBy}</p>
-                        )}
-                        {(cert.issuedDate || cert.credentialId) && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {cert.issuedDate && new Date(cert.issuedDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-                            {cert.credentialId && (cert.issuedDate ? ` • ${cert.credentialId}` : cert.credentialId)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+              {activeTab === 'certifications' &&
+                (certificationsList.length > 0 ? (
+                  <ProfileCertificationsSection items={certificationsList} />
+                ) : (
+                  <EmptyTab
+                    message="No certifications yet. Add data in the Verification Center."
+                    tab="certification"
+                  />
                 ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No certifications. Manage in Verification Center.</p>
-            )}
+
+              {activeTab === 'projects' &&
+                (projectsList.length > 0 ? (
+                  <ProfileProjectsSection items={projectsList} />
+                ) : (
+                  <EmptyTab
+                    message="No projects added yet. Add data in the Verification Center."
+                    tab="projects"
+                  />
+                ))}
+            </div>
           </div>
 
-          {/* Family & Relationship */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <HiUsers className="w-5 h-5 mr-2 text-brand-600" />
-                Family & Relationship
-              </h3>
-              <VerificationCenterLink tab="family">Manage in Verification Center</VerificationCenterLink>
-            </div>
-            {familyInfo && (familyInfo.maritalStatus || familyInfo.spouseName || (familyInfo.relations && familyInfo.relations.length > 0)) ? (
-              <div className="space-y-3">
-                {familyInfo.maritalStatus && (
-                  <div>
-                    <span className="block text-sm font-medium text-gray-500 mb-0.5">Marital status</span>
-                    <p className="text-gray-900">{familyInfo.maritalStatus}</p>
-                  </div>
-                )}
-                {familyInfo.spouseName && (
-                  <div>
-                    <span className="block text-sm font-medium text-gray-500 mb-0.5">Spouse name</span>
-                    <p className="text-gray-900">{familyInfo.spouseName}</p>
-                  </div>
-                )}
-                {familyInfo.relations && familyInfo.relations.length > 0 && (
-                  <div>
-                    <span className="block text-sm font-medium text-gray-500 mb-1">Relations</span>
-                    <ul className="space-y-1">
-                      {familyInfo.relations.map((r: any, i: number) => (
-                        <li key={i} className="text-gray-900">
-                          {r.relationType && <span className="font-medium">{r.relationType}: </span>}
-                          {r.fullName || '—'}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No family information. Manage in Verification Center.</p>
-            )}
-          </div>
-
-          {/* Action Buttons */}
-          {editing && (
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(false);
-                  fetchProfile(); // Reset form
-                }}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-6 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              >
-                <HiSave className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          )}
-        </form>
+          <p className="text-center text-xs text-gray-400">
+            Personal details, ID, and family information are managed in the{' '}
+            <VerificationLink>Verification Center</VerificationLink>.
+          </p>
+        </div>
       </div>
     </ProfessionalLayout>
   );
 }
 
+function EmptyTab({ message, tab }: { message: string; tab: string }) {
+  return (
+    <div className="text-center text-sm text-gray-500">
+      <p>{message}</p>
+      <Link
+        to={`/professional/verification?tab=${tab}`}
+        className="mt-4 inline-flex items-center gap-1.5 font-medium text-brand-600 hover:text-brand-700"
+      >
+        Open Verification Center
+        <HiExternalLink className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+}

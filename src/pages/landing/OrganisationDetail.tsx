@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { APP_NAME } from '@/constants/app';
+import { plainTextFromHtml } from '@/seo/applySeo';
+import { buildCanonicalUrl } from '@/seo/resolveRouteSeo';
+import { usePageSeo } from '@/seo/usePageSeo';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '@/services/api';
 import LandingLayout from '@/components/landing/LandingLayout';
@@ -185,6 +189,20 @@ export default function OrganisationDetail() {
       setJobsLoading(false);
     }
   };
+
+  usePageSeo(
+    !loading && organization
+      ? {
+          title: organization.companyName,
+          description:
+            plainTextFromHtml(organization.description || '') ||
+            `${organization.companyName}${organization.industry ? ` — ${organization.industry}` : ''}. Verified organisation on ${APP_NAME}.`,
+          canonicalUrl: buildCanonicalUrl(`/organisations/${organization.id}`, ''),
+          noIndex: false,
+        }
+      : null,
+    [loading, organization],
+  );
 
   if (loading) {
     return (

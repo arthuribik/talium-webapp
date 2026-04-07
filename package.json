@@ -1,5 +1,6 @@
 {
   "name": "taldium-frontend",
+  "description": "Taldium web client — verified profiles for professionals and organisations.",
   "private": true,
   "version": "1.0.0",
   "type": "module",

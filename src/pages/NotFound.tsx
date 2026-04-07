@@ -1,8 +1,21 @@
+import { useLayoutEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { APP_NAME } from '@/constants/app';
+import { applySeo } from '@/seo/applySeo';
 import { HiHome, HiArrowLeft } from 'react-icons/hi';
 import logo from '@/assets/logo.svg';
 
 export default function NotFound() {
+  useLayoutEffect(() => {
+    applySeo({
+      title: 'Page not found',
+      description: `The page you opened is not available on ${APP_NAME}.`,
+      noIndex: true,
+      canonicalUrl:
+        typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : undefined,
+    });
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="max-w-md w-full text-center">

@@ -14,6 +14,7 @@ import {
 } from 'react-icons/hi';
 import { api } from '@/services/api';
 import logo from '@/assets/logo.svg';
+import { APP_DESCRIPTION, APP_NAME } from '@/constants/app';
 
 type SettingsTab = 'general' | 'users' | 'verification' | 'billing';
 type UsersSubTab = 'admin-users' | 'role-management';
@@ -34,8 +35,8 @@ export default function Settings() {
   const [plansLoading, setPlansLoading] = useState(false);
   const [settings, setSettings] = useState({
     // General - About App
-    appName: 'Taldium',
-    appDescription: 'Building a trusted digital ecosystem for professionals and organizations worldwide.',
+    appName: APP_NAME,
+    appDescription: APP_DESCRIPTION,
     appVersion: '1.0.0',
     appLogo: logo,
     

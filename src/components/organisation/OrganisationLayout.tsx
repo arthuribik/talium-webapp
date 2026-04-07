@@ -15,11 +15,12 @@ import {
   HiChevronRight,
   HiChevronDown,
   HiLogout,
-  HiX,
 } from 'react-icons/hi';
 import { MdPerson } from 'react-icons/md';
-import logo from '@/assets/logo.svg';
+import logoWhite from '@/assets/logo-white.svg';
 import { useLogoutCountdown } from '@/hooks/useLogoutCountdown';
+import { userTypeTitle } from '@/utils/userTypeLabel';
+import { LogoutCountdownModal } from '@/components/common/LogoutCountdownModal';
 
 interface OrganisationLayoutProps {
   children: React.ReactNode;
@@ -98,30 +99,39 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Left Sidebar - Fixed */}
-      <div className={`${sidebarOpen ? 'w-64' : 'w-20'} fixed left-0 top-0 h-screen bg-white shadow-lg transition-all duration-300 flex flex-col z-10 overflow-y-auto`}>
+      <div
+        className={`${sidebarOpen ? 'w-64' : 'w-20'} fixed left-0 top-0 h-screen bg-[#0c192c] shadow-lg shadow-black/20 transition-all duration-300 flex flex-col z-10 overflow-y-auto`}
+      >
         {/* Branding */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+        <div className={`flex items-center ${sidebarOpen ? 'justify-between px-5 py-5' : 'flex-col gap-3 px-3 py-4'}`}>
+          <div className={`flex items-center min-w-0 ${sidebarOpen ? 'gap-3' : 'justify-center w-full'}`}>
             {sidebarOpen ? (
-              <img src={logo} alt="Taldium" className="h-8" />
+              <img src={logoWhite} alt="Taldium" className="h-8 w-auto max-w-[140px] object-left object-contain" />
             ) : (
-              <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-sm"></div>
-              </div>
+              <img
+                src={logoWhite}
+                alt=""
+                className="h-9 w-9 shrink-0 object-cover object-left rounded-full"
+                aria-hidden
+              />
             )}
           </div>
           <button
+            type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="text-gray-600 hover:text-gray-900"
+            className="shrink-0 rounded-lg p-1.5 text-[#94a3b8] transition-colors hover:bg-white/5 hover:text-white"
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           >
             {sidebarOpen ? <HiChevronLeft className="w-5 h-5" /> : <HiChevronRight className="w-5 h-5" />}
           </button>
         </div>
 
+        <div className="mx-4 border-t border-white/10" />
+
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 px-4 py-4 space-y-1">
           {sidebarOpen && (
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-3 px-3">
+            <div className="text-[10px] font-semibold text-[#64748b] uppercase tracking-wider mb-3 px-3">
               Main Menu
             </div>
           )}
@@ -131,25 +141,39 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
             return (
               <button
                 key={item.path}
+                type="button"
                 onClick={() => navigate(item.path)}
-                className={`w-full flex items-center px-4 py-2.5 rounded-lg transition-colors text-sm ${
+                className={`w-full flex items-center px-3 py-2.5 rounded-xl text-sm transition-colors ${
                   active
-                    ? 'bg-brand-500 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
+                    ? 'bg-[#1e2d44] text-brand-300'
+                    : 'text-[#94a3b8] hover:bg-white/[0.06] hover:text-[#cbd5e1]'
+                } ${sidebarOpen ? '' : 'justify-center'}`}
               >
-                <IconComponent className="w-4 h-4 shrink-0 mr-3" />
-                {sidebarOpen && <span className="font-medium">{item.label}</span>}
+                <IconComponent className={`w-[18px] h-[18px] shrink-0 ${sidebarOpen ? 'mr-3' : ''}`} />
+                {sidebarOpen && <span className="font-medium truncate text-left">{item.label}</span>}
               </button>
             );
           })}
         </nav>
+
+        <div className="mx-4 border-t border-white/10" />
+
+        <div className="p-4">
+          <button
+            type="button"
+            onClick={handleLogoutClick}
+            className={`w-full flex items-center px-3 py-2.5 rounded-xl text-sm text-[#94a3b8] transition-colors hover:bg-white/[0.06] hover:text-[#cbd5e1] ${sidebarOpen ? '' : 'justify-center'}`}
+          >
+            <HiLogout className={`w-[18px] h-[18px] shrink-0 ${sidebarOpen ? 'mr-3' : ''}`} />
+            {sidebarOpen && <span className="font-medium">Logout</span>}
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
       <div className={`flex-1 flex flex-col ${sidebarOpen ? 'ml-64' : 'ml-20'} transition-all duration-300`}>
         {/* Header */}
-        <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+        <header className="bg-white shadow-sm border-b border-gray-200 px-6 py-2">
           <div className="flex items-center justify-between">
             <div className="flex-1 max-w-md">
               <div className="relative">
@@ -173,7 +197,7 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
                   <span className="text-sm font-medium text-gray-700">
                     {user?.firstName || 'Organisation'} {user?.lastName || ''}
                   </span>
-                  <span className="text-xs text-gray-500">{user?.email || 'org@taldium.com'}</span>
+                  <span className="text-xs text-gray-500">{userTypeTitle(user?.userType)}</span>
                 </div>
                 <HiChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -209,53 +233,15 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
         </main>
       </div>
 
-      {/* Manual Logout Countdown Modal */}
-      {showLogoutModal && logoutCountdown !== null && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative">
-            <button
-              onClick={() => {
-                cancelLogoutCountdown();
-                setShowLogoutModal(false);
-              }}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <HiX className="w-6 h-6" />
-            </button>
-            <div className="text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <HiLogout className="w-8 h-8 text-red-600" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">
-                Logging Out
-              </h3>
-              <p className="text-gray-600 mb-4">
-                You will be logged out in:
-              </p>
-              <div className="text-4xl font-bold text-red-600 mb-6">
-                {formatLogoutTime(logoutCountdown)}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    cancelLogoutCountdown();
-                    setShowLogoutModal(false);
-                  }}
-                  className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={performLogout}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                >
-                  Logout Now
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <LogoutCountdownModal
+        open={showLogoutModal && logoutCountdown !== null}
+        formattedTime={logoutCountdown !== null ? formatLogoutTime(logoutCountdown) : ''}
+        onDismiss={() => {
+          cancelLogoutCountdown();
+          setShowLogoutModal(false);
+        }}
+        onLogoutNow={performLogout}
+      />
     </div>
   );
 }

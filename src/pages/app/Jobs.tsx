@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
+import { APP_NAME } from '@/constants/app';
 
 interface Job {
   id: string;
@@ -58,7 +59,7 @@ export default function Jobs() {
           <div className="flex justify-between h-16">
             <div className="flex items-center">
               <Link to="/" className="text-xl font-bold">
-                Taldium
+                {APP_NAME}
               </Link>
             </div>
             {user && (

@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
+import { APP_NAME } from '@/constants/app';
 
 export default function Footer() {
+  const year = new Date().getFullYear();
   return (
     <footer className="bg-gray-900 text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -11,10 +13,10 @@ export default function Footer() {
               <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center mr-2">
                 <div className="w-3 h-3 bg-white rounded-sm"></div>
               </div>
-              <span className="text-white text-lg font-semibold">taldium</span>
+              <span className="text-white text-lg font-semibold">{APP_NAME}</span>
             </div>
             <p className="text-gray-400 text-sm">
-              © 2025 Taldium. All rights reserved.
+              © {year} {APP_NAME}. All rights reserved.
             </p>
           </div>
 

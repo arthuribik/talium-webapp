@@ -15,11 +15,12 @@ import {
   HiChevronRight,
   HiChevronDown,
   HiLogout,
-  HiX,
 } from 'react-icons/hi';
 import { MdPerson } from 'react-icons/md';
 import logo from '@/assets/logo.svg';
 import { useLogoutCountdown } from '@/hooks/useLogoutCountdown';
+import { LogoutCountdownModal } from '@/components/common/LogoutCountdownModal';
+import { userTypeTitle } from '@/utils/userTypeLabel';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -193,7 +194,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
                   <span className="text-sm font-medium text-gray-700">
                     {user?.firstName || 'Admin'} {user?.lastName || ''}
                   </span>
-                  <span className="text-xs text-gray-500">{user?.email || 'admin@taldium.com'}</span>
+                  <span className="text-xs text-gray-500">{userTypeTitle(user?.userType)}</span>
                 </div>
                 <HiChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -229,53 +230,15 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         </main>
       </div>
 
-      {/* Manual Logout Countdown Modal */}
-      {showLogoutModal && logoutCountdown !== null && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative">
-            <button
-              onClick={() => {
-                cancelLogoutCountdown();
-                setShowLogoutModal(false);
-              }}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <HiX className="w-6 h-6" />
-            </button>
-            <div className="text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <HiLogout className="w-8 h-8 text-red-600" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">
-                Logging Out
-              </h3>
-              <p className="text-gray-600 mb-4">
-                You will be logged out in:
-              </p>
-              <div className="text-4xl font-bold text-red-600 mb-6">
-                {formatLogoutTime(logoutCountdown)}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    cancelLogoutCountdown();
-                    setShowLogoutModal(false);
-                  }}
-                  className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={performLogout}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                >
-                  Logout Now
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <LogoutCountdownModal
+        open={showLogoutModal && logoutCountdown !== null}
+        formattedTime={logoutCountdown !== null ? formatLogoutTime(logoutCountdown) : ''}
+        onDismiss={() => {
+          cancelLogoutCountdown();
+          setShowLogoutModal(false);
+        }}
+        onLogoutNow={performLogout}
+      />
     </div>
   );
 }

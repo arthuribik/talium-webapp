@@ -12,6 +12,7 @@ interface Professional {
   profileCompleteness: number;
   createdAt: string;
   profileImage?: string;
+  profileImageUrl?: string | null;
   user: {
     id: string;
     email: string;
@@ -161,9 +162,9 @@ export default function ProfessionalsLanding() {
                     {/* Profile Picture and Name */}
                     <div className="flex items-center gap-3 mb-4">
                       <div className="w-12 h-12 rounded-full overflow-hidden flex-shrink-0 bg-brand-100 flex items-center justify-center">
-                        {prof.profileImage && !imageErrors.has(prof.id) ? (
+                        {(prof.profileImageUrl || prof.profileImage) && !imageErrors.has(prof.id) ? (
                           <img
-                            src={prof.profileImage}
+                            src={(prof.profileImageUrl || prof.profileImage) as string}
                             alt={`${prof.user.firstName} ${prof.user.lastName}`}
                             className="w-full h-full object-cover"
                             onError={() => {

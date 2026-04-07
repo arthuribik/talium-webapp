@@ -15,10 +15,19 @@ import {
   HiUsers,
   HiDotsVertical,
   HiLocationMarker,
+  HiFolder,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
-type TabKey = 'personal' | 'location' | 'education' | 'social' | 'work' | 'certification' | 'family';
+type TabKey =
+  | 'personal'
+  | 'location'
+  | 'education'
+  | 'social'
+  | 'work'
+  | 'projects'
+  | 'certification'
+  | 'family';
 type SectionStatus = 'verified' | 'pending' | 'rejected' | 'empty' | 'view_only';
 
 const SIDE_TABS: { key: TabKey; label: string; icon: any }[] = [
@@ -27,6 +36,7 @@ const SIDE_TABS: { key: TabKey; label: string; icon: any }[] = [
   { key: 'education', label: 'Educational Information', icon: HiAcademicCap },
   { key: 'social', label: 'Social Media Profiles', icon: HiShare },
   { key: 'work', label: 'Work Experience', icon: HiBriefcase },
+  { key: 'projects', label: 'Projects', icon: HiFolder },
   { key: 'certification', label: 'Certification', icon: HiBadgeCheck },
   { key: 'family', label: 'Family & Relationship', icon: HiUsers },
 ];
@@ -110,7 +120,7 @@ export default function ProfessionalDetail() {
   }, [id]);
 
   const handleVerify = async (
-    type: 'identity' | 'education' | 'experience',
+    type: 'identity' | 'education' | 'experience' | 'project',
     verificationId: string,
     status: 'verified' | 'rejected' = 'verified',
   ) => {
@@ -118,11 +128,11 @@ export default function ProfessionalDetail() {
     setVerifying(`${type}-${verificationId}`);
     try {
       await api.put(`/v1/admin/professionals/${id}/verify/${type}/${verificationId}`, { status });
-      toast.success(
-        status === 'verified'
-          ? `${type.charAt(0).toUpperCase() + type.slice(1)} verified`
-          : `${type.charAt(0).toUpperCase() + type.slice(1)} rejected`,
-      );
+      const label =
+        type === 'project'
+          ? 'Project'
+          : type.charAt(0).toUpperCase() + type.slice(1);
+      toast.success(status === 'verified' ? `${label} verified` : `${label} rejected`);
       fetchProfessional();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update verification');
@@ -200,6 +210,7 @@ export default function ProfessionalDetail() {
   const user = professional.user || {};
   const education = professional.education || [];
   const workExperience = professional.workExperience || [];
+  const projects = professional.projects || professional.professionalProjects || [];
   const socialMedia = professional.socialMedia || {};
   const identityVerification = professional.identityVerification;
   const addressData = professional.address && typeof professional.address === 'object' ? professional.address : {};
@@ -255,6 +266,16 @@ export default function ProfessionalDetail() {
         if (hasRejected) return 'rejected';
         return 'empty';
       }
+      case 'projects': {
+        if (projects.length === 0) return 'empty';
+        const hasPending = projects.some((p: any) => p.verificationStatus === 'pending' || p.verificationStatus === 'under_review');
+        const hasRejected = projects.some((p: any) => p.verificationStatus === 'rejected');
+        const allVerified = projects.every((p: any) => p.verificationStatus === 'verified');
+        if (hasPending) return 'pending';
+        if (allVerified) return 'verified';
+        if (hasRejected) return 'rejected';
+        return 'empty';
+      }
       case 'certification':
         return certifications.length > 0 ? 'view_only' : 'empty';
       case 'family':
@@ -267,7 +288,8 @@ export default function ProfessionalDetail() {
   const canVerifyProfessional =
     getSectionStatus('personal') === 'verified' &&
     (education.length === 0 || getSectionStatus('education') === 'verified') &&
-    (workExperience.length === 0 || getSectionStatus('work') === 'verified');
+    (workExperience.length === 0 || getSectionStatus('work') === 'verified') &&
+    (projects.length === 0 || getSectionStatus('projects') === 'verified');
   const verifiedByAdminAt = professional.verifiedByAdminAt
     ? new Date(professional.verifiedByAdminAt)
     : null;
@@ -651,6 +673,7 @@ export default function ProfessionalDetail() {
                             <FieldRow label="Level of education" value={edu.levelOfEducation?.replace(/_/g, ' ')} />
                             <FieldRow label="Degree type" value={edu.degreeType} />
                             <FieldRow label="Institution" value={edu.institutionName} />
+                            <FieldRow label="Industry / sector" value={edu.institutionIndustry} />
                             <FieldRow
                               label="Duration / Period"
                               value={edu.startDate && (edu.endDate || 'Present') ? `${edu.startDate} – ${edu.endDate || 'Present'}` : null}
@@ -659,12 +682,34 @@ export default function ProfessionalDetail() {
                               label="Cost of education"
                               value={
                                 edu.costOfEducation != null
-                                  ? `${edu.currency || ''} ${Number(edu.costOfEducation).toLocaleString()}`
+                                  ? `${edu.currency || ''} ${Number(edu.costOfEducation).toLocaleString()}${edu.costFrequency ? ` (${String(edu.costFrequency).replace(/_/g, ' ')})` : ''}`
                                   : null
                               }
                             />
+                            <FieldRow label="Pending loan" value={edu.pendingLoanAmount != null ? `${edu.loanCurrency || ''} ${Number(edu.pendingLoanAmount).toLocaleString()}` : null} />
+                            <FieldRow label="Scholarships & aid" value={edu.scholarshipsAndAid} />
                             <FieldRow label="Country" value={edu.country} />
                             <FieldRow label="Field of study" value={edu.fieldOfStudy} />
+                            <FieldRow label="Grade" value={edu.grade} />
+                            <FieldRow label="Program description" value={edu.programDescription} />
+                            <FieldRow label="Coursework & responsibilities" value={edu.academicResponsibilities} />
+                            <FieldRow label="Honors & achievements" value={edu.academicAchievements} />
+                            <FieldRow label="Activities & societies" value={edu.activitiesSocieties} />
+                            <FieldRow label="Associated skills" value={edu.associatedSkills} />
+                            {Array.isArray(edu.programProgression) && edu.programProgression.length > 0 && (
+                              <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-500 mb-0.5">Program milestones</label>
+                                <ul className="list-disc list-inside text-gray-900 text-sm space-y-1">
+                                  {edu.programProgression.map((m: any, idx: number) => (
+                                    <li key={idx}>
+                                      {[m.title, m.startDate, m.endDate || (m.currentlyActive ? 'Current' : '')]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
                             <span
@@ -886,6 +931,138 @@ export default function ProfessionalDetail() {
                                           handleVerify('experience', exp.id, 'rejected');
                                         }}
                                         disabled={verifying === `experience-${exp.id}` || exp.verificationStatus === 'rejected'}
+                                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 flex items-center gap-2"
+                                      >
+                                        <HiXCircle className="w-4 h-4 flex-shrink-0" />
+                                        Reject
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'projects' && (
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-3">
+                    <h2 className="text-lg font-semibold text-gray-900">Projects</h2>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusBadgeClass[getSectionStatus('projects')]}`}>
+                        {statusLabel[getSectionStatus('projects')]}
+                      </span>
+                    </div>
+                  </div>
+                  {projects.length === 0 ? (
+                    <EmptyState
+                      icon={HiFolder}
+                      title="No projects"
+                      description="This professional has not added any projects."
+                    />
+                  ) : (
+                    <div className="space-y-6">
+                      {projects.map((proj: any) => {
+                        const team = Array.isArray(proj.teamMembers) ? proj.teamMembers : [];
+                        return (
+                          <div
+                            key={proj.id}
+                            className="p-4 border border-gray-200 rounded-lg space-y-4"
+                            ref={actionMenuOpen === `project-${proj.id}` ? actionMenuRef : undefined}
+                          >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <FieldRow label="Project title" value={proj.title} />
+                              <div className="md:col-span-2">
+                                <FieldRow label="Description" value={proj.description} />
+                              </div>
+                              <FieldRow
+                                label="Project link"
+                                value={
+                                  proj.projectLink ? (
+                                    <a
+                                      href={proj.projectLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-brand-600 hover:underline"
+                                    >
+                                      Link
+                                    </a>
+                                  ) : null
+                                }
+                              />
+                              <FieldRow
+                                label="Media URL"
+                                value={
+                                  proj.mediaUrl ? (
+                                    <a
+                                      href={proj.mediaUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-brand-600 hover:underline"
+                                    >
+                                      Link
+                                    </a>
+                                  ) : null
+                                }
+                              />
+                              {team.length > 0 && (
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-500 mb-1">Team members</label>
+                                  <ul className="list-disc list-inside text-gray-900 text-sm space-y-1">
+                                    {team.map((m: any, idx: number) => (
+                                      <li key={idx}>
+                                        {[m.name, m.role].filter(Boolean).join(' — ') || '—'}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                              <span
+                                className={`inline-flex px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                                  proj.verificationStatus || 'pending',
+                                )}`}
+                              >
+                                {(proj.verificationStatus || 'pending').charAt(0).toUpperCase() +
+                                  (proj.verificationStatus || 'pending').slice(1)}
+                              </span>
+                              <div className="relative ml-auto">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setActionMenuOpen((o) => (o === `project-${proj.id}` ? null : `project-${proj.id}`))
+                                  }
+                                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                                  aria-label="Actions"
+                                >
+                                  <HiDotsVertical className="w-5 h-5" />
+                                </button>
+                                {actionMenuOpen === `project-${proj.id}` && (
+                                  <div className="absolute right-0 top-full mt-1 py-1 w-44 bg-white rounded-lg border border-gray-200 shadow-lg z-10">
+                                    <button
+                                      onClick={() => {
+                                        setActionMenuOpen(null);
+                                        handleVerify('project', proj.id, 'verified');
+                                      }}
+                                      disabled={verifying === `project-${proj.id}` || proj.verificationStatus === 'verified'}
+                                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                      <HiCheckCircle className="w-4 h-4 flex-shrink-0" />
+                                      Validate
+                                    </button>
+                                    {proj.verificationStatus !== 'verified' && (
+                                      <button
+                                        onClick={() => {
+                                          setActionMenuOpen(null);
+                                          handleVerify('project', proj.id, 'rejected');
+                                        }}
+                                        disabled={verifying === `project-${proj.id}` || proj.verificationStatus === 'rejected'}
                                         className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 flex items-center gap-2"
                                       >
                                         <HiXCircle className="w-4 h-4 flex-shrink-0" />

@@ -6,11 +6,13 @@ import { Toaster } from 'react-hot-toast';
 import { store, persistor } from '@/store/store';
 import { useAppSelector } from '@/store/hooks';
 import { useEffect, useState } from 'react';
+import { RouteSeo } from '@/seo/RouteSeo';
 import Home from '@/pages/landing/Home';
 import About from '@/pages/landing/About';
 import JobsLanding from '@/pages/landing/JobsLanding';
 import ProfessionalsLanding from '@/pages/landing/ProfessionalsLanding';
 import ProfessionalDetail from '@/pages/landing/ProfessionalDetail';
+import ProfessionalContact from '@/pages/landing/ProfessionalContact';
 import OrganisationsLanding from '@/pages/landing/OrganisationsLanding';
 import OrganisationDetail from '@/pages/landing/OrganisationDetail';
 import LandingJobDetail from '@/pages/landing/JobDetail';
@@ -407,6 +409,7 @@ function AppRoutes() {
       <Route path="/jobs/:id" element={<LandingJobDetail />} />
       <Route path="/professionals" element={<ProfessionalsLanding />} />
       <Route path="/professionals/:id" element={<ProfessionalDetail />} />
+      <Route path="/contact/:professionalId" element={<ProfessionalContact />} />
       <Route path="/organisations" element={<OrganisationsLanding />} />
       <Route path="/organisations/:id" element={<OrganisationDetail />} />
       <Route path="/login" element={<Login />} />
@@ -719,6 +722,7 @@ function App() {
       <PersistGate loading={<div className="min-h-screen flex items-center justify-center">Loading...</div>} persistor={persistor}>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
+            <RouteSeo />
             <AppRoutes />
           </BrowserRouter>
           <Toaster

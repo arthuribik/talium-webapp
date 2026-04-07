@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { APP_NAME } from '@/constants/app';
+import { plainTextFromHtml } from '@/seo/applySeo';
+import { buildCanonicalUrl } from '@/seo/resolveRouteSeo';
+import { usePageSeo } from '@/seo/usePageSeo';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
@@ -55,6 +59,20 @@ export default function JobDetail() {
   const [error, setError] = useState('');
   const [showProfessionalModal, setShowProfessionalModal] = useState(false);
   const [hasApplied, setHasApplied] = useState(false);
+
+  usePageSeo(
+    job
+      ? {
+          title: `${job.jobTitle} — ${job.organisation?.companyName || 'Company'}`,
+          description:
+            plainTextFromHtml(job.description) ||
+            `${job.jobTitle} in ${job.location || 'multiple locations'}. Apply on ${APP_NAME}.`,
+          canonicalUrl: buildCanonicalUrl(`/jobs/${job.id}`, ''),
+          noIndex: false,
+        }
+      : null,
+    [job],
+  );
 
   useEffect(() => {
     if (id) {
