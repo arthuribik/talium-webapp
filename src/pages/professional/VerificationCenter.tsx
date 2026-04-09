@@ -470,10 +470,6 @@ function monthShortCode(monthValue: string): string {
   return opt ? opt.label.slice(0, 3) : '';
 }
 
-function qualificationDisplayLabel(value: string): string {
-  return QUALIFICATION_OPTIONS.find((o) => o.value === value)?.label || value || '';
-}
-
 function schoolTypeDisplayLabel(value: string): string {
   if (!value?.trim()) return '—';
   return SCHOOL_TYPE_OPTIONS.find((o) => o.value === value)?.label || value;
@@ -965,13 +961,11 @@ export default function VerificationCenter() {
   // Education (list of entries like Location)
   const [educationEntriesList, setEducationEntriesList] = useState<EducationEntry[]>([]);
   const [educationDraft, setEducationDraft] = useState<EducationEntry>(() => emptyEducation());
-  const [educationEditingIndex, setEducationEditingIndex] = useState<number | null>(null);
   const [educationSaving, setEducationSaving] = useState(false);
 
   // Work (list of entries like Location)
   const [workEntriesList, setWorkEntriesList] = useState<WorkEntry[]>([]);
   const [workDraft, setWorkDraft] = useState<WorkEntry>(() => emptyWork());
-  const [workEditingIndex, setWorkEditingIndex] = useState<number | null>(null);
   const [workSaving, setWorkSaving] = useState(false);
 
   const [projectsList, setProjectsList] = useState<ProjectEntry[]>([]);
@@ -1018,6 +1012,17 @@ export default function VerificationCenter() {
       personal.nationality
     );
   }, [personal.firstName, personal.lastName, personal.dateOfBirth, personal.gender, personal.nationality]);
+
+  const personalAgeYears = useMemo(() => {
+    if (!personal.dateOfBirth?.trim()) return null;
+    const d = new Date(personal.dateOfBirth);
+    if (Number.isNaN(d.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1;
+    return age;
+  }, [personal.dateOfBirth]);
 
   const identityFlowComplete =
     identityVerificationPath !== 'none' || verificationStatus.personal.verified;
@@ -1624,7 +1629,7 @@ export default function VerificationCenter() {
         verificationStatus: 'pending',
         isDefault: isFirst,
       };
-      const next = isFirst ? [newLoc] : [...prev, newLoc];
+      const next = isFirst ? [newLoc] : [newLoc, ...prev];
       queueMicrotask(() => tryPersistLocations(next, true));
       return next;
     });
@@ -1653,57 +1658,27 @@ export default function VerificationCenter() {
   };
 
   const commitEducationDraft = () => {
-    const labelIndex = educationEditingIndex ?? educationEntriesList.length;
+    const labelIndex = educationEntriesList.length;
     const err = validateEducationEntry(educationDraft, labelIndex);
     if (err) {
       toast.error(err);
       return;
     }
-    if (educationEditingIndex != null) {
-      const i = educationEditingIndex;
-      const merged = cloneEducationEntry(educationDraft);
-      setEducationEntriesList((prev) => {
-        const next = prev.map((e, idx) => (idx === i ? merged : e));
-        queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      setEducationEditingIndex(null);
-      toast.success('Education updated');
-    } else {
-      const entry = cloneEducationEntry({
-        ...educationDraft,
-        id: undefined,
-        eduVerificationStatus: 'pending',
-      });
-      setEducationEntriesList((prev) => {
-        const next = [...prev, entry];
-        queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      toast.success('Education added');
-    }
+    const entry = cloneEducationEntry({
+      ...educationDraft,
+      id: undefined,
+      eduVerificationStatus: 'pending',
+    });
+    setEducationEntriesList((prev) => {
+      const next = [entry, ...prev];
+      queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
+      return next;
+    });
+    toast.success('Education added');
     setEducationDraft(emptyEducation());
-  };
-
-  const beginEditEducationEntry = (index: number) => {
-    const e = educationEntriesList[index];
-    if (!e) return;
-    setEducationDraft(cloneEducationEntry(e));
-    setEducationEditingIndex(index);
-  };
-
-  const cancelEducationDraft = () => {
-    setEducationDraft(emptyEducation());
-    setEducationEditingIndex(null);
   };
 
   const removeEducationEntry = (index: number) => {
-    if (educationEditingIndex === index) {
-      setEducationDraft(emptyEducation());
-      setEducationEditingIndex(null);
-    } else if (educationEditingIndex != null && educationEditingIndex > index) {
-      setEducationEditingIndex(educationEditingIndex - 1);
-    }
     setEducationEntriesList((prev) => {
       const next = prev.filter((_, i) => i !== index);
       queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
@@ -1734,7 +1709,7 @@ export default function VerificationCenter() {
   };
 
   const commitWorkDraft = () => {
-    const labelIndex = workEditingIndex ?? workEntriesList.length;
+    const labelIndex = workEntriesList.length;
     const err = validateWorkEntry(workDraft, labelIndex);
     if (err) {
       toast.error(err);
@@ -1747,37 +1722,14 @@ export default function VerificationCenter() {
       startDate: primary.startDate,
       endDate: primary.currentlyWorking ? '' : primary.endDate,
     };
-    if (workEditingIndex != null) {
-      const i = workEditingIndex;
-      setWorkEntriesList((prev) => {
-        const next = prev.map((e, idx) => (idx === i ? synced : e));
-        queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      setWorkEditingIndex(null);
-      toast.success('Work experience updated');
-    } else {
-      const entry = { ...synced, id: undefined, workVerificationStatus: 'pending' as const };
-      setWorkEntriesList((prev) => {
-        const next = [...prev, entry];
-        queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      toast.success('Work experience added');
-    }
+    const entry = { ...synced, id: undefined, workVerificationStatus: 'pending' as const };
+    setWorkEntriesList((prev) => {
+      const next = [entry, ...prev];
+      queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
+      return next;
+    });
+    toast.success('Work experience added');
     setWorkDraft(emptyWork());
-  };
-
-  const beginEditWorkEntry = (index: number) => {
-    const e = workEntriesList[index];
-    if (!e) return;
-    setWorkDraft(cloneWorkEntry(e));
-    setWorkEditingIndex(index);
-  };
-
-  const cancelWorkDraft = () => {
-    setWorkDraft(emptyWork());
-    setWorkEditingIndex(null);
   };
 
   const onSelfDeclarationBackOrClose = () => {
@@ -1818,12 +1770,6 @@ export default function VerificationCenter() {
   };
 
   const removeWorkEntry = (index: number) => {
-    if (workEditingIndex === index) {
-      setWorkDraft(emptyWork());
-      setWorkEditingIndex(null);
-    } else if (workEditingIndex != null && workEditingIndex > index) {
-      setWorkEditingIndex(workEditingIndex - 1);
-    }
     setWorkEntriesList((prev) => {
       const next = prev.filter((_, i) => i !== index);
       queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
@@ -3117,21 +3063,140 @@ export default function VerificationCenter() {
                   </div>
                 </div>
               ) : (
-                <div className="relative space-y-6 min-h-[280px] py-6 max-w-lg mx-auto px-1">
+                <div className="space-y-6 min-h-[280px]">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between gap-y-2">
+                    <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:justify-end">
+                      {verificationStatus.personal.verified ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Verified
+                        </span>
+                      ) : verificationStatus.personal.completed ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                          Pending verification
+                        </span>
+                      ) : null}
+                      {identityVerificationPath === 'self' && (
+                        <span className="text-xs text-gray-500">via Self Declaration</span>
+                      )}
+                      {identityVerificationPath === 'gov' && (
+                        <span className="text-xs text-gray-500">via Government ID</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5 text-sm border-b border-gray-200 pb-6">
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
+                      <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                        {personal.firstName?.trim() || '—'}
+                        {!!personal.firstName?.trim() && (
+                          <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
+                      <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                        {personal.lastName?.trim() || '—'}
+                        {!!personal.lastName?.trim() && (
+                          <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
+                      <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
+                      <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
+                      <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
+                        {personal.dateOfBirth
+                          ? (() => {
+                              const d = new Date(personal.dateOfBirth);
+                              return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
+                            })()
+                          : '—'}
+                        {personalAgeYears != null && (
+                          <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
+                      <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiMail className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Email Verification</span>
+                      </div>
+                      {userEmailVerified ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
+                          Verified
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiPhone className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Phone Verification</span>
+                      </div>
+                      {userPhoneVerified ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
+                          Verified
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiVideoCamera className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Liveness Check</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {livenessCompleteLocal && profile?.livenessSelfieUrl ? (
+                          <img
+                            src={profile.livenessSelfieUrl}
+                            alt=""
+                            className="h-8 w-8 rounded-md border border-gray-200 object-cover"
+                          />
+                        ) : null}
+                        {livenessCompleteLocal ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Completed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                    className="absolute right-0 top-0 text-sm font-semibold text-brand-600 hover:text-brand-700"
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 hover:text-brand-600"
                   >
-                    Edit Data
+                    <HiLockClosed className="w-4 h-4 text-gray-500" aria-hidden />
+                    Request Edit
                   </button>
-                  <div className="text-center pt-8 px-4">
-                    <HiCheckCircle className="w-14 h-14 text-brand-500 mx-auto" />
-                    <h2 className="text-lg font-semibold text-gray-900 mt-3">Personal flow complete</h2>
-                    <p className="text-sm text-gray-600 mt-2">
-                      You have finished add data, identity verification, email and phone, and liveness for this section.
-                    </p>
-                  </div>
                 </div>
               )}
             </div>
@@ -3153,61 +3218,6 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex items-center gap-2">
-                  <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0" />
-                  <h3 className="text-base font-semibold text-gray-900">Add Location</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
-                    <SearchableList
-                      value={locationDraft.country}
-                      onChange={(country) => setLocationDraft((d) => ({ ...d, country }))}
-                      options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                      placeholder="Select country"
-                      className="[&_button]:bg-gray-50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">State / Province / District</label>
-                    <input
-                      type="text"
-                      value={locationDraft.state}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, state: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                    <input
-                      type="text"
-                      value={locationDraft.city}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, city: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Street Number & Name</label>
-                    <input
-                      type="text"
-                      value={locationDraft.address}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, address: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={addLocationFromDraft}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-                >
-                  <HiPlus className="w-4 h-4" />
-                  {saving ? 'Saving...' : 'Add Location'}
-                </button>
               </div>
 
               <div className="space-y-4">
@@ -3341,6 +3351,61 @@ export default function VerificationCenter() {
                 })}
               </div>
 
+              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0" />
+                  <h3 className="text-base font-semibold text-gray-900">Add Location</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
+                    <SearchableList
+                      value={locationDraft.country}
+                      onChange={(country) => setLocationDraft((d) => ({ ...d, country }))}
+                      options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                      placeholder="Select country"
+                      className="[&_button]:bg-gray-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">State / Province / District</label>
+                    <input
+                      type="text"
+                      value={locationDraft.state}
+                      onChange={(e) => setLocationDraft((d) => ({ ...d, state: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                    <input
+                      type="text"
+                      value={locationDraft.city}
+                      onChange={(e) => setLocationDraft((d) => ({ ...d, city: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Street Number & Name</label>
+                    <input
+                      type="text"
+                      value={locationDraft.address}
+                      onChange={(e) => setLocationDraft((d) => ({ ...d, address: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={addLocationFromDraft}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  <HiPlus className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Add Location'}
+                </button>
+              </div>
+
             </div>
           )}
 
@@ -3360,40 +3425,99 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-                {verificationStatus.education?.completed && !verificationStatus.education?.verified && !isSectionEditable('education') && (
-                  <button
-                    type="button"
-                    onClick={() => setSectionEditMode((prev) => ({ ...prev, education: true }))}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                  >
-                    <HiPencil className="w-4 h-4" />
-                    Edit
-                  </button>
-                )}
               </div>
 
-              {isSectionEditable('education') && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add Education</h3>
+              <div className="space-y-4">
+                {educationEntriesList.map((entry, index) => {
+                  const status = entry.eduVerificationStatus ?? 'pending';
+                  const title = entry.institutionName?.trim() || 'Education';
+                  const subtitle = formatEducationCardSubtitle(entry);
+                  return (
+                    <div
+                      key={entry.id ?? `edu-${index}`}
+                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3 min-w-0">
+                          <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-900">{title}</p>
+                            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                          <div className="flex flex-wrap gap-1.5 justify-end">
+                            {status === 'pending' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                                Pending
+                              </span>
+                            )}
+                            {status === 'verified' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {status === 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEducationEntriesList((prev) => {
+                                  const next = prev.map((e, i) =>
+                                    i === index ? { ...e, eduVerificationStatus: 'verified' as const } : e,
+                                  );
+                                  queueMicrotask(() =>
+                                    void syncEducationEntriesToApi(next, { silentSuccess: true }),
+                                  );
+                                  return next;
+                                });
+                                toast.success('Verification submitted for this education.');
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Verify
+                            </button>
+                          )}
+                          {entry.supportingMediaUrl?.trim() && (
+                            <a
+                              href={
+                                entry.supportingMediaUrl.startsWith('http')
+                                  ? entry.supportingMediaUrl
+                                  : `${api.defaults.baseURL || ''}${entry.supportingMediaUrl}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            >
+                              View supporting media
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeEducationEntry(index)}
+                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                        >
+                          <HiX className="w-4 h-4" />
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                    {educationEditingIndex != null && (
-                      <button
-                        type="button"
-                        onClick={cancelEducationDraft}
-                        className="text-sm font-medium text-gray-600 hover:text-gray-800"
-                      >
-                        Cancel edit
-                      </button>
-                    )}
-                  </div>
-                  {educationEditingIndex != null && (
-                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      You are editing an existing entry. Use &quot;Add Data&quot; to apply changes; they sync to your profile automatically.
-                    </p>
-                  )}
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0" />
+                  <h3 className="text-base font-semibold text-gray-900">Add Education</h3>
+                </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3596,85 +3720,8 @@ export default function VerificationCenter() {
                     className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
                     <HiPlus className="w-4 h-4" />
-                    {educationSaving
-                      ? 'Saving...'
-                      : educationEditingIndex != null
-                        ? 'Update entry'
-                        : 'Add Data'}
+                    {educationSaving ? 'Saving...' : 'Add Education'}
                   </button>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {educationEntriesList.map((entry, index) => {
-                  const cardTitle = `${qualificationDisplayLabel(entry.degreeType) || entry.degreeType || 'Education'} - ${entry.institutionName}`;
-                  const isEditing = educationEditingIndex === index;
-                  return (
-                    <div
-                      key={entry.id ?? `edu-${index}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${
-                        isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
-                      }`}
-                    >
-                      <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
-                        <HiAcademicCap className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-gray-900 truncate">{cardTitle}</p>
-                          <p className="mt-0.5 text-sm text-gray-500 line-clamp-2">{formatEducationCardSubtitle(entry)}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
-                        {isSectionEditable('education') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => beginEditEducationEntry(index)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                            >
-                              <HiPencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeEducationEntry(index)}
-                              className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                            >
-                              <HiX className="h-4 w-4" />
-                              Remove
-                            </button>
-                          </>
-                        )}
-                        {entry.eduVerificationStatus === 'verified' ? (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                            <HiCheckCircle className="h-4 w-4" />
-                            Verified
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEducationEntriesList((prev) => {
-                                const next = prev.map((e, i) =>
-                                  i === index ? { ...e, eduVerificationStatus: 'verified' as const } : e,
-                                );
-                                queueMicrotask(() =>
-                                  void syncEducationEntriesToApi(next, { silentSuccess: true }),
-                                );
-                                return next;
-                              });
-                              toast.success('Verification submitted for this education.');
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                          >
-                            <HiShieldCheck className="h-4 w-4" />
-                            Verify
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
 
             </div>
@@ -3696,40 +3743,117 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-                {verificationStatus.work?.completed && !verificationStatus.work?.verified && !isSectionEditable('work') && (
-                  <button
-                    type="button"
-                    onClick={() => setSectionEditMode((prev) => ({ ...prev, work: true }))}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                  >
-                    <HiPencil className="w-4 h-4" />
-                    Edit
-                  </button>
-                )}
               </div>
 
-              {isSectionEditable('work') && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add Work Experience</h3>
+              <div className="space-y-4">
+                {workEntriesList.map((entry, index) => {
+                  const status = entry.workVerificationStatus ?? 'pending';
+                  const org = entry.organisationName?.trim() || '';
+                  const role = entry.role?.trim() || '';
+                  const title = org || role || 'Work experience';
+                  const subtitle =
+                    org && role ? `${role} · ${formatWorkCardSubtitle(entry)}` : formatWorkCardSubtitle(entry);
+                  return (
+                    <div
+                      key={entry.id ?? `work-${index}`}
+                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3 min-w-0">
+                          <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-900">{title}</p>
+                            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                          <div className="flex flex-wrap gap-1.5 justify-end">
+                            {entry.selfDeclared && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
+                                Self Declared
+                              </span>
+                            )}
+                            {status === 'pending' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                                Pending
+                              </span>
+                            )}
+                            {status === 'verified' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          {entry.selfDeclared && (
+                            <p className="text-xs text-gray-400">Self declared — employer verification skipped</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {entry.selfDeclared && (
+                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
+                          <span>
+                            Self Declaration — limited network access. Upgrade by adding employer verification details.
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {status === 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWorkEntriesList((prev) => {
+                                  const next = prev.map((e, i) =>
+                                    i === index ? { ...e, workVerificationStatus: 'verified' as const } : e,
+                                  );
+                                  queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
+                                  return next;
+                                });
+                                toast.success('Verification submitted for this role.');
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Verify
+                            </button>
+                          )}
+                          {!entry.selfDeclared && entry.verifyWebsite?.trim() && (
+                            <a
+                              href={
+                                entry.verifyWebsite.startsWith('http')
+                                  ? entry.verifyWebsite
+                                  : `https://${entry.verifyWebsite}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            >
+                              Verification website
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeWorkEntry(index)}
+                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                        >
+                          <HiX className="w-4 h-4" />
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                    {workEditingIndex != null && (
-                      <button
-                        type="button"
-                        onClick={cancelWorkDraft}
-                        className="text-sm font-medium text-gray-600 hover:text-gray-800"
-                      >
-                        Cancel edit
-                      </button>
-                    )}
-                  </div>
-                  {workEditingIndex != null && (
-                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      Editing an existing entry. Use &quot;Add Data&quot; to apply changes; they sync automatically.
-                    </p>
-                  )}
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0" />
+                  <h3 className="text-base font-semibold text-gray-900">Add Work Experience</h3>
+                </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Organisation</label>
@@ -3993,80 +4117,8 @@ export default function VerificationCenter() {
                     className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
                     <HiPlus className="w-4 h-4" />
-                    {workSaving ? 'Saving...' : workEditingIndex != null ? 'Update entry' : 'Add Data'}
+                    {workSaving ? 'Saving...' : 'Add Work Experience'}
                   </button>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {workEntriesList.map((entry, index) => {
-                  const isEditing = workEditingIndex === index;
-                  return (
-                    <div
-                      key={entry.id ?? `work-${index}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${
-                        isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
-                      }`}
-                    >
-                      <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-                          <HiBriefcase className="h-5 w-5 text-brand-600" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-gray-900 truncate">{entry.organisationName}</p>
-                          <p className="mt-0.5 text-sm text-gray-500 line-clamp-2">{formatWorkCardSubtitle(entry)}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
-                        {isSectionEditable('work') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => beginEditWorkEntry(index)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                            >
-                              <HiPencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeWorkEntry(index)}
-                              className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                            >
-                              <HiX className="h-4 w-4" />
-                              Remove
-                            </button>
-                          </>
-                        )}
-                        {entry.workVerificationStatus === 'verified' ? (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                            <HiCheckCircle className="h-4 w-4" />
-                            Verified
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setWorkEntriesList((prev) => {
-                                const next = prev.map((e, i) =>
-                                  i === index ? { ...e, workVerificationStatus: 'verified' as const } : e,
-                                );
-                                queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-                                return next;
-                              });
-                              toast.success('Verification submitted for this role.');
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                          >
-                            <HiShieldCheck className="h-4 w-4" />
-                            Verify
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
 
             </div>
