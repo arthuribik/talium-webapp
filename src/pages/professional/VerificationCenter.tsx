@@ -532,6 +532,100 @@ const VERIFICATION_TABS: { id: SectionKey; label: string }[] = [
   { id: 'social', label: 'Social' },
 ];
 
+/** Mirrors API rules so progress works if /verification-status fails or omits sections. */
+function deriveVerificationStatusFromProfile(data: any): Record<SectionKey, { completed: boolean; verified: boolean }> | null {
+  if (!data || typeof data !== 'object') return null;
+  const socialMedia = data.socialMedia || {};
+  const hasSocial = [
+    socialMedia.linkedin,
+    socialMedia.twitter,
+    socialMedia.facebook,
+    socialMedia.instagram,
+    socialMedia.tiktok,
+    socialMedia.snapchat,
+  ].some(Boolean);
+
+  const hasRequiredIdFields = !!(data.idType && String(data.idNumber || '').trim() && data.idDocumentUrl);
+  const personalCompleted =
+    hasRequiredIdFields ||
+    !!(data.country || data.nationality || data.dateOfBirth) ||
+    !!data.identityVerification;
+  const personalVerified =
+    data.identityStatus === 'verified' || !!data.identityVerification?.verifiedAt;
+
+  const education = Array.isArray(data.education) ? data.education : [];
+  const educationCompleted = education.length > 0;
+  const educationVerified = education.some((e: any) => e?.verificationStatus === 'verified');
+
+  const work = Array.isArray(data.workExperience) ? data.workExperience : [];
+  const workCompleted = work.length > 0;
+  const workVerified = work.some((e: any) => e?.verificationStatus === 'verified');
+
+  const projects = Array.isArray(data.professionalProjects)
+    ? data.professionalProjects
+    : Array.isArray(data.projects)
+      ? data.projects
+      : [];
+  const projectsCompleted = projects.length > 0;
+  const projectsVerified = projects.some((p: any) => p?.verificationStatus === 'verified');
+
+  const locationsJson = data.locations;
+  const locationsArr = Array.isArray(locationsJson)
+    ? locationsJson
+    : locationsJson != null && typeof locationsJson === 'object'
+      ? [locationsJson]
+      : [];
+  const locationCompleted =
+    locationsArr.some((loc: any) => {
+      if (!loc || typeof loc !== 'object') return false;
+      const country = typeof loc.country === 'string' ? loc.country.trim() : '';
+      const address = typeof loc.address === 'string' ? loc.address.trim() : '';
+      const docUrl =
+        (typeof loc.documentUrl === 'string' && loc.documentUrl.trim()) ||
+        (typeof loc.document_url === 'string' && loc.document_url.trim()) ||
+        '';
+      return !!(country || address || docUrl);
+    }) ||
+    !!(data.locationDocumentUrl && String(data.locationDocumentUrl).trim()) ||
+    !!(data.locationDocumentType && String(data.locationDocumentType).trim()) ||
+    !!(data.country && String(data.country).trim());
+
+  const certsArr = Array.isArray(data.certifications) ? data.certifications : [];
+  const certificationCompleted = certsArr.some((c: any) => {
+    const name = typeof c?.name === 'string' ? c.name.trim() : '';
+    const issuedBy = typeof c?.issuedBy === 'string' ? c.issuedBy.trim() : '';
+    return !!(name && issuedBy);
+  });
+  const certificationVerified = certsArr.some(
+    (c: any) => c?.verified === true || c?.certVerificationStatus === 'verified',
+  );
+
+  let familyCompleted = false;
+  const familyRaw = data.familyInfo;
+  if (familyRaw && typeof familyRaw === 'object') {
+    const marital = typeof familyRaw.maritalStatus === 'string' ? familyRaw.maritalStatus.trim() : '';
+    const spouse = typeof familyRaw.spouseName === 'string' ? familyRaw.spouseName.trim() : '';
+    const relations = Array.isArray(familyRaw.relations) ? familyRaw.relations : [];
+    const hasValidRelation = relations.some((r: any) => {
+      const rt = typeof r?.relationType === 'string' ? r.relationType.trim() : '';
+      const fn = typeof r?.fullName === 'string' ? r.fullName.trim() : '';
+      return !!(rt && fn);
+    });
+    familyCompleted = !!marital || hasValidRelation || (marital === 'married' && !!spouse);
+  }
+
+  return {
+    personal: { completed: personalCompleted, verified: personalVerified },
+    location: { completed: locationCompleted, verified: false },
+    education: { completed: educationCompleted, verified: educationVerified },
+    social: { completed: hasSocial, verified: hasSocial },
+    work: { completed: workCompleted, verified: workVerified },
+    projects: { completed: projectsCompleted, verified: projectsVerified },
+    certification: { completed: certificationCompleted, verified: certificationVerified },
+    family: { completed: familyCompleted, verified: false },
+  };
+}
+
 type CertificateEntry = {
   name: string;
   issuedBy: string;
@@ -1059,19 +1153,27 @@ export default function VerificationCenter() {
           Boolean((data as { livenessSelfieUrl?: string | null }).livenessSelfieUrl),
         );
       }
-      const status = statusRes.data?.data;
-      if (status) {
-        setVerificationStatus((prev) => ({
-          ...prev,
-          personal: status.personal || prev.personal,
-          location: status.location || prev.location,
-          education: status.education || prev.education,
-          social: status.social || prev.social,
-          work: status.work || prev.work,
-          projects: status.projects || prev.projects,
-          certification: status.certification || prev.certification,
-          family: status.family || prev.family,
-        }));
+      const status = statusRes.data?.data as Partial<Record<SectionKey, { completed?: boolean; verified?: boolean }>> | undefined;
+      const derived = data && typeof data === 'object' ? deriveVerificationStatusFromProfile(data) : null;
+      if (status || derived) {
+        const mergeKey = (key: SectionKey): { completed: boolean; verified: boolean } => {
+          const s = status?.[key];
+          const d = derived?.[key];
+          return {
+            completed: !!(s?.completed || s?.verified || d?.completed || d?.verified),
+            verified: !!(s?.verified || d?.verified),
+          };
+        };
+        setVerificationStatus({
+          personal: mergeKey('personal'),
+          location: mergeKey('location'),
+          education: mergeKey('education'),
+          social: mergeKey('social'),
+          work: mergeKey('work'),
+          projects: mergeKey('projects'),
+          certification: mergeKey('certification'),
+          family: mergeKey('family'),
+        });
       }
       if (data?.user) {
         const u = data.user as {
