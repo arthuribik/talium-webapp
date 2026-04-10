@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useId } from 'react';
-import { HiSearch } from 'react-icons/hi';
+import { HiSearch, HiChevronDown, HiX } from 'react-icons/hi';
 
 export type SearchableListOption = string | { value: string; label: string };
 
@@ -14,6 +14,8 @@ export interface SearchableListProps {
   id?: string;
   /** When true, typed text that is not in the list is accepted as the value on blur or Enter */
   allowCustom?: boolean;
+  /** Validation message — red border on the control and text below */
+  error?: string;
 }
 
 function normalizeOptions(options: SearchableListOption[]): { value: string; label: string }[] {
@@ -32,14 +34,17 @@ export function SearchableList({
   className = '',
   id,
   allowCustom = false,
+  error,
 }: SearchableListProps) {
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [inputValue, setInputValue] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listboxId = useId();
   const listId = listboxId.replace(/:/g, '-');
+  const errorId = `${listId}-error-msg`;
 
   const normalized = useMemo(() => normalizeOptions(options), [options]);
 
@@ -60,6 +65,8 @@ export function SearchableList({
   }, [normalized, filterQuery]);
 
   const canOpen = !disabled && !readOnly;
+  const hasSelection = value.trim() !== '';
+  const invalid = Boolean(error);
 
   useEffect(() => {
     if (!open) return;
@@ -143,11 +150,25 @@ export function SearchableList({
 
   const showInput = open && canOpen ? inputValue : displayValue;
 
+  const openList = () => {
+    if (!canOpen) return;
+    setOpen(true);
+    setInputValue(displayValue);
+    queueMicrotask(() => inputRef.current?.focus());
+  };
+
+  const clearSelection = () => {
+    onChange('');
+    setInputValue('');
+    setOpen(false);
+  };
+
   return (
     <div ref={containerRef} className="relative">
       <div className="relative">
         <HiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
         <input
+          ref={inputRef}
           id={id}
           type="text"
           value={showInput}
@@ -173,10 +194,16 @@ export function SearchableList({
           onKeyDown={handleKeyDown}
           disabled={disabled}
           readOnly={readOnly}
-          className={`w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed ${className}`}
+          className={`w-full pl-9 pr-10 py-2 border rounded-lg focus:outline-none disabled:bg-gray-50 disabled:cursor-not-allowed ${
+            invalid
+              ? 'border-red-500 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+              : 'border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500'
+          } ${className}`}
           placeholder={placeholder}
           autoComplete="off"
           role="combobox"
+          aria-invalid={invalid}
+          aria-describedby={invalid ? errorId : undefined}
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-controls={listId}
@@ -186,7 +213,43 @@ export function SearchableList({
               : undefined
           }
         />
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
+          {hasSelection && canOpen ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Clear selection"
+              disabled={disabled}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={clearSelection}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <HiX className="w-5 h-5" aria-hidden />
+            </button>
+          ) : (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Open options"
+              aria-expanded={open}
+              disabled={!canOpen}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => (open ? setOpen(false) : openList())}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <HiChevronDown
+                className={`w-5 h-5 transition-transform ${open ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+          )}
+        </div>
       </div>
+      {error ? (
+        <p id={errorId} className="mt-1 text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
       {open && canOpen && (
         <ul
           id={listId}

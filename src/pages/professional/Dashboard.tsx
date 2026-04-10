@@ -4,6 +4,11 @@ import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import { useAppSelector } from '@/store/hooks';
 import {
+  VERIFICATION_TABS,
+  mergeVerificationStatusFromSources,
+  verificationProgressFromMerged,
+} from '@/utils/verificationProgress';
+import {
   HiClock,
   HiArrowRight,
   HiUser,
@@ -34,6 +39,10 @@ export default function ProfessionalDashboard() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [verificationProgress, setVerificationProgress] = useState({
+    completedVerificationSteps: 0,
+    progressPct: 0,
+  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -42,8 +51,12 @@ export default function ProfessionalDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/v1/professional/dashboard/stats');
-      const data = res.data?.data;
+      const [statsRes, profileRes, statusRes] = await Promise.all([
+        api.get('/v1/professional/dashboard/stats'),
+        api.get('/v1/professional/profile'),
+        api.get('/v1/professional/verification-status').catch(() => ({ data: { data: null } })),
+      ]);
+      const data = statsRes.data?.data;
       if (data) {
         setStats({
           totalApplications: data.totalApplications ?? 0,
@@ -61,6 +74,11 @@ export default function ProfessionalDashboard() {
           recentApplications: [],
         });
       }
+      const profileData = profileRes.data?.data;
+      const statusPayload = statusRes.data?.data;
+      const merged = mergeVerificationStatusFromSources(statusPayload, profileData);
+      const { completedVerificationSteps, progressPct } = verificationProgressFromMerged(merged);
+      setVerificationProgress({ completedVerificationSteps, progressPct });
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
       setStats({
@@ -70,6 +88,7 @@ export default function ProfessionalDashboard() {
         profileCompleteness: 0,
         recentApplications: [],
       });
+      setVerificationProgress({ completedVerificationSteps: 0, progressPct: 0 });
     } finally {
       setLoading(false);
     }
@@ -149,7 +168,7 @@ export default function ProfessionalDashboard() {
     },
   ];
 
-  const completeness = Math.min(100, stats?.profileCompleteness ?? 0);
+  const { completedVerificationSteps, progressPct } = verificationProgress;
 
   return (
     <ProfessionalLayout>
@@ -196,12 +215,22 @@ export default function ProfessionalDashboard() {
           ))}
         </div>
 
-        {/* Profile completeness bar */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-900">
-              Profile completeness
-            </h2>
+        {/* Same progress card as Verification Center (8 verification steps) */}
+        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between text-sm font-medium text-gray-800">
+            <span>Profile Completion</span>
+            <span>{progressPct}%</span>
+          </div>
+          <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full bg-brand-500 transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-gray-500">
+              {completedVerificationSteps}/{VERIFICATION_TABS.length} verification steps completed
+            </p>
             <Link
               to="/professional/verification"
               className="text-xs font-medium text-brand-600 hover:text-brand-700"
@@ -209,17 +238,6 @@ export default function ProfessionalDashboard() {
               Complete profile →
             </Link>
           </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-brand-500 rounded-full transition-all duration-500"
-              style={{ width: `${completeness}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-gray-500">
-            {completeness < 100
-              ? 'Add verification details to improve your profile strength.'
-              : 'Your profile is complete.'}
-          </p>
         </div>
 
         {/* Recent applications */}

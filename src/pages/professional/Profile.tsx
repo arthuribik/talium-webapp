@@ -15,6 +15,9 @@ import {
   HiShieldCheck,
   HiCamera,
   HiChevronDown,
+  HiBriefcase,
+  HiAcademicCap,
+  HiFolder,
 } from 'react-icons/hi';
 import { FaLinkedin, FaTwitter, FaGithub } from 'react-icons/fa';
 import { HiGlobeAlt } from 'react-icons/hi2';
@@ -30,8 +33,53 @@ import {
   ProfileCertificationsSection,
   ProfileProjectsSection,
 } from '@/pages/professional/profileVerificationDisplay';
+import {
+  VERIFICATION_TABS,
+  mergeVerificationStatusFromSources,
+  verificationProgressFromMerged,
+  type VerificationSectionKey,
+  type VerificationSectionStatus,
+} from '@/utils/verificationProgress';
 
 type ProfileTab = 'experience' | 'education' | 'locations' | 'certifications' | 'projects';
+
+const EMPTY_VERIFICATION_ICONS: Record<
+  string,
+  React.ComponentType<{ className?: string }>
+> = {
+  work: HiBriefcase,
+  education: HiAcademicCap,
+  location: HiLocationMarker,
+  certification: HiShieldCheck,
+  projects: HiFolder,
+};
+
+function ProfileSectionVerificationBadge({
+  status,
+}: {
+  status: VerificationSectionStatus | undefined;
+}) {
+  if (!status) return null;
+  if (status.verified) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-100 text-green-800">
+        Verified
+      </span>
+    );
+  }
+  if (status.completed) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800">
+        Pending verification
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
+      Not completed
+    </span>
+  );
+}
 
 function browserDefaultIana(): string {
   try {
@@ -46,6 +94,10 @@ export default function Profile() {
   const [savingAbout, setSavingAbout] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [profileCompleteness, setProfileCompleteness] = useState(0);
+  const [mergedVerification, setMergedVerification] = useState<Record<
+    VerificationSectionKey,
+    VerificationSectionStatus
+  > | null>(null);
   const [editingAbout, setEditingAbout] = useState(false);
   const [editingProfession, setEditingProfession] = useState(false);
   const [activeTab, setActiveTab] = useState<ProfileTab>('experience');
@@ -76,6 +128,13 @@ export default function Profile() {
     );
   }, [timezoneOptions, timezoneFilter]);
 
+  const { completedVerificationSteps, progressPct } = useMemo(() => {
+    if (!mergedVerification) {
+      return { completedVerificationSteps: 0, progressPct: 0 };
+    }
+    return verificationProgressFromMerged(mergedVerification);
+  }, [mergedVerification]);
+
   useEffect(() => {
     fetchAll();
   }, []);
@@ -90,13 +149,16 @@ export default function Profile() {
     setLoading(true);
     setPhotoError(false);
     try {
-      const [profRes, dashRes] = await Promise.all([
+      const [profRes, dashRes, statusRes] = await Promise.all([
         api.get('/v1/professional/profile'),
         api.get('/v1/professional/dashboard/stats').catch(() => ({ data: { data: null } })),
+        api.get('/v1/professional/verification-status').catch(() => ({ data: { data: null } })),
       ]);
       const data = profRes.data.data;
       setProfile(data);
       setProfileCompleteness(dashRes.data?.data?.profileCompleteness ?? 0);
+      const merged = mergeVerificationStatusFromSources(statusRes.data?.data, data);
+      setMergedVerification(merged);
       setFormData({
         profession: data.profession || '',
         description: data.description || '',
@@ -108,6 +170,7 @@ export default function Profile() {
     } catch (err) {
       console.error('Failed to fetch profile:', err);
       toast.error('Failed to load profile');
+      setMergedVerification(null);
     } finally {
       setLoading(false);
     }
@@ -616,16 +679,30 @@ export default function Profile() {
 
           {/* Stats */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-                <HiShieldCheck className="h-6 w-6" />
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between text-sm font-medium text-gray-800">
+                <span>Profile completion</span>
+                <span>{progressPct}%</span>
               </div>
-              <div>
-                <p className="text-2xl font-bold text-gray-900">
+              <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all duration-300"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-500">
+                  {completedVerificationSteps}/{VERIFICATION_TABS.length} verification steps · ID score{' '}
                   {Math.min(100, profileCompleteness)}/100
                 </p>
-                <p className="text-sm text-gray-500">ID Score · Updated {updatedLabel}</p>
+                <Link
+                  to="/professional/verification"
+                  className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                >
+                  Verification Center →
+                </Link>
               </div>
+              <p className="mt-1 text-xs text-gray-400">Updated {updatedLabel}</p>
             </div>
             <div className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-100 text-brand-800">
@@ -720,56 +797,83 @@ export default function Profile() {
               ))}
             </div>
 
-            <div className="mt-4 min-h-[200px] rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
-              {activeTab === 'experience' &&
-                (profile.workExperience?.length > 0 ? (
-                  <ProfileWorkSection items={profile.workExperience} />
-                ) : (
-                  <EmptyTab
-                    message="No work experience added yet. Add data in the Verification Center."
-                    tab="work"
-                  />
-                ))}
+            <div className="mt-3 min-h-[160px] rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="space-y-4">
+                {activeTab === 'experience' &&
+                  (profile.workExperience?.length > 0 ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                        <ProfileSectionVerificationBadge status={mergedVerification?.work} />
+                      </div>
+                      <ProfileWorkSection items={profile.workExperience} />
+                    </>
+                  ) : (
+                    <EmptyTab
+                      message="No work experience added yet. Add data in the Verification Center."
+                      tab="work"
+                    />
+                  ))}
 
-              {activeTab === 'education' &&
-                (profile.education?.length > 0 ? (
-                  <ProfileEducationSection items={profile.education} />
-                ) : (
-                  <EmptyTab
-                    message="No education added yet. Add data in the Verification Center."
-                    tab="education"
-                  />
-                ))}
+                {activeTab === 'education' &&
+                  (profile.education?.length > 0 ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                        <ProfileSectionVerificationBadge status={mergedVerification?.education} />
+                      </div>
+                      <ProfileEducationSection items={profile.education} />
+                    </>
+                  ) : (
+                    <EmptyTab
+                      message="No education added yet. Add data in the Verification Center."
+                      tab="education"
+                    />
+                  ))}
 
-              {activeTab === 'locations' &&
-                (locationsList.length > 0 ? (
-                  <ProfileLocationsSection items={locationsList} />
-                ) : (
-                  <EmptyTab
-                    message="No locations added yet. Add data in the Verification Center."
-                    tab="location"
-                  />
-                ))}
+                {activeTab === 'locations' &&
+                  (locationsList.length > 0 ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                        <ProfileSectionVerificationBadge status={mergedVerification?.location} />
+                      </div>
+                      <ProfileLocationsSection items={locationsList} />
+                    </>
+                  ) : (
+                    <EmptyTab
+                      message="No locations added yet. Add data in the Verification Center."
+                      tab="location"
+                    />
+                  ))}
 
-              {activeTab === 'certifications' &&
-                (certificationsList.length > 0 ? (
-                  <ProfileCertificationsSection items={certificationsList} />
-                ) : (
-                  <EmptyTab
-                    message="No certifications yet. Add data in the Verification Center."
-                    tab="certification"
-                  />
-                ))}
+                {activeTab === 'certifications' &&
+                  (certificationsList.length > 0 ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                        <ProfileSectionVerificationBadge status={mergedVerification?.certification} />
+                      </div>
+                      <ProfileCertificationsSection items={certificationsList} />
+                    </>
+                  ) : (
+                    <EmptyTab
+                      message="No certifications yet. Add data in the Verification Center."
+                      tab="certification"
+                    />
+                  ))}
 
-              {activeTab === 'projects' &&
-                (projectsList.length > 0 ? (
-                  <ProfileProjectsSection items={projectsList} />
-                ) : (
-                  <EmptyTab
-                    message="No projects added yet. Add data in the Verification Center."
-                    tab="projects"
-                  />
-                ))}
+                {activeTab === 'projects' &&
+                  (projectsList.length > 0 ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                        <ProfileSectionVerificationBadge status={mergedVerification?.projects} />
+                      </div>
+                      <ProfileProjectsSection items={projectsList} />
+                    </>
+                  ) : (
+                    <EmptyTab
+                      message="No projects added yet. Add data in the Verification Center."
+                      tab="projects"
+                    />
+                  ))}
+              </div>
             </div>
           </div>
 
@@ -784,12 +888,16 @@ export default function Profile() {
 }
 
 function EmptyTab({ message, tab }: { message: string; tab: string }) {
+  const Icon = EMPTY_VERIFICATION_ICONS[tab] ?? HiShieldCheck;
   return (
-    <div className="text-center text-sm text-gray-500">
-      <p>{message}</p>
+    <div className="rounded-lg border-2 border-dashed border-gray-200 bg-gray-50/50 px-5 py-10 text-center sm:px-6">
+      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm sm:h-14 sm:w-14">
+        <Icon className="h-6 w-6 text-brand-500 sm:h-7 sm:w-7" />
+      </div>
+      <p className="text-sm text-gray-600">{message}</p>
       <Link
         to={`/professional/verification?tab=${tab}`}
-        className="mt-4 inline-flex items-center gap-1.5 font-medium text-brand-600 hover:text-brand-700"
+        className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
       >
         Open Verification Center
         <HiExternalLink className="h-4 w-4" />

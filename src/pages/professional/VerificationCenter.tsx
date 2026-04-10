@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { LivenessSelfieModal } from '@/components/professional/LivenessSelfieModal';
@@ -31,37 +31,34 @@ import {
   HiStar,
   HiUpload,
   HiExclamationCircle,
+  HiPaperAirplane,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
 import {
   DEFAULT_PHONE_DIAL_VALUE,
-  PHONE_DIAL_SEARCH_OPTIONS,
   buildE164FromDialAndNational,
   parsePhoneDialValue,
   splitPlusPrefixedPhone,
 } from '@/utils/phoneDialCodes';
 import { SearchableList } from '@/components/common/SearchableList';
+import { PhoneDialCodeSelect } from '@/components/common/PhoneDialCodeSelect';
+import {
+  verificationPersonalBasicSchema,
+  verificationPersonalGovSchema,
+  verificationLocationDraftSchema,
+  verificationSocialSchema,
+  prefixZodFieldErrors,
+} from '@/schemas/verificationCenter.schema';
+import {
+  VERIFICATION_TABS,
+  mergeVerificationStatusFromSources,
+  verificationProgressFromMerged,
+  type VerificationSectionKey,
+} from '@/utils/verificationProgress';
 
-type SectionKey =
-  | 'personal'
-  | 'location'
-  | 'education'
-  | 'social'
-  | 'work'
-  | 'projects'
-  | 'certification'
-  | 'family';
+type SectionKey = VerificationSectionKey;
 
-const VALID_SECTION_KEYS: SectionKey[] = [
-  'personal',
-  'location',
-  'education',
-  'social',
-  'work',
-  'projects',
-  'certification',
-  'family',
-];
+const VALID_SECTION_KEYS: SectionKey[] = VERIFICATION_TABS.map((t) => t.id);
 
 function isSectionKey(value: string | null): value is SectionKey {
   return value !== null && VALID_SECTION_KEYS.includes(value as SectionKey);
@@ -83,23 +80,139 @@ type SelfDeclarationFlow =
   | { open: true; kind: 'address'; locationIndex: number }
   | { open: true; kind: 'work' };
 
-const PERSONAL_FLOW_STEPS: { step: Exclude<PersonalFlowStep, 'complete'>; label: string }[] = [
-  { step: 'add_data', label: 'Add data' },
-  { step: 'identity', label: 'Identity' },
-  { step: 'contact', label: 'Email & phone' },
-  { step: 'liveness', label: 'Liveness' },
+/** Pills shown above personal flow (identity verification has no separate tab — grouped under Add data). */
+const PERSONAL_FLOW_UI_GROUPS: { label: string; steps: readonly PersonalFlowStep[] }[] = [
+  { label: 'Add data', steps: ['add_data', 'identity'] },
+  { label: 'Email & phone', steps: ['contact'] },
+  { label: 'Liveness', steps: ['liveness'] },
 ];
 
-function personalFlowStepIndex(s: PersonalFlowStep): number {
-  const m: Record<PersonalFlowStep, number> = {
-    add_data: 0,
-    identity: 1,
-    contact: 2,
-    liveness: 3,
-    complete: 4,
-  };
-  return m[s];
+const PERSONAL_FLOW_STEP_STORAGE_KEY = 'taldium:verification:personalFlowStep';
+const PERSONAL_IDENTITY_AWAITING_STORAGE_KEY = 'taldium:verification:personalIdentityAwaiting';
+const PERSONAL_IDENTITY_PATH_STORAGE_KEY = 'taldium:verification:personalIdentityPath';
+
+function parseStoredPersonalFlowStep(raw: string | null): PersonalFlowStep | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (v === 'add_data' || v === 'identity' || v === 'contact' || v === 'liveness' || v === 'complete') return v;
+  return null;
 }
+
+function computeCanonicalPersonalFlowStep(
+  personalBasicComplete: boolean,
+  identityFlowComplete: boolean,
+  userEmailVerified: boolean,
+  userPhoneVerified: boolean,
+  livenessCompleteLocal: boolean,
+): PersonalFlowStep {
+  if (!personalBasicComplete) return 'add_data';
+  if (!identityFlowComplete) return 'identity';
+  if (!userEmailVerified || !userPhoneVerified) return 'contact';
+  if (!livenessCompleteLocal) return 'liveness';
+  return 'complete';
+}
+
+function isPersonalFlowStepValidForProgress(
+  step: PersonalFlowStep,
+  personalBasicComplete: boolean,
+  identityFlowComplete: boolean,
+  userEmailVerified: boolean,
+  userPhoneVerified: boolean,
+  livenessCompleteLocal: boolean,
+): boolean {
+  if (step === 'add_data' || step === 'identity') {
+    return !identityFlowComplete;
+  }
+  if (step === 'contact') {
+    return identityFlowComplete && (!userEmailVerified || !userPhoneVerified);
+  }
+  if (step === 'liveness') {
+    return identityFlowComplete && userEmailVerified && userPhoneVerified && !livenessCompleteLocal;
+  }
+  if (step === 'complete') {
+    return (
+      personalBasicComplete &&
+      identityFlowComplete &&
+      userEmailVerified &&
+      userPhoneVerified &&
+      livenessCompleteLocal
+    );
+  }
+  return false;
+}
+
+function resolvePersonalFlowStepFromStorage(
+  stored: PersonalFlowStep | null,
+  personalBasicComplete: boolean,
+  identityFlowComplete: boolean,
+  userEmailVerified: boolean,
+  userPhoneVerified: boolean,
+  livenessCompleteLocal: boolean,
+): PersonalFlowStep {
+  const canonical = computeCanonicalPersonalFlowStep(
+    personalBasicComplete,
+    identityFlowComplete,
+    userEmailVerified,
+    userPhoneVerified,
+    livenessCompleteLocal,
+  );
+  if (
+    !stored ||
+    !isPersonalFlowStepValidForProgress(
+      stored,
+      personalBasicComplete,
+      identityFlowComplete,
+      userEmailVerified,
+      userPhoneVerified,
+      livenessCompleteLocal,
+    )
+  ) {
+    return canonical;
+  }
+  return stored;
+}
+
+function clearPersonalIdentityAwaitingStorage() {
+  try {
+    sessionStorage.removeItem(PERSONAL_IDENTITY_AWAITING_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPersonalIdentityPathStorage() {
+  try {
+    sessionStorage.removeItem(PERSONAL_IDENTITY_PATH_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Personal tab "Request Data Edit" modal — keys must match api-engine PROFILE_EDIT_ALLOWED_FIELDS */
+const PROFILE_REQUEST_EDIT_FIELDS: { label: string; key: string }[][] = [
+  [
+    { label: 'First Name', key: 'firstName' },
+    { label: 'Middle Name', key: 'middleName' },
+    { label: 'Nationality', key: 'nationality' },
+    { label: 'Email', key: 'email' },
+  ],
+  [
+    { label: 'Last Name', key: 'lastName' },
+    { label: 'Date of Birth', key: 'dateOfBirth' },
+    { label: 'Gender', key: 'gender' },
+    { label: 'Phone Number', key: 'phoneNumber' },
+  ],
+];
+
+const PROFILE_REQUEST_EDIT_REASON_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Select reason' },
+  { value: 'legal_name_change', label: 'Legal name change' },
+  { value: 'clerical_error', label: 'Clerical error' },
+  { value: 'outdated_information', label: 'Outdated information' },
+  { value: 'government_id_reissued', label: 'Government ID reissued' },
+  { value: 'other', label: 'Other' },
+];
+
 type LocationVerificationStatus = 'pending' | 'self_declared' | 'verified';
 
 type LocationEntry = {
@@ -521,111 +634,6 @@ function deriveProgramLevel(level: string): string | undefined {
   return undefined;
 }
 
-const VERIFICATION_TABS: { id: SectionKey; label: string }[] = [
-  { id: 'personal', label: 'Personal Identity' },
-  { id: 'location', label: 'Location Data' },
-  { id: 'education', label: 'Education' },
-  { id: 'work', label: 'Work Experience' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'certification', label: 'Certifications' },
-  { id: 'family', label: 'Family' },
-  { id: 'social', label: 'Social' },
-];
-
-/** Mirrors API rules so progress works if /verification-status fails or omits sections. */
-function deriveVerificationStatusFromProfile(data: any): Record<SectionKey, { completed: boolean; verified: boolean }> | null {
-  if (!data || typeof data !== 'object') return null;
-  const socialMedia = data.socialMedia || {};
-  const hasSocial = [
-    socialMedia.linkedin,
-    socialMedia.twitter,
-    socialMedia.facebook,
-    socialMedia.instagram,
-    socialMedia.tiktok,
-    socialMedia.snapchat,
-  ].some(Boolean);
-
-  const hasRequiredIdFields = !!(data.idType && String(data.idNumber || '').trim() && data.idDocumentUrl);
-  const personalCompleted =
-    hasRequiredIdFields ||
-    !!(data.country || data.nationality || data.dateOfBirth) ||
-    !!data.identityVerification;
-  const personalVerified =
-    data.identityStatus === 'verified' || !!data.identityVerification?.verifiedAt;
-
-  const education = Array.isArray(data.education) ? data.education : [];
-  const educationCompleted = education.length > 0;
-  const educationVerified = education.some((e: any) => e?.verificationStatus === 'verified');
-
-  const work = Array.isArray(data.workExperience) ? data.workExperience : [];
-  const workCompleted = work.length > 0;
-  const workVerified = work.some((e: any) => e?.verificationStatus === 'verified');
-
-  const projects = Array.isArray(data.professionalProjects)
-    ? data.professionalProjects
-    : Array.isArray(data.projects)
-      ? data.projects
-      : [];
-  const projectsCompleted = projects.length > 0;
-  const projectsVerified = projects.some((p: any) => p?.verificationStatus === 'verified');
-
-  const locationsJson = data.locations;
-  const locationsArr = Array.isArray(locationsJson)
-    ? locationsJson
-    : locationsJson != null && typeof locationsJson === 'object'
-      ? [locationsJson]
-      : [];
-  const locationCompleted =
-    locationsArr.some((loc: any) => {
-      if (!loc || typeof loc !== 'object') return false;
-      const country = typeof loc.country === 'string' ? loc.country.trim() : '';
-      const address = typeof loc.address === 'string' ? loc.address.trim() : '';
-      const docUrl =
-        (typeof loc.documentUrl === 'string' && loc.documentUrl.trim()) ||
-        (typeof loc.document_url === 'string' && loc.document_url.trim()) ||
-        '';
-      return !!(country || address || docUrl);
-    }) ||
-    !!(data.locationDocumentUrl && String(data.locationDocumentUrl).trim()) ||
-    !!(data.locationDocumentType && String(data.locationDocumentType).trim()) ||
-    !!(data.country && String(data.country).trim());
-
-  const certsArr = Array.isArray(data.certifications) ? data.certifications : [];
-  const certificationCompleted = certsArr.some((c: any) => {
-    const name = typeof c?.name === 'string' ? c.name.trim() : '';
-    const issuedBy = typeof c?.issuedBy === 'string' ? c.issuedBy.trim() : '';
-    return !!(name && issuedBy);
-  });
-  const certificationVerified = certsArr.some(
-    (c: any) => c?.verified === true || c?.certVerificationStatus === 'verified',
-  );
-
-  let familyCompleted = false;
-  const familyRaw = data.familyInfo;
-  if (familyRaw && typeof familyRaw === 'object') {
-    const marital = typeof familyRaw.maritalStatus === 'string' ? familyRaw.maritalStatus.trim() : '';
-    const spouse = typeof familyRaw.spouseName === 'string' ? familyRaw.spouseName.trim() : '';
-    const relations = Array.isArray(familyRaw.relations) ? familyRaw.relations : [];
-    const hasValidRelation = relations.some((r: any) => {
-      const rt = typeof r?.relationType === 'string' ? r.relationType.trim() : '';
-      const fn = typeof r?.fullName === 'string' ? r.fullName.trim() : '';
-      return !!(rt && fn);
-    });
-    familyCompleted = !!marital || hasValidRelation || (marital === 'married' && !!spouse);
-  }
-
-  return {
-    personal: { completed: personalCompleted, verified: personalVerified },
-    location: { completed: locationCompleted, verified: false },
-    education: { completed: educationCompleted, verified: educationVerified },
-    social: { completed: hasSocial, verified: hasSocial },
-    work: { completed: workCompleted, verified: workVerified },
-    projects: { completed: projectsCompleted, verified: projectsVerified },
-    certification: { completed: certificationCompleted, verified: certificationVerified },
-    family: { completed: familyCompleted, verified: false },
-  };
-}
-
 type CertificateEntry = {
   name: string;
   issuedBy: string;
@@ -717,239 +725,246 @@ function yearMonthSortKey(year: string, month: string): number | null {
   return y * 12 + (m - 1);
 }
 
-function validateLocationEntry(loc: LocationEntry, index: number): string | null {
-  const label = `Location ${index + 1}`;
-  if (!loc.country?.trim()) return `${label}: country is required`;
-  if (!loc.address?.trim()) return `${label}: address is required`;
-  if (!loc.city?.trim()) return `${label}: city is required`;
-  if (!loc.state?.trim()) return `${label}: state / region is required`;
+function omitKeysMatching(obj: Record<string, string>, re: RegExp): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (!re.test(k)) out[k] = v;
+  }
+  return out;
+}
+
+function locationEntryFieldErrors(loc: LocationEntry, index: number): Record<string, string> {
+  const k = (f: string) => `loc_${index}_${f}`;
+  const o: Record<string, string> = {};
+  if (!loc.country?.trim()) o[k('country')] = 'Country is required';
+  if (!loc.address?.trim()) o[k('address')] = 'Address is required';
+  if (!loc.city?.trim()) o[k('city')] = 'City is required';
+  if (!loc.state?.trim()) o[k('state')] = 'State / region is required';
   const status = loc.verificationStatus ?? 'pending';
   if (status === 'verified') {
     const digital = loc.documentType === 'digital_verify';
-    if (!digital && !loc.documentUrl?.trim()) return `${label}: upload a proof-of-address document`;
-    if (!digital && !loc.documentType?.trim()) return `${label}: document type is required`;
+    if (!digital && !loc.documentUrl?.trim()) o[k('documentUrl')] = 'Upload a proof-of-address document';
+    if (!digital && !loc.documentType?.trim()) o[k('documentType')] = 'Document type is required';
   }
-  return null;
+  return o;
 }
 
-function validateLocationsList(list: LocationEntry[]): string | null {
-  if (list.length === 0) return 'Add at least one location.';
+function locationsListFieldErrors(list: LocationEntry[]): Record<string, string> {
+  if (list.length === 0) return { loc_list: 'Add at least one location.' };
   const defaults = list.filter((l) => l.isDefault);
-  if (defaults.length !== 1) return 'Select exactly one default location.';
+  if (defaults.length !== 1) return { loc_default: 'Select exactly one default location.' };
   for (let i = 0; i < list.length; i++) {
-    const err = validateLocationEntry(list[i], i);
-    if (err) return err;
+    const fe = locationEntryFieldErrors(list[i], i);
+    if (Object.keys(fe).length) return fe;
   }
-  return null;
+  return {};
 }
 
-function validateEducationEntry(entry: EducationEntry, index: number): string | null {
-  const label = `Education ${index + 1}`;
-  if (!entry.institutionName?.trim()) return `${label}: institution / school is required`;
-  if (!entry.grade?.trim()) return `${label}: grade is required`;
-  if (!entry.fieldOfStudy?.trim()) return `${label}: field of study is required`;
-  if (!entry.country?.trim()) return `${label}: country is required`;
-  if (!entry.levelOfEducation) return `${label}: level is required`;
-  if (!entry.degreeType) return `${label}: qualification is required`;
-  if (!entry.startMonth || !entry.startYear) return `${label}: start month and year are required`;
+function educationEntryFieldErrors(entry: EducationEntry, slug: string): Record<string, string> {
+  const k = (f: string) => `edu_${slug}_${f}`;
+  const o: Record<string, string> = {};
+  if (!entry.institutionName?.trim()) o[k('institutionName')] = 'Institution / school is required';
+  if (!entry.grade?.trim()) o[k('grade')] = 'Grade is required';
+  if (!entry.fieldOfStudy?.trim()) o[k('fieldOfStudy')] = 'Field of study is required';
+  if (!entry.country?.trim()) o[k('country')] = 'Country is required';
+  if (!entry.levelOfEducation) o[k('levelOfEducation')] = 'Level is required';
+  if (!entry.degreeType) o[k('degreeType')] = 'Qualification is required';
+  if (!entry.startMonth || !entry.startYear) o[k('startDate')] = 'Start month and year are required';
   if (!entry.expectedEndOngoing && (!entry.endMonth || !entry.endYear)) {
-    return `${label}: end month and year are required, or mark “expected end date (ongoing)”`;
+    o[k('endDate')] = 'End month and year are required, or mark ongoing';
   }
   const startKey = yearMonthSortKey(entry.startYear, entry.startMonth);
   const endKey = yearMonthSortKey(entry.endYear, entry.endMonth);
   if (startKey != null && endKey != null && endKey < startKey) {
-    return `${label}: end date cannot be before start date`;
+    o[k('endDate')] = 'End date cannot be before start date';
   }
   const costErr = validateAmountField('Cost of education', entry.costOfEducation);
-  if (costErr) return `${label}: ${costErr}`;
+  if (costErr) o[k('costOfEducation')] = costErr.replace(/^Cost of education /, '');
   const loanErr = validateAmountField('Pending loan', entry.pendingLoanAmount);
-  if (loanErr) return `${label}: ${loanErr}`;
+  if (loanErr) o[k('pendingLoanAmount')] = loanErr.replace(/^Pending loan /, '');
   const mediaErr = validateOptionalHttpUrl('Supporting media URL', entry.supportingMediaUrl);
-  if (mediaErr) return `${label}: ${mediaErr}`;
+  if (mediaErr) o[k('supportingMediaUrl')] = mediaErr;
   for (let mi = 0; mi < entry.programMilestones.length; mi++) {
     const m = entry.programMilestones[mi];
     const hasT = !!m.title?.trim();
     const hasS = !!m.startDate?.trim();
     if (hasT && !hasS) {
-      return `${label}: milestone ${mi + 1}: start date is required when a title is entered`;
+      o[k(`milestone_${mi}_startDate`)] = 'Start date is required when a title is entered';
+      break;
     }
     if (m.startDate && m.endDate && m.startDate > m.endDate) {
-      return `${label}: milestone ${mi + 1}: end date cannot be before start date`;
+      o[k(`milestone_${mi}_endDate`)] = 'End date cannot be before start date';
+      break;
     }
   }
-  return null;
+  return o;
 }
 
-function validateEducationList(list: EducationEntry[]): string | null {
-  const toSave = list.filter((e) => e.id || e.institutionName.trim());
-  if (toSave.length === 0) {
-    return 'Add at least one education entry with an institution name.';
-  }
-  for (let i = 0; i < list.length; i++) {
-    const e = list[i];
-    if (!e.id && !e.institutionName.trim()) continue;
-    const err = validateEducationEntry(e, i);
-    if (err) return err;
-  }
-  return null;
-}
-
-function validateWorkEntry(entry: WorkEntry, index: number): string | null {
-  const label = `Work experience ${index + 1}`;
-  if (!entry.organisationName?.trim()) return `${label}: organisation name is required`;
-  if (!entry.industry?.trim()) return `${label}: industry is required`;
-  if (!entry.employmentType) return `${label}: employment type is required`;
-  if (!entry.workMode) return `${label}: work mode is required`;
-  if (!entry.workRoles?.length) return `${label}: add at least one role`;
+function workEntryFieldErrors(entry: WorkEntry, slug: string): Record<string, string> {
+  const k = (f: string) => `work_${slug}_${f}`;
+  const o: Record<string, string> = {};
+  if (!entry.organisationName?.trim()) o[k('organisationName')] = 'Organisation name is required';
+  if (!entry.industry?.trim()) o[k('industry')] = 'Industry is required';
+  if (!entry.employmentType) o[k('employmentType')] = 'Employment type is required';
+  if (!entry.workMode) o[k('workMode')] = 'Work mode is required';
+  if (!entry.workRoles?.length) o[k('workRoles')] = 'Add at least one role';
   const primary = entry.workRoles[0];
-  if (!primary.title?.trim()) return `${label}: role title is required`;
-  if (!primary.startDate?.trim()) return `${label}: start date is required for the role`;
-  if (!primary.currentlyWorking && !primary.endDate?.trim()) {
-    return `${label}: end date is required, or mark “Currently working here”`;
+  if (primary) {
+    if (!primary.title?.trim()) o[k('role0_title')] = 'Role title is required';
+    if (!primary.startDate?.trim()) o[k('role0_startDate')] = 'Start date is required for the role';
+    if (!primary.currentlyWorking && !primary.endDate?.trim()) {
+      o[k('role0_endDate')] = 'End date is required, or mark “Currently working here”';
+    }
   }
   for (let ri = 1; ri < entry.workRoles.length; ri++) {
     const r = entry.workRoles[ri];
     if (!r.title?.trim()) continue;
-    if (!r.startDate?.trim()) return `${label}: role ${ri + 1}: start date is required`;
+    if (!r.startDate?.trim()) o[k(`role${ri}_startDate`)] = 'Start date is required';
     if (!r.currentlyWorking && !r.endDate?.trim()) {
-      return `${label}: role ${ri + 1}: end date is required, or mark as current`;
+      o[k(`role${ri}_endDate`)] = 'End date is required, or mark as current';
     }
   }
   if (!entry.selfDeclared) {
     const web = entry.verifyWebsite?.trim();
     const em = entry.verifyHrEmail?.trim();
     if (!web && !em) {
-      return `${label}: add a verification website or HR email, or check “Self declared”`;
+      o[k('verifyWebsite')] = 'Add a verification website or HR email, or check “Self declared”';
     }
     if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
-      return `${label}: enter a valid HR email address`;
+      o[k('verifyHrEmail')] = 'Enter a valid HR email address';
     }
     const siteErr = web ? validateOptionalHttpUrl('Verification website', web) : null;
-    if (siteErr) return `${label}: ${siteErr}`;
+    if (siteErr) o[k('verifyWebsite')] = siteErr.replace(/^Verification website /, '');
   }
   const salErr = validateAmountField('Salary', entry.salary);
-  if (salErr) return `${label}: ${salErr}`;
-  return null;
+  if (salErr) o[k('salary')] = salErr.replace(/^Salary /, '');
+  return o;
 }
 
-function validateWorkList(list: WorkEntry[]): string | null {
-  const toSave = list.filter((e) => e.id || e.organisationName.trim());
-  if (toSave.length === 0) {
-    return 'Add at least one work experience with an organisation name.';
-  }
-  for (let i = 0; i < list.length; i++) {
-    const e = list[i];
-    if (!e.id && !e.organisationName.trim()) continue;
-    const err = validateWorkEntry(e, i);
-    if (err) return err;
-  }
-  return null;
-}
-
-function validateProjectEntry(entry: ProjectEntry, index: number): string | null {
-  const label = `Project ${index + 1}`;
-  if (!entry.title?.trim()) return `${label}: title is required`;
+function projectEntryFieldErrors(entry: ProjectEntry, slug: string): Record<string, string> {
+  const k = (f: string) => `proj_${slug}_${f}`;
+  const o: Record<string, string> = {};
+  if (!entry.title?.trim()) o[k('title')] = 'Title is required';
   const linkErr = validateOptionalHttpUrl('Project link', entry.projectLink);
-  if (linkErr) return `${label}: ${linkErr}`;
+  if (linkErr) o[k('projectLink')] = linkErr;
   const mediaErr = validateOptionalHttpUrl('Media URL', entry.mediaUrl);
-  if (mediaErr) return `${label}: ${mediaErr}`;
+  if (mediaErr) o[k('mediaUrl')] = mediaErr;
   for (let mi = 0; mi < entry.teamMembers.length; mi++) {
     const m = entry.teamMembers[mi];
     const hasN = !!m.name?.trim();
     const hasR = !!m.role?.trim();
     if (hasN !== hasR) {
-      return `${label}: team member ${mi + 1} needs both name and role, or leave the row empty`;
+      o[k(`team_${mi}`)] = 'Team member needs both name and role, or leave the row empty';
+      break;
     }
   }
-  return null;
+  return o;
 }
 
-function validateProjectList(list: ProjectEntry[]): string | null {
-  const toSave = list.filter((p) => p.id || p.title.trim());
-  if (toSave.length === 0) {
-    return 'Add at least one project with a title.';
-  }
-  for (let i = 0; i < list.length; i++) {
-    const p = list[i];
-    if (!p.id && !p.title.trim()) continue;
-    const err = validateProjectEntry(p, i);
-    if (err) return err;
-  }
-  return null;
-}
-
-function validateCertificateEntry(c: CertificateEntry, index: number): string | null {
-  const label = `Certificate ${index + 1}`;
-  if (!c.name?.trim()) return `${label}: certificate name is required`;
-  if (!c.issuedBy?.trim()) return `${label}: issued by is required`;
+function certificateEntryFieldErrors(c: CertificateEntry, slug: string): Record<string, string> {
+  const k = (f: string) => `cert_${slug}_${f}`;
+  const o: Record<string, string> = {};
+  if (!c.name?.trim()) o[k('name')] = 'Certificate name is required';
+  if (!c.issuedBy?.trim()) o[k('issuedBy')] = 'Issued by is required';
   const reportErr = validateOptionalHttpUrl('Reporting URL', c.reportingUrl);
-  if (reportErr) return `${label}: ${reportErr}`;
+  if (reportErr) o[k('reportingUrl')] = reportErr;
   const mediaErr = validateOptionalHttpUrl('Supporting media URL', c.supportingMediaUrl);
-  if (mediaErr) return `${label}: ${mediaErr}`;
+  if (mediaErr) o[k('supportingMediaUrl')] = mediaErr;
   if (c.issuedDate && c.expirationDate && c.issuedDate > c.expirationDate) {
-    return `${label}: expiration date cannot be before issued date`;
+    o[k('expirationDate')] = 'Expiration date cannot be before issued date';
   }
-  return null;
+  return o;
 }
 
-function validateCertificationList(list: CertificateEntry[]): string | null {
-  if (list.length === 0) return 'Add at least one certification.';
-  for (let i = 0; i < list.length; i++) {
-    const err = validateCertificateEntry(list[i], i);
-    if (err) return err;
-  }
-  return null;
-}
-
-function validateFamilyForm(
+function familyFieldErrors(
   maritalStatus: string,
   spouseName: string,
   relationsList: FamilyRelationEntry[],
-): string | null {
+): Record<string, string> {
+  const o: Record<string, string> = {};
   if (maritalStatus === 'married' && !spouseName?.trim()) {
-    return 'Spouse name is required when marital status is Married.';
+    o.fam_spouseName = 'Spouse name is required when marital status is Married.';
   }
   for (let i = 0; i < relationsList.length; i++) {
     const r = relationsList[i];
     const hasT = !!r.relationType?.trim();
     const hasN = !!r.fullName?.trim();
     if (!hasT && !hasN) continue;
-    if (!hasT) return `Family relation ${i + 1}: select a relation type`;
-    if (!hasN) return `Family relation ${i + 1}: enter full name`;
+    if (!hasT) o[`fam_rel_${i}_type`] = 'Select a relation type';
+    if (!hasN) o[`fam_rel_${i}_name`] = 'Enter full name';
   }
-  return null;
+  return o;
 }
 
-function validateFamilyRelationDraft(r: FamilyRelationEntry): string | null {
-  if (!r.relationType?.trim()) return 'Select a relationship type.';
-  if (!r.fullName?.trim()) return 'Enter relation full name.';
-  return null;
+function familyRelationDraftFieldErrors(r: FamilyRelationEntry): Record<string, string> {
+  const o: Record<string, string> = {};
+  if (!r.relationType?.trim()) o.fam_draft_type = 'Select a relationship type.';
+  if (!r.fullName?.trim()) o.fam_draft_name = 'Enter relation full name.';
+  return o;
 }
 
-const SOCIAL_URL_FIELDS = [
-  { key: 'linkedin' as const, label: 'LinkedIn' },
-  { key: 'twitter' as const, label: 'X (Twitter)' },
-  { key: 'facebook' as const, label: 'Facebook' },
-  { key: 'instagram' as const, label: 'Instagram' },
-  { key: 'tiktok' as const, label: 'TikTok' },
-  { key: 'snapchat' as const, label: 'Snapchat' },
-];
-
-function validateSocialForm(social: {
+function socialFieldErrors(social: {
   linkedin: string;
   twitter: string;
   facebook: string;
   instagram: string;
   tiktok: string;
   snapchat: string;
-}): string | null {
-  for (const { key, label } of SOCIAL_URL_FIELDS) {
-    const v = social[key]?.trim();
-    if (!v) continue;
-    const err = validateOptionalHttpUrl(`${label} URL`, v);
-    if (err) return err;
+}): Record<string, string> {
+  const parsed = verificationSocialSchema.safeParse(social);
+  if (parsed.success) return {};
+  return prefixZodFieldErrors('soc', parsed.error);
+}
+
+function educationListFieldErrors(list: EducationEntry[]): Record<string, string> {
+  const toSave = list.filter((e) => e.id || e.institutionName.trim());
+  if (toSave.length === 0) {
+    return { edu_list: 'Add at least one education entry with an institution name.' };
   }
-  return null;
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (!e.id && !e.institutionName.trim()) continue;
+    const fe = educationEntryFieldErrors(e, String(i));
+    if (Object.keys(fe).length) return fe;
+  }
+  return {};
+}
+
+function workListFieldErrors(list: WorkEntry[]): Record<string, string> {
+  const toSave = list.filter((e) => e.id || e.organisationName.trim());
+  if (toSave.length === 0) {
+    return { work_list: 'Add at least one work experience with an organisation name.' };
+  }
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (!e.id && !e.organisationName.trim()) continue;
+    const fe = workEntryFieldErrors(e, String(i));
+    if (Object.keys(fe).length) return fe;
+  }
+  return {};
+}
+
+function projectListFieldErrors(list: ProjectEntry[]): Record<string, string> {
+  const toSave = list.filter((p) => p.id || p.title.trim());
+  if (toSave.length === 0) {
+    return { proj_list: 'Add at least one project with a title.' };
+  }
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    if (!p.id && !p.title.trim()) continue;
+    const fe = projectEntryFieldErrors(p, String(i));
+    if (Object.keys(fe).length) return fe;
+  }
+  return {};
+}
+
+function certificationListFieldErrors(list: CertificateEntry[]): Record<string, string> {
+  if (list.length === 0) return { cert_list: 'Add at least one certification.' };
+  for (let i = 0; i < list.length; i++) {
+    const fe = certificateEntryFieldErrors(list[i], String(i));
+    if (Object.keys(fe).length) return fe;
+  }
+  return {};
 }
 
 export default function VerificationCenter() {
@@ -968,18 +983,12 @@ export default function VerificationCenter() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const activeTab: SectionKey = isSectionKey(tabParam) ? tabParam : 'personal';
-  const { completedVerificationSteps, progressPct } = useMemo(() => {
-    const total = VERIFICATION_TABS.length;
-    const done = VERIFICATION_TABS.filter(({ id }) => {
-      const s = verificationStatus[id];
-      return s?.completed || s?.verified;
-    }).length;
-    return {
-      completedVerificationSteps: done,
-      progressPct: total ? Math.round((done / total) * 100) : 0,
-    };
-  }, [verificationStatus]);
+  const { completedVerificationSteps, progressPct } = useMemo(
+    () => verificationProgressFromMerged(verificationStatus),
+    [verificationStatus],
+  );
   const [saving, setSaving] = useState(false);
+  const [formFieldErrors, setFormFieldErrors] = useState<Record<string, string>>({});
 
   // Personal
   const [personal, setPersonal] = useState({
@@ -1001,6 +1010,8 @@ export default function VerificationCenter() {
   });
   const [sectionEditMode, setSectionEditMode] = useState<Partial<Record<SectionKey, boolean>>>({});
   const [verifyPersonalModalOpen, setVerifyPersonalModalOpen] = useState(false);
+  /** After "Add data" succeeds: keep the same form visible with a "Verify Data" CTA until identity is verified. */
+  const [personalIdentityAwaitingVerification, setPersonalIdentityAwaitingVerification] = useState(false);
   const [verifyGovIdModalOpen, setVerifyGovIdModalOpen] = useState(false);
   const [identityVerificationPath, setIdentityVerificationPath] = useState<'none' | 'self' | 'gov'>('none');
   const [phoneDialSelection, setPhoneDialSelection] = useState(DEFAULT_PHONE_DIAL_VALUE);
@@ -1018,6 +1029,12 @@ export default function VerificationCenter() {
   const [emailCodeSending, setEmailCodeSending] = useState(false);
   const [livenessCompleteLocal, setLivenessCompleteLocal] = useState(false);
   const [livenessSelfieModalOpen, setLivenessSelfieModalOpen] = useState(false);
+  const [requestDataEditModalOpen, setRequestDataEditModalOpen] = useState(false);
+  const [requestDataEditSelected, setRequestDataEditSelected] = useState<Record<string, boolean>>({});
+  const [requestDataEditReason, setRequestDataEditReason] = useState('');
+  const [requestDataEditFile, setRequestDataEditFile] = useState<File | null>(null);
+  const [requestDataEditSubmitting, setRequestDataEditSubmitting] = useState(false);
+  const requestDataEditFileInputRef = useRef<HTMLInputElement>(null);
   const [selfDeclarationFlow, setSelfDeclarationFlow] = useState<SelfDeclarationFlow>({ open: false });
   const [personalFlowStep, setPersonalFlowStep] = useState<PersonalFlowStep>('add_data');
 
@@ -1034,6 +1051,8 @@ export default function VerificationCenter() {
     city: '',
     address: '',
   });
+  /** When false, the add-location form is hidden behind an "Add new" control (like other sections). */
+  const [locationAddFormOpen, setLocationAddFormOpen] = useState(false);
   const [verifyAddressModal, setVerifyAddressModal] = useState<{
     open: boolean;
     locationIndex: number | null;
@@ -1056,6 +1075,7 @@ export default function VerificationCenter() {
   const [educationEntriesList, setEducationEntriesList] = useState<EducationEntry[]>([]);
   const [educationDraft, setEducationDraft] = useState<EducationEntry>(() => emptyEducation());
   const [educationSaving, setEducationSaving] = useState(false);
+  const [educationAddFormOpen, setEducationAddFormOpen] = useState(false);
 
   // Work (list of entries like Location)
   const [workEntriesList, setWorkEntriesList] = useState<WorkEntry[]>([]);
@@ -1118,26 +1138,127 @@ export default function VerificationCenter() {
     return age;
   }, [personal.dateOfBirth]);
 
-  const identityFlowComplete =
-    identityVerificationPath !== 'none' || verificationStatus.personal.verified;
+  const identityFlowComplete = useMemo(() => {
+    if (identityVerificationPath !== 'none') return true;
+    if (verificationStatus.personal.verified) return true;
+    if (profile?.identityVerification) return true;
+    const gov =
+      !!(profile?.idType && String(profile?.idNumber || '').trim() && profile?.idDocumentUrl);
+    return gov;
+  }, [
+    identityVerificationPath,
+    verificationStatus.personal.verified,
+    profile?.identityVerification,
+    profile?.idType,
+    profile?.idNumber,
+    profile?.idDocumentUrl,
+  ]);
+
+  /** Keep personal form/summary in this card until identity is verified; never hide it just because fields validate locally. */
+  const showPersonalBasicEntryForm = !identityFlowComplete;
 
   useEffect(() => {
     if (loading) return;
-    let next: PersonalFlowStep = 'complete';
-    if (!personalBasicComplete) next = 'add_data';
-    else if (!identityFlowComplete) next = 'identity';
-    else if (!userEmailVerified || !userPhoneVerified) next = 'contact';
-    else if (!livenessCompleteLocal) next = 'liveness';
-    else next = 'complete';
-    setPersonalFlowStep(next);
+    try {
+      if (verificationStatus.personal.verified) {
+        clearPersonalIdentityPathStorage();
+        return;
+      }
+      if (identityVerificationPath === 'self' || identityVerificationPath === 'gov') {
+        sessionStorage.setItem(PERSONAL_IDENTITY_PATH_STORAGE_KEY, identityVerificationPath);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [loading, identityVerificationPath, verificationStatus.personal.verified]);
+
+  useEffect(() => {
+    if (identityFlowComplete) {
+      setPersonalIdentityAwaitingVerification(false);
+      clearPersonalIdentityAwaitingStorage();
+    }
+  }, [identityFlowComplete]);
+
+  useEffect(() => {
+    if (!personalBasicComplete) {
+      setPersonalIdentityAwaitingVerification(false);
+      clearPersonalIdentityAwaitingStorage();
+    }
+  }, [personalBasicComplete]);
+
+  useLayoutEffect(() => {
+    if (loading) return;
+    if (!verificationStatus.personal.verified && identityVerificationPath === 'none') {
+      const hasServerIdentity =
+        !!(profile?.identityVerification) ||
+        !!(profile?.idType && String(profile?.idNumber || '').trim() && profile?.idDocumentUrl);
+      if (!hasServerIdentity) {
+        try {
+          const p = sessionStorage.getItem(PERSONAL_IDENTITY_PATH_STORAGE_KEY);
+          if (p === 'self' || p === 'gov') {
+            setIdentityVerificationPath(p);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (!personalBasicComplete) {
+      clearPersonalIdentityAwaitingStorage();
+    } else {
+      try {
+        const raw = sessionStorage.getItem(PERSONAL_IDENTITY_AWAITING_STORAGE_KEY);
+        if (raw === '1' && !identityFlowComplete) {
+          setPersonalIdentityAwaitingVerification(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const stored = parseStoredPersonalFlowStep(sessionStorage.getItem(PERSONAL_FLOW_STEP_STORAGE_KEY));
+    const resolved = resolvePersonalFlowStepFromStorage(
+      stored,
+      personalBasicComplete,
+      identityFlowComplete,
+      userEmailVerified,
+      userPhoneVerified,
+      livenessCompleteLocal,
+    );
+    setPersonalFlowStep(resolved);
   }, [
     loading,
     personalBasicComplete,
     identityFlowComplete,
+    identityVerificationPath,
+    verificationStatus.personal.verified,
+    profile?.identityVerification,
+    profile?.idType,
+    profile?.idNumber,
+    profile?.idDocumentUrl,
     userPhoneVerified,
     userEmailVerified,
     livenessCompleteLocal,
   ]);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      sessionStorage.setItem(PERSONAL_FLOW_STEP_STORAGE_KEY, personalFlowStep);
+    } catch {
+      /* ignore */
+    }
+  }, [personalFlowStep, loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      if (personalIdentityAwaitingVerification) {
+        sessionStorage.setItem(PERSONAL_IDENTITY_AWAITING_STORAGE_KEY, '1');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [personalIdentityAwaitingVerification, loading]);
 
   const fetchProfile = async (opts?: { soft?: boolean }) => {
     if (!opts?.soft) setLoading(true);
@@ -1154,27 +1275,7 @@ export default function VerificationCenter() {
         );
       }
       const status = statusRes.data?.data as Partial<Record<SectionKey, { completed?: boolean; verified?: boolean }>> | undefined;
-      const derived = data && typeof data === 'object' ? deriveVerificationStatusFromProfile(data) : null;
-      if (status || derived) {
-        const mergeKey = (key: SectionKey): { completed: boolean; verified: boolean } => {
-          const s = status?.[key];
-          const d = derived?.[key];
-          return {
-            completed: !!(s?.completed || s?.verified || d?.completed || d?.verified),
-            verified: !!(s?.verified || d?.verified),
-          };
-        };
-        setVerificationStatus({
-          personal: mergeKey('personal'),
-          location: mergeKey('location'),
-          education: mergeKey('education'),
-          social: mergeKey('social'),
-          work: mergeKey('work'),
-          projects: mergeKey('projects'),
-          certification: mergeKey('certification'),
-          family: mergeKey('family'),
-        });
-      }
+      setVerificationStatus(mergeVerificationStatusFromSources(status, data));
       if (data?.user) {
         const u = data.user as {
           firstName?: string;
@@ -1415,35 +1516,28 @@ export default function VerificationCenter() {
   };
 
 
-  const personalBasicRequiredFields = (): string[] => {
-    const missing: string[] = [];
-    if (!personal.firstName?.trim()) missing.push('First name');
-    if (!personal.lastName?.trim()) missing.push('Last name');
-    if (!personal.dateOfBirth) missing.push('Date of birth');
-    if (!personal.gender) missing.push('Gender');
-    if (!personal.nationality) missing.push('Nationality');
-    return missing;
-  };
-
-  const personalGovIdRequiredFields = (): string[] => {
-    const missing: string[] = [];
-    if (!personal.nationality) missing.push('Country of nationality');
-    if (!personal.idType) missing.push('ID type');
-    if (!personal.idNumber?.trim()) missing.push('ID number');
-    return missing;
-  };
-
   const idNumberPlaceholder = (): string => {
     const label = ID_TYPE_OPTIONS.find((o) => o.value === personal.idType)?.label || 'ID';
     return `Enter your ${label} number`;
   };
 
   const handleAddPersonalBasic = async () => {
-    const missingPersonal = personalBasicRequiredFields();
-    if (missingPersonal.length) {
-      toast.error(`Please fill required fields: ${missingPersonal.join(', ')}`);
+    const parsed = verificationPersonalBasicSchema.safeParse({
+      firstName: personal.firstName,
+      lastName: personal.lastName,
+      dateOfBirth: personal.dateOfBirth,
+      gender: personal.gender,
+      nationality: personal.nationality,
+    });
+    if (!parsed.success) {
+      setFormFieldErrors((p) => ({
+        ...omitKeysMatching(p, /^per_/),
+        ...prefixZodFieldErrors('per', parsed.error),
+      }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^per_/));
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
@@ -1455,10 +1549,9 @@ export default function VerificationCenter() {
         nationality: personal.nationality || undefined,
       });
       toast.success('Personal data added');
-      setSectionEditMode((prev) => ({ ...prev, personal: false }));
+      setVerifyPersonalModalOpen(false);
+      setPersonalIdentityAwaitingVerification(true);
       await fetchProfile();
-      setPersonalFlowStep('identity');
-      setVerifyPersonalModalOpen(true);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -1467,11 +1560,22 @@ export default function VerificationCenter() {
   };
 
   const handleSavePersonal = async () => {
-    const missingPersonal = personalBasicRequiredFields();
-    if (missingPersonal.length) {
-      toast.error(`Please fill required fields: ${missingPersonal.join(', ')}`);
+    const parsed = verificationPersonalBasicSchema.safeParse({
+      firstName: personal.firstName,
+      lastName: personal.lastName,
+      dateOfBirth: personal.dateOfBirth,
+      gender: personal.gender,
+      nationality: personal.nationality,
+    });
+    if (!parsed.success) {
+      setFormFieldErrors((p) => ({
+        ...omitKeysMatching(p, /^per_/),
+        ...prefixZodFieldErrors('per', parsed.error),
+      }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^per_/));
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
@@ -1496,11 +1600,20 @@ export default function VerificationCenter() {
   };
 
   const handleSubmitGovIdVerification = async () => {
-    const missing = personalGovIdRequiredFields();
-    if (missing.length) {
-      toast.error(`Please complete: ${missing.join(', ')}`);
+    const parsed = verificationPersonalGovSchema.safeParse({
+      nationality: personal.nationality,
+      idType: personal.idType,
+      idNumber: personal.idNumber,
+    });
+    if (!parsed.success) {
+      setFormFieldErrors((p) => ({
+        ...omitKeysMatching(p, /^gov_/),
+        ...prefixZodFieldErrors('gov', parsed.error),
+      }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^gov_/));
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
@@ -1531,6 +1644,53 @@ export default function VerificationCenter() {
       parsePhoneDialValue(phoneDialSelection).dial,
       personal.phoneNumber?.trim() || '',
     );
+  };
+
+  const closeRequestDataEditModal = () => {
+    setRequestDataEditModalOpen(false);
+    setRequestDataEditSelected({});
+    setRequestDataEditReason('');
+    setRequestDataEditFile(null);
+    setRequestDataEditSubmitting(false);
+    if (requestDataEditFileInputRef.current) requestDataEditFileInputRef.current.value = '';
+  };
+
+  const toggleRequestEditField = (key: string) => {
+    setRequestDataEditSelected((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSubmitRequestDataEdit = async () => {
+    const keys = Object.entries(requestDataEditSelected)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (keys.length === 0) {
+      toast.error('Select at least one field to edit');
+      return;
+    }
+    if (!requestDataEditReason.trim()) {
+      toast.error('Select a reason for your edit request');
+      return;
+    }
+    if (!requestDataEditFile) {
+      toast.error('Attach supporting evidence');
+      return;
+    }
+    setRequestDataEditSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('fields', JSON.stringify(keys));
+      formData.append('reason', requestDataEditReason);
+      formData.append('file', requestDataEditFile);
+      await api.post('/v1/professional/profile/edit-request', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Request submitted. Our team will review your request.');
+      closeRequestDataEditModal();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to submit request');
+    } finally {
+      setRequestDataEditSubmitting(false);
+    }
   };
 
   const handlePhoneOtpDigit = (index: number, char: string) => {
@@ -1688,6 +1848,7 @@ export default function VerificationCenter() {
       await api.put('/v1/professional/profile', {
         locations: mapLocationsForApi(list),
       });
+      setFormFieldErrors((p) => omitKeysMatching(p, /^loc_/));
       if (!options?.silentSuccess) toast.success('Location saved');
       setSectionEditMode((prev) => ({ ...prev, location: false }));
       fetchProfile();
@@ -1699,8 +1860,12 @@ export default function VerificationCenter() {
   };
 
   const tryPersistLocations = (list: LocationEntry[], silentSuccess?: boolean) => {
-    const locErr = validateLocationsList(list);
-    if (locErr) return;
+    const locFe = locationsListFieldErrors(list);
+    if (Object.keys(locFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^loc_/), ...locFe }));
+      if (!silentSuccess) toast.error('Please fix the highlighted location fields');
+      return;
+    }
     void putLocationsProfile(list, { silentSuccess });
   };
 
@@ -1711,15 +1876,16 @@ export default function VerificationCenter() {
   };
 
   const addLocationFromDraft = () => {
-    if (
-      !locationDraft.country.trim() ||
-      !locationDraft.state.trim() ||
-      !locationDraft.city.trim() ||
-      !locationDraft.address.trim()
-    ) {
-      toast.error('Fill country, state, city, and street address');
+    const parsed = verificationLocationDraftSchema.safeParse(locationDraft);
+    if (!parsed.success) {
+      setFormFieldErrors((p) => ({
+        ...omitKeysMatching(p, /^loc_draft_/),
+        ...prefixZodFieldErrors('loc_draft', parsed.error),
+      }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^loc_draft_/));
     setLocationsList((prev) => {
       const isFirst = prev.length === 0;
       const newLoc: LocationEntry = {
@@ -1736,6 +1902,7 @@ export default function VerificationCenter() {
       return next;
     });
     setLocationDraft({ country: '', state: '', city: '', address: '' });
+    setLocationAddFormOpen(false);
     toast.success('Location added — verify to unlock full access');
   };
 
@@ -1760,12 +1927,13 @@ export default function VerificationCenter() {
   };
 
   const commitEducationDraft = () => {
-    const labelIndex = educationEntriesList.length;
-    const err = validateEducationEntry(educationDraft, labelIndex);
-    if (err) {
-      toast.error(err);
+    const eduFe = educationEntryFieldErrors(educationDraft, 'draft');
+    if (Object.keys(eduFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^edu_draft_/), ...eduFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
     const entry = cloneEducationEntry({
       ...educationDraft,
       id: undefined,
@@ -1778,6 +1946,7 @@ export default function VerificationCenter() {
     });
     toast.success('Education added');
     setEducationDraft(emptyEducation());
+    setEducationAddFormOpen(false);
   };
 
   const removeEducationEntry = (index: number) => {
@@ -1811,12 +1980,13 @@ export default function VerificationCenter() {
   };
 
   const commitWorkDraft = () => {
-    const labelIndex = workEntriesList.length;
-    const err = validateWorkEntry(workDraft, labelIndex);
-    if (err) {
-      toast.error(err);
+    const workFe = workEntryFieldErrors(workDraft, 'draft');
+    if (Object.keys(workFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^work_draft_/), ...workFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
     const primary = workDraft.workRoles[0];
     const synced: WorkEntry = {
       ...cloneWorkEntry(workDraft),
@@ -1954,11 +2124,13 @@ export default function VerificationCenter() {
   };
 
   const handleSaveSocial = async () => {
-    const socialErr = validateSocialForm(social);
-    if (socialErr) {
-      toast.error(socialErr);
+    const socFe = socialFieldErrors(social);
+    if (Object.keys(socFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^soc_/), ...socFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^soc_/));
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
@@ -1978,9 +2150,10 @@ export default function VerificationCenter() {
     options?: { silentSuccess?: boolean },
   ) => {
     if (!profile?.id) return;
-    const eduErr = validateEducationList(list);
-    if (eduErr) {
-      if (!options?.silentSuccess) toast.error(eduErr);
+    const eduFe = educationListFieldErrors(list);
+    if (Object.keys(eduFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^edu_/), ...eduFe }));
+      if (!options?.silentSuccess) toast.error('Please fix the highlighted education fields');
       return;
     }
     const toSave = list.filter((e) => e.id || e.institutionName.trim());
@@ -2032,6 +2205,7 @@ export default function VerificationCenter() {
           await api.post(`/v1/professional/${profId}/education`, payload);
         }
       }
+      setFormFieldErrors((p) => omitKeysMatching(p, /^edu_/));
       if (!options?.silentSuccess) toast.success('Education saved');
       setSectionEditMode((prev) => ({ ...prev, education: false }));
       fetchProfile();
@@ -2095,9 +2269,10 @@ export default function VerificationCenter() {
 
   const syncWorkEntriesToApi = async (list: WorkEntry[], options?: { silentSuccess?: boolean }) => {
     if (!profile?.id) return;
-    const workErr = validateWorkList(list);
-    if (workErr) {
-      if (!options?.silentSuccess) toast.error(workErr);
+    const workFe = workListFieldErrors(list);
+    if (Object.keys(workFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^work_/), ...workFe }));
+      if (!options?.silentSuccess) toast.error('Please fix the highlighted work fields');
       return;
     }
     const profId = profile.id;
@@ -2112,6 +2287,7 @@ export default function VerificationCenter() {
           await api.post(`/v1/professional/${profId}/experience`, payload);
         }
       }
+      setFormFieldErrors((p) => omitKeysMatching(p, /^work_/));
       if (!options?.silentSuccess) toast.success('Work experience saved');
       setSectionEditMode((prev) => ({ ...prev, work: false }));
       fetchProfile();
@@ -2148,12 +2324,13 @@ export default function VerificationCenter() {
   };
 
   const commitProjectDraft = () => {
-    const labelIndex = projectEditingIndex ?? projectsList.length;
-    const err = validateProjectEntry(projectDraft, labelIndex);
-    if (err) {
-      toast.error(err);
+    const projFe = projectEntryFieldErrors(projectDraft, 'draft');
+    if (Object.keys(projFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^proj_draft_/), ...projFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
     if (projectEditingIndex != null) {
       const i = projectEditingIndex;
       const merged = cloneProjectEntry(projectDraft);
@@ -2208,9 +2385,10 @@ export default function VerificationCenter() {
 
   const syncProjectsListToApi = async (list: ProjectEntry[], options?: { silentSuccess?: boolean }) => {
     if (!profile?.id) return;
-    const projErr = validateProjectList(list);
-    if (projErr) {
-      if (!options?.silentSuccess) toast.error(projErr);
+    const projFe = projectListFieldErrors(list);
+    if (Object.keys(projFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^proj_/), ...projFe }));
+      if (!options?.silentSuccess) toast.error('Please fix the highlighted project fields');
       return;
     }
     const profId = profile.id;
@@ -2234,6 +2412,7 @@ export default function VerificationCenter() {
           await api.post(`/v1/professional/${profId}/project`, payload);
         }
       }
+      setFormFieldErrors((p) => omitKeysMatching(p, /^proj_/));
       if (!options?.silentSuccess) toast.success('Projects saved');
       setSectionEditMode((prev) => ({ ...prev, projects: false }));
       fetchProfile();
@@ -2249,12 +2428,13 @@ export default function VerificationCenter() {
   };
 
   const commitCertDraft = () => {
-    const labelIndex = certEditingIndex ?? certList.length;
-    const err = validateCertificateEntry(certDraft, labelIndex);
-    if (err) {
-      toast.error(err);
+    const certFe = certificateEntryFieldErrors(certDraft, 'draft');
+    if (Object.keys(certFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^cert_draft_/), ...certFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
     if (certEditingIndex != null) {
       const i = certEditingIndex;
       const merged = cloneCertificate(certDraft);
@@ -2323,6 +2503,7 @@ export default function VerificationCenter() {
       const url = (res.data as any)?.data?.url ?? (res.data as any)?.url;
       if (url) {
         setCertDraft((d) => ({ ...d, supportingMediaUrl: url }));
+        clearFormError('cert_draft_supportingMediaUrl');
         toast.success('File uploaded');
       }
     } catch (err: any) {
@@ -2334,9 +2515,10 @@ export default function VerificationCenter() {
   };
 
   const syncCertificationsToApi = async (list: CertificateEntry[], options?: { silentSuccess?: boolean }) => {
-    const certErr = validateCertificationList(list);
-    if (certErr) {
-      if (!options?.silentSuccess) toast.error(certErr);
+    const certFe = certificationListFieldErrors(list);
+    if (Object.keys(certFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^cert_/), ...certFe }));
+      if (!options?.silentSuccess) toast.error('Please fix the highlighted certification fields');
       return;
     }
     setSaving(true);
@@ -2352,6 +2534,7 @@ export default function VerificationCenter() {
           supportingMediaUrl: c.supportingMediaUrl || undefined,
         })),
       });
+      setFormFieldErrors((p) => omitKeysMatching(p, /^cert_/));
       if (!options?.silentSuccess) toast.success('Certifications saved');
       setSectionEditMode((prev) => ({ ...prev, certification: false }));
       fetchProfile();
@@ -2368,9 +2551,10 @@ export default function VerificationCenter() {
     list: FamilyRelationEntry[],
     options?: { silentSuccess?: boolean; exitEditMode?: boolean },
   ) => {
-    const famErr = validateFamilyForm(marital, spouse, list);
-    if (famErr) {
-      if (!options?.silentSuccess) toast.error(famErr);
+    const famFe = familyFieldErrors(marital, spouse, list);
+    if (Object.keys(famFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^fam/), ...famFe }));
+      if (!options?.silentSuccess) toast.error('Please fix the highlighted family fields');
       return;
     }
     setSaving(true);
@@ -2384,6 +2568,7 @@ export default function VerificationCenter() {
             .map((r) => ({ relationType: r.relationType, fullName: r.fullName })),
         },
       });
+      setFormFieldErrors((p) => omitKeysMatching(p, /^fam/));
       if (!options?.silentSuccess) toast.success('Family information saved');
       if (options?.exitEditMode) {
         setSectionEditMode((prev) => ({ ...prev, family: false }));
@@ -2413,19 +2598,22 @@ export default function VerificationCenter() {
   };
 
   const commitFamilyRelationDraft = () => {
-    const draftErr = validateFamilyRelationDraft(familyRelationDraft);
-    if (draftErr) {
-      toast.error(draftErr);
+    const draftFe = familyRelationDraftFieldErrors(familyRelationDraft);
+    if (Object.keys(draftFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^fam_draft_/), ...draftFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
+    setFormFieldErrors((p) => omitKeysMatching(p, /^fam_draft_/));
     const i = familyRelationEditingIndex;
     const next =
       i != null
         ? relationsList.map((r, idx) => (idx === i ? { ...familyRelationDraft } : r))
         : [...relationsList, { ...familyRelationDraft }];
-    const famErr = validateFamilyForm(maritalStatus, spouseName, next);
-    if (famErr) {
-      toast.error(famErr);
+    const famFe = familyFieldErrors(maritalStatus, spouseName, next);
+    if (Object.keys(famFe).length) {
+      setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^fam/), ...famFe }));
+      toast.error('Please fix the highlighted fields');
       return;
     }
     setRelationsList(next);
@@ -2450,6 +2638,23 @@ export default function VerificationCenter() {
       return next;
     });
   };
+
+  const clearFormError = (key: string) => {
+    setFormFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const fe = formFieldErrors;
+  const hasLocationDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('loc_draft_'));
+  const showLocationAddForm = locationAddFormOpen || hasLocationDraftFieldErrors;
+  const hasEducationDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('edu_draft_'));
+  const showEducationAddForm = educationAddFormOpen || hasEducationDraftFieldErrors;
+  const errB3 = (k: string) => (fe[k] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300');
+  const errB2 = (k: string) => (fe[k] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-200');
 
   if (loading) {
     return (
@@ -2534,17 +2739,19 @@ export default function VerificationCenter() {
                 )}
               </div>
 
-              {!(sectionEditMode.personal && personalBasicComplete) && (
+              {!(sectionEditMode.personal && personalBasicComplete) && personalFlowStep !== 'complete' && (
                 <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4">
                   {/* <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Personal verification flow</p> */}
                   <div className="flex flex-wrap gap-2">
-                    {PERSONAL_FLOW_STEPS.map(({ step, label }, i) => {
-                      const cur = personalFlowStepIndex(personalFlowStep);
-                      const done = cur > i || personalFlowStep === 'complete';
-                      const active = personalFlowStep === step;
+                    {PERSONAL_FLOW_UI_GROUPS.map(({ label, steps: groupSteps }, i) => {
+                      const done =
+                        (i === 0 && identityFlowComplete) ||
+                        (i === 1 && userEmailVerified && userPhoneVerified) ||
+                        (i === 2 && livenessCompleteLocal);
+                      const active = groupSteps.includes(personalFlowStep);
                       return (
                         <div
-                          key={step}
+                          key={label}
                           className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium border ${
                             done
                               ? 'border-brand-200 bg-brand-50 text-brand-800'
@@ -2593,10 +2800,14 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={personal.firstName}
-                        onChange={(e) => setPersonal((p) => ({ ...p, firstName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          setPersonal((p) => ({ ...p, firstName: e.target.value }));
+                          clearFormError('per_firstName');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_firstName')}`}
                         required
                       />
+                      {fe.per_firstName ? <p className="mt-1 text-sm text-red-600">{fe.per_firstName}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2605,10 +2816,14 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={personal.lastName}
-                        onChange={(e) => setPersonal((p) => ({ ...p, lastName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          setPersonal((p) => ({ ...p, lastName: e.target.value }));
+                          clearFormError('per_lastName');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_lastName')}`}
                         required
                       />
+                      {fe.per_lastName ? <p className="mt-1 text-sm text-red-600">{fe.per_lastName}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Other Names</label>
@@ -2625,10 +2840,14 @@ export default function VerificationCenter() {
                       </label>
                       <SearchableList
                         value={personal.nationality}
-                        onChange={(nationality) => setPersonal((p) => ({ ...p, nationality }))}
+                        onChange={(nationality) => {
+                          setPersonal((p) => ({ ...p, nationality }));
+                          clearFormError('per_nationality');
+                        }}
                         options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
                         placeholder="Select country"
                         className="bg-gray-50"
+                        error={fe.per_nationality}
                       />
                     </div>
                     <div>
@@ -2638,10 +2857,14 @@ export default function VerificationCenter() {
                       <input
                         type="date"
                         value={personal.dateOfBirth}
-                        onChange={(e) => setPersonal((p) => ({ ...p, dateOfBirth: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          setPersonal((p) => ({ ...p, dateOfBirth: e.target.value }));
+                          clearFormError('per_dateOfBirth');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_dateOfBirth')}`}
                         required
                       />
+                      {fe.per_dateOfBirth ? <p className="mt-1 text-sm text-red-600">{fe.per_dateOfBirth}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2649,23 +2872,20 @@ export default function VerificationCenter() {
                       </label>
                       <SearchableList
                         value={personal.gender}
-                        onChange={(gender) => setPersonal((p) => ({ ...p, gender }))}
+                        onChange={(gender) => {
+                          setPersonal((p) => ({ ...p, gender }));
+                          clearFormError('per_gender');
+                        }}
                         options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
                         placeholder="Select"
                         className="bg-gray-50"
+                        error={fe.per_gender}
                       />
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      const missing = personalBasicRequiredFields();
-                      if (missing.length) {
-                        toast.error(`Please fill required fields: ${missing.join(', ')}`);
-                        return;
-                      }
-                      void handleSavePersonal();
-                    }}
+                    onClick={() => void handleSavePersonal()}
                     disabled={saving}
                     className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                   >
@@ -2673,140 +2893,220 @@ export default function VerificationCenter() {
                     {saving ? 'Saving...' : 'Continue'}
                   </button>
                 </div>
-              ) : !personalBasicComplete ? (
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Enter your details, then continue to choose how we verify your identity.
-                      </p>
+              ) : showPersonalBasicEntryForm ? (
+                !(personalBasicComplete && personalIdentityAwaitingVerification) ? (
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Enter your details, then tap Add Data. After saving, use Verify Data to open identity verification.
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        First Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={personal.firstName}
-                        onChange={(e) => setPersonal((p) => ({ ...p, firstName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="First name"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Last Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={personal.lastName}
-                        onChange={(e) => setPersonal((p) => ({ ...p, lastName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="Last name"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Other Names</label>
-                      <input
-                        type="text"
-                        value={personal.middleName}
-                        onChange={(e) => setPersonal((p) => ({ ...p, middleName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="Optional"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Nationality <span className="text-red-500">*</span>
-                      </label>
-                      <SearchableList
-                        value={personal.nationality}
-                        onChange={(nationality) => setPersonal((p) => ({ ...p, nationality }))}
-                        options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                        placeholder="Select country"
-                        className="bg-gray-50"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Date of Birth <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        value={personal.dateOfBirth}
-                        onChange={(e) => setPersonal((p) => ({ ...p, dateOfBirth: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Gender <span className="text-red-500">*</span>
-                      </label>
-                      <SearchableList
-                        value={personal.gender}
-                        onChange={(gender) => setPersonal((p) => ({ ...p, gender }))}
-                        options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
-                        placeholder="Select"
-                        className="bg-gray-50"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleAddPersonalBasic()}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
-                  >
-                    <HiPlus className="w-4 h-4" />
-                    {saving ? 'Saving...' : 'Add Data'}
-                  </button>
-                </div>
-              ) : personalFlowStep === 'identity' ? (
-                <div className="space-y-5 min-h-[280px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-lg font-semibold text-gray-900">Verify your identity</h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Proceed by choosing self declaration or government ID. A dialog will open with both options.
-                      </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          First Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={personal.firstName}
+                          onChange={(e) => {
+                            setPersonal((p) => ({ ...p, firstName: e.target.value }));
+                            clearFormError('per_firstName');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_firstName')}`}
+                          placeholder="First name"
+                          required
+                        />
+                        {fe.per_firstName ? <p className="mt-1 text-sm text-red-600">{fe.per_firstName}</p> : null}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Last Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={personal.lastName}
+                          onChange={(e) => {
+                            setPersonal((p) => ({ ...p, lastName: e.target.value }));
+                            clearFormError('per_lastName');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_lastName')}`}
+                          placeholder="Last name"
+                          required
+                        />
+                        {fe.per_lastName ? <p className="mt-1 text-sm text-red-600">{fe.per_lastName}</p> : null}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Other Names</label>
+                        <input
+                          type="text"
+                          value={personal.middleName}
+                          onChange={(e) => setPersonal((p) => ({ ...p, middleName: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          placeholder="Optional"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Nationality <span className="text-red-500">*</span>
+                        </label>
+                        <SearchableList
+                          value={personal.nationality}
+                          onChange={(nationality) => {
+                            setPersonal((p) => ({ ...p, nationality }));
+                            clearFormError('per_nationality');
+                          }}
+                          options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                          placeholder="Select country"
+                          className="bg-gray-50"
+                          error={fe.per_nationality}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Date of Birth <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={personal.dateOfBirth}
+                          onChange={(e) => {
+                            setPersonal((p) => ({ ...p, dateOfBirth: e.target.value }));
+                            clearFormError('per_dateOfBirth');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_dateOfBirth')}`}
+                          required
+                        />
+                        {fe.per_dateOfBirth ? <p className="mt-1 text-sm text-red-600">{fe.per_dateOfBirth}</p> : null}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Gender <span className="text-red-500">*</span>
+                        </label>
+                        <SearchableList
+                          value={personal.gender}
+                          onChange={(gender) => {
+                            setPersonal((p) => ({ ...p, gender }));
+                            clearFormError('per_gender');
+                          }}
+                          options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
+                          placeholder="Select"
+                          className="bg-gray-50"
+                          error={fe.per_gender}
+                        />
+                      </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                      className="shrink-0 text-sm font-semibold text-gray-900 hover:text-brand-600"
+                      onClick={() => void handleAddPersonalBasic()}
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                     >
-                      Edit Data
+                      <HiPlus className="w-4 h-4" />
+                      {saving ? 'Saving...' : 'Add Data'}
                     </button>
                   </div>
-                  <div className="rounded-lg border border-gray-200 bg-gray-50/50 px-4 py-3">
-                    <p className="text-xs font-medium text-gray-500 mb-2">Data on file</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-                      <div>
-                        <span className="text-gray-500">Name: </span>
-                        <span className="text-gray-900">
-                          {personal.firstName} {personal.lastName}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Nationality: </span>
-                        <span className="text-gray-900">{personal.nationality || '—'}</span>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                        Data Added
+                      </span>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-x-10">
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">First Name</p>
+                            <p className="mt-0.5 text-sm font-medium text-gray-900">
+                              {personal.firstName?.trim() || '—'}
+                            </p>
+                          </div>
+                          {personal.middleName?.trim() ? (
+                            <div>
+                              <p className="text-xs font-medium text-gray-500">Other Names</p>
+                              <p className="mt-0.5 text-sm font-medium text-gray-900">{personal.middleName.trim()}</p>
+                            </div>
+                          ) : null}
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">Nationality</p>
+                            <p className="mt-0.5 text-sm font-medium text-gray-900">
+                              {personal.nationality?.trim() || '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">Gender</p>
+                            <p className="mt-0.5 text-sm font-medium text-gray-900">
+                              {personal.gender?.trim() || '—'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">Last Name</p>
+                            <p className="mt-0.5 text-sm font-medium text-gray-900">
+                              {personal.lastName?.trim() || '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">Date of Birth</p>
+                            <p className="mt-0.5 text-sm font-medium text-gray-900">
+                              {personal.dateOfBirth?.trim() || '—'}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setVerifyPersonalModalOpen(true)}
+                        disabled={saving}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
+                      >
+                        <HiShieldCheck className="w-4 h-4" />
+                        Verify Data
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                      >
+                        Edit details
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setVerifyPersonalModalOpen(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium text-sm"
-                  >
-                    <HiShieldCheck className="w-4 h-4" />
-                    Choose verification method
-                  </button>
+                )
+              ) : personalFlowStep === 'identity' ? (
+                <div
+                  className={
+                    verifyPersonalModalOpen
+                      ? ''
+                      : 'min-h-[120px] flex flex-col items-center justify-center gap-3 text-center px-4 py-6'
+                  }
+                >
+                  {!verifyPersonalModalOpen && (
+                    <>
+                      <p className="text-sm text-gray-600">Choose how to verify your identity to continue.</p>
+                      <button
+                        type="button"
+                        onClick={() => setVerifyPersonalModalOpen(true)}
+                        className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+                      >
+                        Open verification options
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                        className="text-xs text-gray-500 hover:text-gray-800"
+                      >
+                        Edit personal data
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : personalFlowStep === 'contact' ? (
                 <div className="w-full space-y-5 min-h-[280px]">
@@ -3023,13 +3323,11 @@ export default function VerificationCenter() {
                                 <label htmlFor="contact-phone-dial" className="sr-only">
                                   Country code
                                 </label>
-                                <SearchableList
+                                <PhoneDialCodeSelect
                                   id="contact-phone-dial"
                                   value={phoneDialSelection}
                                   onChange={setPhoneDialSelection}
-                                  options={PHONE_DIAL_SEARCH_OPTIONS}
-                                  placeholder="Search country or code"
-                                  className="bg-white text-sm h-10 py-2"
+                                  className="text-sm"
                                 />
                               </div>
                               <div className="min-w-[140px] flex-1">
@@ -3166,15 +3464,15 @@ export default function VerificationCenter() {
                 </div>
               ) : (
                 <div className="space-y-6 min-h-[280px]">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between gap-y-2">
+                  <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                     <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:justify-end">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       {verificationStatus.personal.verified ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           Verified
                         </span>
                       ) : verificationStatus.personal.completed ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
                           Pending verification
                         </span>
                       ) : null}
@@ -3187,50 +3485,54 @@ export default function VerificationCenter() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5 text-sm border-b border-gray-200 pb-6">
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
-                      <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                        {personal.firstName?.trim() || '—'}
-                        {!!personal.firstName?.trim() && (
-                          <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
-                        )}
-                      </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 text-sm border-b border-gray-200 pb-6">
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
+                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                          {personal.firstName?.trim() || '—'}
+                          {!!personal.firstName?.trim() && (
+                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
+                        <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
+                        <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
+                          {personal.dateOfBirth
+                            ? (() => {
+                                const d = new Date(personal.dateOfBirth);
+                                return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
+                              })()
+                            : '—'}
+                          {personalAgeYears != null && (
+                            <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
+                          )}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
-                      <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                        {personal.lastName?.trim() || '—'}
-                        {!!personal.lastName?.trim() && (
-                          <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
-                      <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
-                      <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
-                      <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
-                        {personal.dateOfBirth
-                          ? (() => {
-                              const d = new Date(personal.dateOfBirth);
-                              return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
-                            })()
-                          : '—'}
-                        {personalAgeYears != null && (
-                          <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
-                      <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
+                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                          {personal.lastName?.trim() || '—'}
+                          {!!personal.lastName?.trim() && (
+                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
+                        <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
+                        <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -3293,7 +3595,7 @@ export default function VerificationCenter() {
 
                   <button
                     type="button"
-                    onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                    onClick={() => setRequestDataEditModalOpen(true)}
                     className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 hover:text-brand-600"
                   >
                     <HiLockClosed className="w-4 h-4 text-gray-500" aria-hidden />
@@ -3322,17 +3624,29 @@ export default function VerificationCenter() {
                 )}
               </div>
 
+              {(fe.loc_list || fe.loc_default) && (
+                <p className="text-sm text-red-600">{fe.loc_list || fe.loc_default}</p>
+              )}
+
               <div className="space-y-4">
                 {locationsList.map((loc, index) => {
                   const status = loc.verificationStatus ?? 'pending';
                   const title =
                     [loc.city, loc.state].filter((s) => s?.trim()).join(', ') || 'Location';
                   const subtitle = `${loc.country?.trim() || '—'} · ${loc.address?.trim() || '—'}`;
+                  const locRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`loc_${index}_`));
                   return (
                     <div
                       key={`loc-${index}-${title}`}
                       className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
                     >
+                      {locRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {locRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex gap-3 min-w-0">
                           <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
@@ -3402,24 +3716,14 @@ export default function VerificationCenter() {
                             </button>
                           )}
                           {status === 'self_declared' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => openVerifyAddressModal(index)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
-                              >
-                                <HiShieldCheck className="w-4 h-4" />
-                                Upgrade Verification
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => toast('Edit request recorded. Support will contact you if needed.')}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
-                              >
-                                <HiLockClosed className="w-4 h-4" />
-                                Request Edit
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              onClick={() => openVerifyAddressModal(index)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Upgrade Verification
+                            </button>
                           )}
                           {status === 'verified' && loc.documentUrl && (
                             <a
@@ -3453,60 +3757,100 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex items-center gap-2">
-                  <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0" />
-                  <h3 className="text-base font-semibold text-gray-900">Add Location</h3>
+              {showLocationAddForm ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0" />
+                      <h3 className="text-base font-semibold text-gray-900">Add new location</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLocationAddFormOpen(false);
+                        setLocationDraft({ country: '', state: '', city: '', address: '' });
+                        setFormFieldErrors((p) => omitKeysMatching(p, /^loc_draft_/));
+                      }}
+                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
+                      <SearchableList
+                        value={locationDraft.country}
+                        onChange={(country) => {
+                          setLocationDraft((d) => ({ ...d, country }));
+                          clearFormError('loc_draft_country');
+                        }}
+                        options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
+                        placeholder="Select country"
+                        className="[&_button]:bg-gray-50"
+                        error={fe.loc_draft_country}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">State / Province / District</label>
+                      <input
+                        type="text"
+                        value={locationDraft.state}
+                        onChange={(e) => {
+                          setLocationDraft((d) => ({ ...d, state: e.target.value }));
+                          clearFormError('loc_draft_state');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('loc_draft_state')}`}
+                      />
+                      {fe.loc_draft_state ? <p className="mt-1 text-sm text-red-600">{fe.loc_draft_state}</p> : null}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                      <input
+                        type="text"
+                        value={locationDraft.city}
+                        onChange={(e) => {
+                          setLocationDraft((d) => ({ ...d, city: e.target.value }));
+                          clearFormError('loc_draft_city');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('loc_draft_city')}`}
+                      />
+                      {fe.loc_draft_city ? <p className="mt-1 text-sm text-red-600">{fe.loc_draft_city}</p> : null}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Street Number & Name</label>
+                      <input
+                        type="text"
+                        value={locationDraft.address}
+                        onChange={(e) => {
+                          setLocationDraft((d) => ({ ...d, address: e.target.value }));
+                          clearFormError('loc_draft_address');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('loc_draft_address')}`}
+                      />
+                      {fe.loc_draft_address ? <p className="mt-1 text-sm text-red-600">{fe.loc_draft_address}</p> : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addLocationFromDraft}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                  >
+                    <HiPlus className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Add Location'}
+                  </button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
-                    <SearchableList
-                      value={locationDraft.country}
-                      onChange={(country) => setLocationDraft((d) => ({ ...d, country }))}
-                      options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                      placeholder="Select country"
-                      className="[&_button]:bg-gray-50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">State / Province / District</label>
-                    <input
-                      type="text"
-                      value={locationDraft.state}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, state: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                    <input
-                      type="text"
-                      value={locationDraft.city}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, city: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Street Number & Name</label>
-                    <input
-                      type="text"
-                      value={locationDraft.address}
-                      onChange={(e) => setLocationDraft((d) => ({ ...d, address: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                </div>
+              ) : (
                 <button
                   type="button"
-                  onClick={addLocationFromDraft}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                  onClick={() => setLocationAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
                 >
-                  <HiPlus className="w-4 h-4" />
-                  {saving ? 'Saving...' : 'Add Location'}
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new location
                 </button>
-              </div>
+              )}
 
             </div>
           )}
@@ -3529,16 +3873,26 @@ export default function VerificationCenter() {
                 )}
               </div>
 
+              {fe.edu_list && <p className="text-sm text-red-600">{fe.edu_list}</p>}
+
               <div className="space-y-4">
                 {educationEntriesList.map((entry, index) => {
                   const status = entry.eduVerificationStatus ?? 'pending';
                   const title = entry.institutionName?.trim() || 'Education';
                   const subtitle = formatEducationCardSubtitle(entry);
+                  const eduRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`edu_${index}_`));
                   return (
                     <div
                       key={entry.id ?? `edu-${index}`}
                       className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
                     >
+                      {eduRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {eduRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex gap-3 min-w-0">
                           <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
@@ -3615,10 +3969,24 @@ export default function VerificationCenter() {
                 })}
               </div>
 
+              {showEducationAddForm ? (
               <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex items-center gap-2">
-                  <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0" />
-                  <h3 className="text-base font-semibold text-gray-900">Add Education</h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0" />
+                    <h3 className="text-base font-semibold text-gray-900">Add new education</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEducationAddFormOpen(false);
+                      setEducationDraft(emptyEducation());
+                      setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
+                    }}
+                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Cancel
+                  </button>
                 </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -3628,10 +3996,16 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={educationDraft.institutionName}
-                        onChange={(e) => updateEducationDraft({ institutionName: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateEducationDraft({ institutionName: e.target.value });
+                          clearFormError('edu_draft_institutionName');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_institutionName')}`}
                         placeholder="Enter institution name"
                       />
+                      {fe.edu_draft_institutionName ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_institutionName}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">School Type</label>
@@ -3647,20 +4021,28 @@ export default function VerificationCenter() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
                       <SearchableList
                         value={educationDraft.levelOfEducation}
-                        onChange={(levelOfEducation) => updateEducationDraft({ levelOfEducation })}
+                        onChange={(levelOfEducation) => {
+                          updateEducationDraft({ levelOfEducation });
+                          clearFormError('edu_draft_levelOfEducation');
+                        }}
                         options={[{ value: '', label: 'Select' }, ...EDUCATION_LEVELS]}
                         placeholder="Select"
                         className="[&_button]:bg-gray-50"
+                        error={fe.edu_draft_levelOfEducation}
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Qualification</label>
                       <SearchableList
                         value={educationDraft.degreeType}
-                        onChange={(degreeType) => updateEducationDraft({ degreeType })}
+                        onChange={(degreeType) => {
+                          updateEducationDraft({ degreeType });
+                          clearFormError('edu_draft_degreeType');
+                        }}
                         options={[{ value: '', label: 'Select' }, ...QUALIFICATION_OPTIONS]}
                         placeholder="Select"
                         className="[&_button]:bg-gray-50"
+                        error={fe.edu_draft_degreeType}
                       />
                     </div>
                     <div className="md:col-span-2">
@@ -3668,19 +4050,29 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={educationDraft.fieldOfStudy}
-                        onChange={(e) => updateEducationDraft({ fieldOfStudy: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateEducationDraft({ fieldOfStudy: e.target.value });
+                          clearFormError('edu_draft_fieldOfStudy');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_fieldOfStudy')}`}
                         placeholder="e.g. Computer Science, Medicine, Law..."
                       />
+                      {fe.edu_draft_fieldOfStudy ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_fieldOfStudy}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
                       <SearchableList
                         value={educationDraft.country}
-                        onChange={(country) => updateEducationDraft({ country })}
+                        onChange={(country) => {
+                          updateEducationDraft({ country });
+                          clearFormError('edu_draft_country');
+                        }}
                         options={[{ value: '', label: 'Select' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
                         placeholder="Select"
                         className="[&_button]:bg-gray-50"
+                        error={fe.edu_draft_country}
                       />
                     </div>
                     <div>
@@ -3690,29 +4082,42 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={educationDraft.grade}
-                        onChange={(e) => updateEducationDraft({ grade: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateEducationDraft({ grade: e.target.value });
+                          clearFormError('edu_draft_grade');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_grade')}`}
                         placeholder="e.g. First Class, 3.8 GPA"
                       />
+                      {fe.edu_draft_grade ? <p className="mt-1 text-sm text-red-600">{fe.edu_draft_grade}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
                       <div className="grid grid-cols-2 gap-2">
                         <SearchableList
                           value={educationDraft.startMonth}
-                          onChange={(startMonth) => updateEducationDraft({ startMonth })}
+                          onChange={(startMonth) => {
+                            updateEducationDraft({ startMonth });
+                            clearFormError('edu_draft_startDate');
+                          }}
                           options={[{ value: '', label: 'Month' }, ...MONTH_OPTIONS]}
                           placeholder="Month"
                           className="[&_button]:bg-gray-50"
                         />
                         <SearchableList
                           value={educationDraft.startYear}
-                          onChange={(startYear) => updateEducationDraft({ startYear })}
+                          onChange={(startYear) => {
+                            updateEducationDraft({ startYear });
+                            clearFormError('edu_draft_startDate');
+                          }}
                           options={[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS]}
                           placeholder="Year"
                           className="[&_button]:bg-gray-50"
                         />
                       </div>
+                      {fe.edu_draft_startDate ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_startDate}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3721,19 +4126,28 @@ export default function VerificationCenter() {
                       <div className="grid grid-cols-2 gap-2">
                         <SearchableList
                           value={educationDraft.endMonth}
-                          onChange={(endMonth) => updateEducationDraft({ endMonth })}
+                          onChange={(endMonth) => {
+                            updateEducationDraft({ endMonth });
+                            clearFormError('edu_draft_endDate');
+                          }}
                           options={[{ value: '', label: 'Month' }, ...MONTH_OPTIONS]}
                           placeholder="Month"
                           className="[&_button]:bg-gray-50"
                         />
                         <SearchableList
                           value={educationDraft.endYear}
-                          onChange={(endYear) => updateEducationDraft({ endYear })}
+                          onChange={(endYear) => {
+                            updateEducationDraft({ endYear });
+                            clearFormError('edu_draft_endDate');
+                          }}
                           options={[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS]}
                           placeholder="Year"
                           className="[&_button]:bg-gray-50"
                         />
                       </div>
+                      {fe.edu_draft_endDate ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_endDate}</p>
+                      ) : null}
                       <label className="mt-2 flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
                         <input
                           type="checkbox"
@@ -3758,11 +4172,17 @@ export default function VerificationCenter() {
                           type="text"
                           inputMode="decimal"
                           value={educationDraft.costOfEducation}
-                          onChange={(e) => updateEducationDraft({ costOfEducation: e.target.value })}
-                          className="min-w-0 px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateEducationDraft({ costOfEducation: e.target.value });
+                            clearFormError('edu_draft_costOfEducation');
+                          }}
+                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_costOfEducation')}`}
                           placeholder="0.00"
                         />
                       </div>
+                      {fe.edu_draft_costOfEducation ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_costOfEducation}</p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Pending Loan</label>
@@ -3778,11 +4198,17 @@ export default function VerificationCenter() {
                           type="text"
                           inputMode="decimal"
                           value={educationDraft.pendingLoanAmount}
-                          onChange={(e) => updateEducationDraft({ pendingLoanAmount: e.target.value })}
-                          className="min-w-0 px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateEducationDraft({ pendingLoanAmount: e.target.value });
+                            clearFormError('edu_draft_pendingLoanAmount');
+                          }}
+                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_pendingLoanAmount')}`}
                           placeholder="0.00"
                         />
                       </div>
+                      {fe.edu_draft_pendingLoanAmount ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_pendingLoanAmount}</p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Activities & Societies</label>
@@ -3809,12 +4235,25 @@ export default function VerificationCenter() {
                       <input
                         type="url"
                         value={educationDraft.supportingMediaUrl}
-                        onChange={(e) => updateEducationDraft({ supportingMediaUrl: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateEducationDraft({ supportingMediaUrl: e.target.value });
+                          clearFormError('edu_draft_supportingMediaUrl');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_supportingMediaUrl')}`}
                         placeholder="URL to certificate, transcript, or media file"
                       />
+                      {fe.edu_draft_supportingMediaUrl ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_supportingMediaUrl}</p>
+                      ) : null}
                     </div>
                   </div>
+                  {Object.entries(fe)
+                    .filter(([k]) => k.startsWith('edu_draft_milestone'))
+                    .map(([k, msg]) => (
+                      <p key={k} className="text-sm text-red-600">
+                        {msg}
+                      </p>
+                    ))}
                   <button
                     type="button"
                     onClick={commitEducationDraft}
@@ -3825,6 +4264,34 @@ export default function VerificationCenter() {
                     {educationSaving ? 'Saving...' : 'Add Education'}
                   </button>
               </div>
+              ) : educationEntriesList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiAcademicCap className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No education added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Add your schools and qualifications to complete this step.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setEducationAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new education
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEducationAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                >
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new education
+                </button>
+              )}
 
             </div>
           )}
@@ -3847,6 +4314,8 @@ export default function VerificationCenter() {
                 )}
               </div>
 
+              {fe.work_list && <p className="text-sm text-red-600">{fe.work_list}</p>}
+
               <div className="space-y-4">
                 {workEntriesList.map((entry, index) => {
                   const status = entry.workVerificationStatus ?? 'pending';
@@ -3855,11 +4324,19 @@ export default function VerificationCenter() {
                   const title = org || role || 'Work experience';
                   const subtitle =
                     org && role ? `${role} · ${formatWorkCardSubtitle(entry)}` : formatWorkCardSubtitle(entry);
+                  const workRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`work_${index}_`));
                   return (
                     <div
                       key={entry.id ?? `work-${index}`}
                       className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
                     >
+                      {workRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {workRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex gap-3 min-w-0">
                           <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
@@ -3962,26 +4439,41 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={workDraft.organisationName}
-                        onChange={(e) => updateWorkDraft({ organisationName: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateWorkDraft({ organisationName: e.target.value });
+                          clearFormError('work_draft_organisationName');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_organisationName')}`}
                         placeholder="Company name"
                       />
+                      {fe.work_draft_organisationName ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_organisationName}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
                       <input
                         type="text"
                         value={workDraft.industry}
-                        onChange={(e) => updateWorkDraft({ industry: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateWorkDraft({ industry: e.target.value });
+                          clearFormError('work_draft_industry');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_industry')}`}
                         placeholder="Industry or sector"
                       />
+                      {fe.work_draft_industry ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_industry}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
                       <SearchableList
                         value={workDraft.employmentType}
-                        onChange={(employmentType) => updateWorkDraft({ employmentType })}
+                        onChange={(employmentType) => {
+                          updateWorkDraft({ employmentType });
+                          clearFormError('work_draft_employmentType');
+                        }}
                         options={[
                           { value: '', label: 'Select' },
                           { value: 'full_time', label: 'Full-time' },
@@ -3991,13 +4483,17 @@ export default function VerificationCenter() {
                         ]}
                         placeholder="Select"
                         className="[&_button]:bg-gray-50"
+                        error={fe.work_draft_employmentType}
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode</label>
                       <SearchableList
                         value={workDraft.workMode}
-                        onChange={(workMode) => updateWorkDraft({ workMode })}
+                        onChange={(workMode) => {
+                          updateWorkDraft({ workMode });
+                          clearFormError('work_draft_workMode');
+                        }}
                         options={[
                           { value: '', label: 'Select' },
                           { value: 'on_site', label: 'On-site' },
@@ -4007,6 +4503,7 @@ export default function VerificationCenter() {
                         ]}
                         placeholder="Select"
                         className="[&_button]:bg-gray-50"
+                        error={fe.work_draft_workMode}
                       />
                     </div>
                     <div className="md:col-span-2">
@@ -4023,8 +4520,11 @@ export default function VerificationCenter() {
                           type="text"
                           inputMode="decimal"
                           value={workDraft.salary}
-                          onChange={(e) => updateWorkDraft({ salary: e.target.value })}
-                          className="min-w-0 px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateWorkDraft({ salary: e.target.value });
+                            clearFormError('work_draft_salary');
+                          }}
+                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_salary')}`}
                           placeholder="0.00"
                         />
                         <SearchableList
@@ -4035,6 +4535,9 @@ export default function VerificationCenter() {
                           className="[&_button]:bg-gray-50"
                         />
                       </div>
+                      {fe.work_draft_salary ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_salary}</p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Other Compensation</label>
@@ -4060,7 +4563,11 @@ export default function VerificationCenter() {
                         Add Role
                       </button>
                     </div>
-                    {workDraft.workRoles.map((roleRow, ri) => (
+                    {workDraft.workRoles.map((roleRow, ri) => {
+                      const titleKey = ri === 0 ? 'work_draft_role0_title' : '';
+                      const startKey = `work_draft_role${ri}_startDate`;
+                      const endKey = `work_draft_role${ri}_endDate`;
+                      return (
                       <div
                         key={ri}
                         className="rounded-lg border border-gray-200 bg-white p-4 space-y-3 shadow-sm"
@@ -4083,10 +4590,18 @@ export default function VerificationCenter() {
                           <input
                             type="text"
                             value={roleRow.title}
-                            onChange={(e) => updateWorkDraftRole(ri, { title: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                            onChange={(e) => {
+                              updateWorkDraftRole(ri, { title: e.target.value });
+                              if (titleKey) clearFormError(titleKey);
+                            }}
+                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
+                              titleKey && fe[titleKey] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-200'
+                            }`}
                             placeholder="Job title"
                           />
+                          {titleKey && fe[titleKey] ? (
+                            <p className="mt-1 text-sm text-red-600">{fe[titleKey]}</p>
+                          ) : null}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
@@ -4094,9 +4609,13 @@ export default function VerificationCenter() {
                             <input
                               type="date"
                               value={roleRow.startDate}
-                              onChange={(e) => updateWorkDraftRole(ri, { startDate: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                              onChange={(e) => {
+                                updateWorkDraftRole(ri, { startDate: e.target.value });
+                                clearFormError(startKey);
+                              }}
+                              className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(startKey)}`}
                             />
+                            {fe[startKey] ? <p className="mt-1 text-sm text-red-600">{fe[startKey]}</p> : null}
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
@@ -4104,9 +4623,13 @@ export default function VerificationCenter() {
                               type="date"
                               value={roleRow.endDate}
                               disabled={roleRow.currentlyWorking}
-                              onChange={(e) => updateWorkDraftRole(ri, { endDate: e.target.value })}
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:opacity-60"
+                              onChange={(e) => {
+                                updateWorkDraftRole(ri, { endDate: e.target.value });
+                                clearFormError(endKey);
+                              }}
+                              className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:opacity-60 ${errB2(endKey)}`}
                             />
+                            {fe[endKey] ? <p className="mt-1 text-sm text-red-600">{fe[endKey]}</p> : null}
                           </div>
                         </div>
                         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
@@ -4124,8 +4647,12 @@ export default function VerificationCenter() {
                           Currently working here
                         </label>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
+                  {fe.work_draft_workRoles ? (
+                    <p className="text-sm text-red-600">{fe.work_draft_workRoles}</p>
+                  ) : null}
 
                   <div className="grid grid-cols-1 gap-4">
                     <div>
@@ -4193,20 +4720,32 @@ export default function VerificationCenter() {
                           <input
                             type="url"
                             value={workDraft.verifyWebsite}
-                            onChange={(e) => updateWorkDraft({ verifyWebsite: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                            onChange={(e) => {
+                              updateWorkDraft({ verifyWebsite: e.target.value });
+                              clearFormError('work_draft_verifyWebsite');
+                            }}
+                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_verifyWebsite')}`}
                             placeholder="https://company.com"
                           />
+                          {fe.work_draft_verifyWebsite ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_verifyWebsite}</p>
+                          ) : null}
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">HR email</label>
                           <input
                             type="email"
                             value={workDraft.verifyHrEmail}
-                            onChange={(e) => updateWorkDraft({ verifyHrEmail: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                            onChange={(e) => {
+                              updateWorkDraft({ verifyHrEmail: e.target.value });
+                              clearFormError('work_draft_verifyHrEmail');
+                            }}
+                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_verifyHrEmail')}`}
                             placeholder="hr@company.com"
                           />
+                          {fe.work_draft_verifyHrEmail ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_verifyHrEmail}</p>
+                          ) : null}
                         </div>
                       </div>
                     )}
@@ -4256,6 +4795,8 @@ export default function VerificationCenter() {
                   )}
               </div>
 
+              {fe.proj_list && <p className="text-sm text-red-600">{fe.proj_list}</p>}
+
               {isSectionEditable('projects') && (
                 <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -4286,10 +4827,16 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={projectDraft.title}
-                        onChange={(e) => updateProjectDraft({ title: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateProjectDraft({ title: e.target.value });
+                          clearFormError('proj_draft_title');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('proj_draft_title')}`}
                         placeholder="Project title"
                       />
+                      {fe.proj_draft_title ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.proj_draft_title}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-800 mb-1">Project Description</label>
@@ -4307,20 +4854,32 @@ export default function VerificationCenter() {
                         <input
                           type="url"
                           value={projectDraft.projectLink}
-                          onChange={(e) => updateProjectDraft({ projectLink: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateProjectDraft({ projectLink: e.target.value });
+                            clearFormError('proj_draft_projectLink');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('proj_draft_projectLink')}`}
                           placeholder="https://..."
                         />
+                        {fe.proj_draft_projectLink ? (
+                          <p className="mt-1 text-sm text-red-600">{fe.proj_draft_projectLink}</p>
+                        ) : null}
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-gray-800 mb-1">Media URL</label>
                         <input
                           type="url"
                           value={projectDraft.mediaUrl}
-                          onChange={(e) => updateProjectDraft({ mediaUrl: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateProjectDraft({ mediaUrl: e.target.value });
+                            clearFormError('proj_draft_mediaUrl');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('proj_draft_mediaUrl')}`}
                           placeholder="Image or video URL"
                         />
+                        {fe.proj_draft_mediaUrl ? (
+                          <p className="mt-1 text-sm text-red-600">{fe.proj_draft_mediaUrl}</p>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -4337,7 +4896,9 @@ export default function VerificationCenter() {
                         Add Member
                       </button>
                     </div>
-                    {projectDraft.teamMembers.map((member, memberIndex) => (
+                    {projectDraft.teamMembers.map((member, memberIndex) => {
+                      const teamKey = `proj_draft_team_${memberIndex}`;
+                      return (
                       <div
                         key={memberIndex}
                         className="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end"
@@ -4346,21 +4907,24 @@ export default function VerificationCenter() {
                           <input
                             type="text"
                             value={member.name}
-                            onChange={(e) =>
-                              updateProjectDraftMember(memberIndex, { name: e.target.value })
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                            onChange={(e) => {
+                              updateProjectDraftMember(memberIndex, { name: e.target.value });
+                              clearFormError(teamKey);
+                            }}
+                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
                             placeholder="Name"
                           />
+                          {fe[teamKey] ? <p className="mt-1 text-sm text-red-600">{fe[teamKey]}</p> : null}
                         </div>
                         <div className="flex gap-2 items-end">
                           <input
                             type="text"
                             value={member.role}
-                            onChange={(e) =>
-                              updateProjectDraftMember(memberIndex, { role: e.target.value })
-                            }
-                            className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                            onChange={(e) => {
+                              updateProjectDraftMember(memberIndex, { role: e.target.value });
+                              clearFormError(teamKey);
+                            }}
+                            className={`flex-1 min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
                             placeholder="Role"
                           />
                           {projectDraft.teamMembers.length > 1 && (
@@ -4375,7 +4939,8 @@ export default function VerificationCenter() {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   <button
@@ -4397,13 +4962,22 @@ export default function VerificationCenter() {
               <div className="space-y-3">
                 {projectsList.map((entry, index) => {
                   const isEditing = projectEditingIndex === index;
+                  const projRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`proj_${index}_`));
                   return (
                     <div
                       key={entry.id ?? `proj-${index}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${
+                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 ${
                         isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
                       }`}
                     >
+                      {projRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {projRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                       <div className="flex min-w-0 flex-1 items-start gap-3">
                         <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
@@ -4462,6 +5036,7 @@ export default function VerificationCenter() {
                           </button>
                         )}
                       </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -4500,6 +5075,8 @@ export default function VerificationCenter() {
                   )}
               </div>
 
+              {fe.cert_list && <p className="text-sm text-red-600">{fe.cert_list}</p>}
+
               {isSectionEditable('certification') && (
                 <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -4528,20 +5105,32 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={certDraft.name}
-                        onChange={(e) => updateCertDraft({ name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateCertDraft({ name: e.target.value });
+                          clearFormError('cert_draft_name');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_name')}`}
                         placeholder="e.g. Advanced Product Management"
                       />
+                      {fe.cert_draft_name ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_name}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Issued by</label>
                       <input
                         type="text"
                         value={certDraft.issuedBy}
-                        onChange={(e) => updateCertDraft({ issuedBy: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateCertDraft({ issuedBy: e.target.value });
+                          clearFormError('cert_draft_issuedBy');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_issuedBy')}`}
                         placeholder="e.g. Coursera"
                       />
+                      {fe.cert_draft_issuedBy ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_issuedBy}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Issued date</label>
@@ -4557,9 +5146,15 @@ export default function VerificationCenter() {
                       <input
                         type="date"
                         value={certDraft.expirationDate}
-                        onChange={(e) => updateCertDraft({ expirationDate: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateCertDraft({ expirationDate: e.target.value });
+                          clearFormError('cert_draft_expirationDate');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_expirationDate')}`}
                       />
+                      {fe.cert_draft_expirationDate ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_expirationDate}</p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Credential ID</label>
@@ -4576,13 +5171,35 @@ export default function VerificationCenter() {
                       <input
                         type="url"
                         value={certDraft.reportingUrl}
-                        onChange={(e) => updateCertDraft({ reportingUrl: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        onChange={(e) => {
+                          updateCertDraft({ reportingUrl: e.target.value });
+                          clearFormError('cert_draft_reportingUrl');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_reportingUrl')}`}
                         placeholder="https://..."
                       />
+                      {fe.cert_draft_reportingUrl ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_reportingUrl}</p>
+                      ) : null}
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting media</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting media URL</label>
+                      <input
+                        type="url"
+                        value={certDraft.supportingMediaUrl}
+                        onChange={(e) => {
+                          updateCertDraft({ supportingMediaUrl: e.target.value });
+                          clearFormError('cert_draft_supportingMediaUrl');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_supportingMediaUrl')}`}
+                        placeholder="Or paste URL after upload"
+                      />
+                      {fe.cert_draft_supportingMediaUrl ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_supportingMediaUrl}</p>
+                      ) : null}
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting media file</label>
                       <input
                         type="file"
                         accept=".pdf,image/jpeg,image/png,image/webp"
@@ -4625,13 +5242,22 @@ export default function VerificationCenter() {
               <div className="space-y-3">
                 {certList.map((cert, index) => {
                   const isEditing = certEditingIndex === index;
+                  const certRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`cert_${index}_`));
                   return (
                     <div
                       key={`cert-${index}-${cert.name}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${
+                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 ${
                         isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
                       }`}
                     >
+                      {certRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {certRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                       <div className="flex min-w-0 flex-1 items-start gap-3">
                         <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
@@ -4704,6 +5330,7 @@ export default function VerificationCenter() {
                           </button>
                         )}
                       </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -4757,6 +5384,7 @@ export default function VerificationCenter() {
                         onChange={(e) => {
                           const v = e.target.value;
                           setMaritalStatus(v);
+                          clearFormError('fam_spouseName');
                           setRelationsList((relList) => {
                             queueMicrotask(() =>
                               void syncFamilyToApi(v, spouseName, relList, { silentSuccess: true }),
@@ -4783,7 +5411,10 @@ export default function VerificationCenter() {
                       <input
                         type="text"
                         value={spouseName}
-                        onChange={(e) => setSpouseName(e.target.value)}
+                        onChange={(e) => {
+                          setSpouseName(e.target.value);
+                          clearFormError('fam_spouseName');
+                        }}
                         onBlur={(e) => {
                           setRelationsList((relList) => {
                             queueMicrotask(() =>
@@ -4794,9 +5425,12 @@ export default function VerificationCenter() {
                             return relList;
                           });
                         }}
-                        className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                        className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_spouseName')}`}
                         placeholder="Full name"
                       />
+                      {fe.fam_spouseName ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.fam_spouseName}</p>
+                      ) : null}
                     </div>
                   )}
 
@@ -4828,18 +5462,27 @@ export default function VerificationCenter() {
                         <input
                           type="text"
                           value={familyRelationDraft.fullName}
-                          onChange={(e) => updateFamilyRelationDraft({ fullName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                          onChange={(e) => {
+                            updateFamilyRelationDraft({ fullName: e.target.value });
+                            clearFormError('fam_draft_name');
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('fam_draft_name')}`}
                           placeholder="Full name"
                         />
+                        {fe.fam_draft_name ? (
+                          <p className="mt-1 text-sm text-red-600">{fe.fam_draft_name}</p>
+                        ) : null}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Relationship type</label>
                         <div className="relative">
                           <select
                             value={familyRelationDraft.relationType}
-                            onChange={(e) => updateFamilyRelationDraft({ relationType: e.target.value })}
-                            className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                            onChange={(e) => {
+                              updateFamilyRelationDraft({ relationType: e.target.value });
+                              clearFormError('fam_draft_type');
+                            }}
+                            className={`w-full appearance-none rounded-lg border bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_draft_type')}`}
                           >
                             <option value="">Select</option>
                             {RELATION_TYPE_OPTIONS.map((o) => (
@@ -4850,6 +5493,9 @@ export default function VerificationCenter() {
                           </select>
                           <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                         </div>
+                        {fe.fam_draft_type ? (
+                          <p className="mt-1 text-sm text-red-600">{fe.fam_draft_type}</p>
+                        ) : null}
                       </div>
                     </div>
                     <button
@@ -4876,6 +5522,8 @@ export default function VerificationCenter() {
                     RELATION_TYPE_OPTIONS.find((o) => o.value === rel.relationType)?.label ||
                     rel.relationType ||
                     'Relation';
+                  const famRelTypeErr = fe[`fam_rel_${index}_type`];
+                  const famRelNameErr = fe[`fam_rel_${index}_name`];
                   return (
                     <div
                       key={`fam-${index}-${rel.fullName}-${rel.relationType}`}
@@ -4883,6 +5531,12 @@ export default function VerificationCenter() {
                         isRowEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
                       }`}
                     >
+                      {(famRelTypeErr || famRelNameErr) && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5 w-full order-first">
+                          {famRelTypeErr ? <li key="t">{famRelTypeErr}</li> : null}
+                          {famRelNameErr ? <li key="n">{famRelNameErr}</li> : null}
+                        </ul>
+                      )}
                       <div className="flex min-w-0 flex-1 items-start gap-3">
                         <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
                         <HiUsers className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" aria-hidden />
@@ -4954,7 +5608,9 @@ export default function VerificationCenter() {
                     { key: 'instagram' as const, label: 'Instagram' },
                     { key: 'tiktok' as const, label: 'TikTok' },
                     { key: 'snapchat' as const, label: 'Snapchat' },
-                  ].map(({ key, label }) => (
+                  ].map(({ key, label }) => {
+                    const sk = `soc_${key}` as const;
+                    return (
                     <div key={key} className="p-4 rounded-lg border border-gray-200 bg-gray-50/50 space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <label className="text-sm font-medium text-gray-700">{label}</label>
@@ -4963,27 +5619,25 @@ export default function VerificationCenter() {
                       <input
                         type="url"
                         value={social[key]}
-                        onChange={(e) => setSocial((s) => ({ ...s, [key]: e.target.value }))}
+                        onChange={(e) => {
+                          setSocial((s) => ({ ...s, [key]: e.target.value }));
+                          clearFormError(sk);
+                        }}
                         disabled={!isSectionEditable('social')}
                         readOnly={!isSectionEditable('social')}
                         placeholder={`${label} URL`}
-                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed"
+                        className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:cursor-not-allowed ${errB3(sk)}`}
                       />
+                      {fe[sk] ? <p className="text-sm text-red-600">{fe[sk]}</p> : null}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {isSectionEditable('social') && (
                   <button
                     type="button"
-                    onClick={() => {
-                      const err = validateSocialForm(social);
-                      if (err) {
-                        toast.error(err);
-                        return;
-                      }
-                      void handleSaveSocial();
-                    }}
+                    onClick={() => void handleSaveSocial()}
                     disabled={saving}
                     className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                   >
@@ -4996,6 +5650,139 @@ export default function VerificationCenter() {
         </div>
 
       </div>
+
+      {requestDataEditModalOpen && (
+        <div
+          className="fixed inset-0 z-[62] flex items-center justify-center p-4 bg-black/50"
+          onClick={closeRequestDataEditModal}
+          role="presentation"
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[min(90vh,720px)] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="request-data-edit-title"
+          >
+            <div className="p-6 space-y-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 pr-2">
+                  <h2 id="request-data-edit-title" className="text-lg font-semibold text-gray-900">
+                    Request Data Edit
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Select which fields you want to edit and provide a reason with supporting evidence.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeRequestDataEditModal}
+                  className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 shrink-0"
+                  aria-label="Close"
+                >
+                  <HiX className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-gray-900 mb-3">Fields to Edit</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+                  {PROFILE_REQUEST_EDIT_FIELDS.map((col, ci) => (
+                    <div key={ci} className="space-y-3">
+                      {col.map(({ label, key }) => (
+                        <label
+                          key={key}
+                          className="flex items-center gap-3 cursor-pointer select-none text-sm text-gray-900"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!requestDataEditSelected[key]}
+                            onChange={() => toggleRequestEditField(key)}
+                            className="h-4 w-4 rounded-full border-gray-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="request-data-edit-reason" className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Reason for Edit
+                </label>
+                <div className="relative">
+                  <select
+                    id="request-data-edit-reason"
+                    value={requestDataEditReason}
+                    onChange={(e) => setRequestDataEditReason(e.target.value)}
+                    className="w-full appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {PROFILE_REQUEST_EDIT_REASON_OPTIONS.map((o) => (
+                      <option key={o.value || 'placeholder'} value={o.value} disabled={o.value === ''}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <HiChevronDown
+                    className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                    aria-hidden
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-gray-900 mb-2">Supporting Evidence</p>
+                <input
+                  ref={requestDataEditFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) {
+                      setRequestDataEditFile(null);
+                      return;
+                    }
+                    const ok = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(f.type);
+                    if (!ok) {
+                      toast.error('Please upload an image (JPEG, PNG, WebP) or PDF');
+                      e.target.value = '';
+                      return;
+                    }
+                    setRequestDataEditFile(f);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => requestDataEditFileInputRef.current?.click()}
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-gray-300 hover:bg-gray-100/80"
+                >
+                  <HiUpload className="w-8 h-8 text-gray-400" aria-hidden />
+                  <span className="text-sm text-gray-600">
+                    {requestDataEditFile ? (
+                      <span className="font-medium text-gray-900">{requestDataEditFile.name}</span>
+                    ) : (
+                      <>Click to attach supporting document</>
+                    )}
+                  </span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleSubmitRequestDataEdit()}
+                disabled={requestDataEditSubmitting}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-3.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
+              >
+                <HiPaperAirplane className="w-5 h-5" aria-hidden />
+                {requestDataEditSubmitting ? 'Submitting…' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <LivenessSelfieModal
         open={livenessSelfieModalOpen}
@@ -5111,18 +5898,26 @@ export default function VerificationCenter() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Country of Nationality</label>
                 <SearchableList
                   value={personal.nationality}
-                  onChange={(nationality) => setPersonal((p) => ({ ...p, nationality }))}
+                  onChange={(nationality) => {
+                    setPersonal((p) => ({ ...p, nationality }));
+                    clearFormError('gov_nationality');
+                  }}
                   options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
                   placeholder="Select country"
+                  error={fe.gov_nationality}
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ID Type</label>
                 <SearchableList
                   value={personal.idType}
-                  onChange={(idType) => setPersonal((p) => ({ ...p, idType }))}
+                  onChange={(idType) => {
+                    setPersonal((p) => ({ ...p, idType }));
+                    clearFormError('gov_idType');
+                  }}
                   options={[{ value: '', label: 'Select ID type' }, ...ID_TYPE_OPTIONS]}
                   placeholder="Select ID type"
+                  error={fe.gov_idType}
                 />
               </div>
               <div>
@@ -5130,10 +5925,14 @@ export default function VerificationCenter() {
                 <input
                   type="text"
                   value={personal.idNumber}
-                  onChange={(e) => setPersonal((p) => ({ ...p, idNumber: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                  onChange={(e) => {
+                    setPersonal((p) => ({ ...p, idNumber: e.target.value }));
+                    clearFormError('gov_idNumber');
+                  }}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('gov_idNumber')}`}
                   placeholder={idNumberPlaceholder()}
                 />
+                {fe.gov_idNumber ? <p className="mt-1 text-sm text-red-600">{fe.gov_idNumber}</p> : null}
               </div>
             </div>
             <button

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
@@ -9,11 +9,38 @@ import { COUNTRIES } from '@/utils/countries';
 import PhoneNumberInput from '@/components/common/PhoneNumberInput';
 import { SearchableList } from '@/components/common/SearchableList';
 import logo from '@/assets/logo.svg';
+import {
+  registerSendCodeSchema,
+  registerVerifyCodeSchema,
+  registerBasicDetailsSchema,
+  registerPasswordSchema,
+} from '@/schemas/register.schema';
+import { fieldErrorsFromZod } from '@/utils/zodFieldErrors';
+
+function fieldClass(field: string, errors: Record<string, string>): string {
+  return errors[field]
+    ? 'border-red-500 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+    : 'border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500';
+}
+
+function passwordFieldClass(field: string, errors: Record<string, string>): string {
+  return errors[field]
+    ? 'border-red-500 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+    : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500';
+}
 
 type Step = 1 | 2 | 3;
 
+const STEP_VALUES: Step[] = [1, 2, 3];
+
+function parseStepParam(raw: string | null): Step {
+  const n = raw ? parseInt(raw, 10) : 1;
+  return STEP_VALUES.includes(n as Step) ? (n as Step) : 1;
+}
+
 export default function Register() {
-  const [currentStep, setCurrentStep] = useState<Step>(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [currentStep, setCurrentStep] = useState<Step>(() => parseStepParam(searchParams.get('step')));
   const [email, setEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
@@ -26,52 +53,110 @@ export default function Register() {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
+    profession: '',
     country: '',
     phoneNumber: '',
   });
   
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  
-  const [localError, setLocalError] = useState('');
+
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  /** Server / network message (shown above the form when not tied to one field). */
+  const [formError, setFormError] = useState('');
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const redirectUrl = searchParams.get('redirect');
 
+  const goToStep = useCallback(
+    (step: Step, opts?: { replace?: boolean }) => {
+      setCurrentStep(step);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('step', String(step));
+          return next;
+        },
+        { replace: opts?.replace ?? true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const stepFromUrl = parseStepParam(searchParams.get('step'));
+
+  // Keep wizard step in sync with ?step= on load, back/forward, or manual URL edits
+  useEffect(() => {
+    if (stepFromUrl >= 2 && !emailVerified) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('step', '1');
+          return next;
+        },
+        { replace: true },
+      );
+      setCurrentStep(1);
+      return;
+    }
+    setCurrentStep((prev) => (prev === stepFromUrl ? prev : stepFromUrl));
+  }, [stepFromUrl, emailVerified, setSearchParams]);
+
+  // Ensure ?step= is present (e.g. /join with only ?redirect=)
+  useEffect(() => {
+    if (searchParams.get('step') != null && searchParams.get('step') !== '') return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('step', '1');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    setFieldErrors({});
+    setFormError('');
+  }, [currentStep]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name } = e.target;
+    setFormData({ ...formData, [name]: e.target.value });
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
   };
 
   // Step 1: Email Verification
   const handleSendVerificationCode = async () => {
-    if (!email.trim()) {
-      setLocalError('Please enter an email address');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setLocalError('Please enter a valid email address');
+    setFormError('');
+    const parsed = registerSendCodeSchema.safeParse({ email });
+    if (!parsed.success) {
+      setFieldErrors(fieldErrorsFromZod(parsed.error));
       return;
     }
 
     setVerifyingEmail(true);
-    setLocalError('');
+    setFieldErrors({});
 
     try {
-      const response = await api.post('/v1/auth/send-verification-code', { email });
+      const response = await api.post('/v1/auth/send-verification-code', { email: parsed.data.email });
       setCodeSent(true);
       setVerificationCode('');
       toast.success('Verification code sent to your email');
-      
+
       if (response.data.code) {
         console.log('Verification code:', response.data.code);
       }
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Failed to send verification code';
-      setLocalError(errorMsg);
+      setFieldErrors({ email: errorMsg });
       toast.error(errorMsg);
     } finally {
       setVerifyingEmail(false);
@@ -79,29 +164,30 @@ export default function Register() {
   };
 
   const handleVerifyCode = async () => {
-    if (verificationCode.length !== 6) {
-      setLocalError('Please enter the complete 6-digit code');
+    setFormError('');
+    const parsed = registerVerifyCodeSchema.safeParse({ verificationCode });
+    if (!parsed.success) {
+      setFieldErrors(fieldErrorsFromZod(parsed.error));
       return;
     }
 
     setVerifyingCode(true);
-    setLocalError('');
+    setFieldErrors({});
 
     try {
       await api.post('/v1/auth/verify-email', {
         email,
-        code: verificationCode,
+        code: parsed.data.verificationCode,
       });
-      
+
       setEmailVerified(true);
       toast.success('Email verified successfully!');
-      // Move to next step after a brief delay
       setTimeout(() => {
-        setCurrentStep(2);
+        goToStep(2, { replace: true });
       }, 500);
     } catch (err: any) {
       const errorMsg = err.response?.data?.message || 'Invalid verification code. Please try again.';
-      setLocalError(errorMsg);
+      setFieldErrors({ verificationCode: errorMsg });
       setVerificationCode('');
       toast.error(errorMsg);
     } finally {
@@ -121,9 +207,15 @@ export default function Register() {
     const newCode = verificationCode.split('');
     newCode[index] = value;
     const updatedCode = newCode.join('').slice(0, 6);
-    
+
     setVerificationCode(updatedCode);
-    setLocalError('');
+    if (fieldErrors.verificationCode) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.verificationCode;
+        return next;
+      });
+    }
 
     if (value && index < 5) {
       const nextInput = document.getElementById(`code-${index + 1}`);
@@ -144,64 +236,52 @@ export default function Register() {
 
   // Step 2: Basic Details - Move to next step
   const handleNextToPassword = () => {
-    if (!formData.firstName.trim()) {
-      setLocalError('First name is required');
-      toast.error('First name is required');
+    setFormError('');
+    const parsed = registerBasicDetailsSchema.safeParse(formData);
+    if (!parsed.success) {
+      setFieldErrors(fieldErrorsFromZod(parsed.error));
       return;
     }
-    if (!formData.lastName.trim()) {
-      setLocalError('Last name is required');
-      toast.error('Last name is required');
-      return;
-    }
-    setLocalError('');
-    setCurrentStep(3);
+    setFieldErrors({});
+    goToStep(3);
   };
 
   // Step 3: Password & Registration
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLocalError('');
+    setFormError('');
     dispatch(clearError());
-    
-    // Validate passwords match
-    if (password !== confirmPassword) {
-      const errorMsg = 'Passwords do not match';
-      setLocalError(errorMsg);
-      toast.error(errorMsg);
-      return;
-    }
 
-    // Validate password strength
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
-    if (password.length < 8 || !passwordRegex.test(password)) {
-      const errorMsg = 'Password must be at least 8 characters and contain one uppercase, one lowercase, one number, and one special character';
-      setLocalError(errorMsg);
-      toast.error(errorMsg);
+    const parsed = registerPasswordSchema.safeParse({ password, confirmPassword });
+    if (!parsed.success) {
+      setFieldErrors(fieldErrorsFromZod(parsed.error));
       return;
     }
+    setFieldErrors({});
 
     try {
-      await dispatch(register({
-        ...formData,
-        email,
-        password,
-        confirmPassword,
-      })).unwrap();
-      
-      // Remove registrationId from localStorage on successful registration
+      await dispatch(
+        register({
+          ...formData,
+          email,
+          password: parsed.data.password,
+          confirmPassword: parsed.data.confirmPassword,
+        }),
+      ).unwrap();
+
       localStorage.removeItem('registrationId');
-      
+
       toast.success('Registration successful!');
-      
-      // Redirect to the job page if user came from there, otherwise go to login
+
       if (redirectUrl) {
         navigate(redirectUrl);
       } else {
         navigate('/login');
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Registration failed');
+      const msg = err?.message || 'Registration failed';
+      toast.error(msg);
+      setFormError(msg);
     }
   };
 
@@ -218,20 +298,43 @@ export default function Register() {
           <p className="text-sm text-gray-600 mt-2">Step {currentStep} of 3</p>
         </div>
 
-        {/* Progress Steps */}
+        {/* Progress steps — sync with ?step=; click to jump when allowed */}
         <div className="flex items-center justify-center mb-8">
-          <div className="flex items-center">
-            <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${currentStep >= 1 ? 'bg-brand-500 border-brand-500 text-white' : 'border-gray-300 text-gray-400'}`}>
-              {emailVerified ? <HiCheckCircle className="w-6 h-6" /> : '1'}
-            </div>
-            <div className={`w-12 h-1 ${currentStep >= 2 ? 'bg-brand-500' : 'bg-gray-300'}`}></div>
-            <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${currentStep >= 2 ? 'bg-brand-500 border-brand-500 text-white' : 'border-gray-300 text-gray-400'}`}>
-              {currentStep > 2 ? <HiCheckCircle className="w-6 h-6" /> : '2'}
-            </div>
-            <div className={`w-12 h-1 ${currentStep >= 3 ? 'bg-brand-500' : 'bg-gray-300'}`}></div>
-            <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${currentStep >= 3 ? 'bg-brand-500 border-brand-500 text-white' : 'border-gray-300 text-gray-400'}`}>
-              3
-            </div>
+          <div className="flex items-center" role="tablist" aria-label="Registration steps">
+            {([1, 2, 3] as const).map((step, i) => {
+              const canJump = step === 1 || emailVerified;
+              const active = currentStep === step;
+              const reached = currentStep >= step;
+              const showCheck =
+                (step === 1 && emailVerified) || (step === 2 && currentStep > 2);
+              return (
+                <div key={step} className="flex items-center">
+                  {i > 0 && (
+                    <div
+                      className={`w-12 h-1 ${currentStep >= step ? 'bg-brand-500' : 'bg-gray-300'}`}
+                      aria-hidden
+                    />
+                  )}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    aria-current={active ? 'step' : undefined}
+                    disabled={!canJump}
+                    onClick={() => canJump && goToStep(step)}
+                    className={`flex items-center justify-center w-10 h-10 rounded-full border-2 text-sm font-semibold transition-colors ${
+                      active
+                        ? 'bg-brand-500 border-brand-500 text-white ring-2 ring-brand-200 ring-offset-2'
+                        : reached
+                          ? 'bg-brand-500 border-brand-500 text-white'
+                          : 'border-gray-300 text-gray-400'
+                    } ${canJump ? 'cursor-pointer hover:opacity-90' : 'cursor-not-allowed opacity-60'}`}
+                  >
+                    {showCheck ? <HiCheckCircle className="w-6 h-6" aria-hidden /> : step}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -240,9 +343,9 @@ export default function Register() {
           <div className="bg-white rounded-lg p-6 shadow-sm">
             <h3 className="text-xl font-semibold text-gray-900 mb-4">Verify Your Email</h3>
             
-            {localError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                {localError}
+            {formError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+                {formError}
               </div>
             )}
 
@@ -259,12 +362,25 @@ export default function Register() {
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
-                      setLocalError('');
+                      setFormError('');
+                      if (fieldErrors.email) {
+                        setFieldErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.email;
+                          return next;
+                        });
+                      }
                     }}
                     disabled={emailVerified}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    aria-invalid={Boolean(fieldErrors.email)}
+                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none ${fieldClass('email', fieldErrors)}`}
                     placeholder="Enter your email address"
                   />
+                  {fieldErrors.email ? (
+                    <p className="mt-1 text-sm text-red-600" role="alert">
+                      {fieldErrors.email}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -294,10 +410,20 @@ export default function Register() {
                         value={verificationCode[index] || ''}
                         onChange={(e) => handleCodeInputChange(index, e.target.value)}
                         onKeyDown={(e) => handleCodeKeyDown(index, e)}
-                        className="w-12 h-12 text-center text-lg font-semibold border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        aria-invalid={Boolean(fieldErrors.verificationCode)}
+                        className={`w-12 h-12 text-center text-lg font-semibold border-2 rounded-lg focus:outline-none ${
+                          fieldErrors.verificationCode
+                            ? 'border-red-500 focus:ring-2 focus:ring-red-500'
+                            : 'border-gray-300 focus:ring-2 focus:ring-brand-500'
+                        }`}
                       />
                     ))}
                   </div>
+                  {fieldErrors.verificationCode ? (
+                    <p className="mt-2 text-sm text-red-600 text-center" role="alert">
+                      {fieldErrors.verificationCode}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -324,11 +450,11 @@ export default function Register() {
           <div className="bg-white rounded-lg p-6 shadow-sm">
             <h3 className="text-xl font-semibold text-gray-900 mb-4">Basic Information</h3>
             
-            {localError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                {localError}
-            </div>
-          )}
+            {formError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+                {formError}
+              </div>
+            )}
 
           <div className="space-y-4">
             <div>
@@ -342,8 +468,14 @@ export default function Register() {
                 required
                 value={formData.firstName}
                 onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                aria-invalid={Boolean(fieldErrors.firstName)}
+                className={`w-full px-4 py-2 border rounded-lg focus:outline-none ${fieldClass('firstName', fieldErrors)}`}
               />
+              {fieldErrors.firstName ? (
+                <p className="mt-1 text-sm text-red-600" role="alert">
+                  {fieldErrors.firstName}
+                </p>
+              ) : null}
             </div>
             <div>
                 <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-2">
@@ -356,8 +488,35 @@ export default function Register() {
                 required
                 value={formData.lastName}
                 onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                aria-invalid={Boolean(fieldErrors.lastName)}
+                className={`w-full px-4 py-2 border rounded-lg focus:outline-none ${fieldClass('lastName', fieldErrors)}`}
               />
+              {fieldErrors.lastName ? (
+                <p className="mt-1 text-sm text-red-600" role="alert">
+                  {fieldErrors.lastName}
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <label htmlFor="profession" className="block text-sm font-medium text-gray-700 mb-2">
+                Professional / job title
+              </label>
+              <input
+                id="profession"
+                name="profession"
+                type="text"
+                required
+                value={formData.profession}
+                onChange={handleChange}
+                aria-invalid={Boolean(fieldErrors.profession)}
+                className={`w-full px-4 py-2 border rounded-lg focus:outline-none ${fieldClass('profession', fieldErrors)}`}
+                placeholder="e.g. Registered Nurse, Software Engineer"
+              />
+              {fieldErrors.profession ? (
+                <p className="mt-1 text-sm text-red-600" role="alert">
+                  {fieldErrors.profession}
+                </p>
+              ) : null}
             </div>
             <div>
                 <label htmlFor="country" className="block text-sm font-medium text-gray-700 mb-2">
@@ -366,18 +525,38 @@ export default function Register() {
               <SearchableList
                 id="country"
                 value={formData.country}
-                onChange={(country) => setFormData({ ...formData, country })}
+                onChange={(country) => {
+                  setFormData({ ...formData, country });
+                  if (fieldErrors.country) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.country;
+                      return next;
+                    });
+                  }
+                }}
                 options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
                 placeholder="Select country"
-                className="w-full focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                error={fieldErrors.country}
+                className="w-full"
               />
             </div>
             <div>
               <PhoneNumberInput
                 value={formData.phoneNumber}
-                onChange={(value) => setFormData({ ...formData, phoneNumber: value })}
+                onChange={(value) => {
+                  setFormData({ ...formData, phoneNumber: value });
+                  if (fieldErrors.phoneNumber) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.phoneNumber;
+                      return next;
+                    });
+                  }
+                }}
                 label="Phone Number"
                 placeholder="Enter phone number"
+                error={fieldErrors.phoneNumber}
               />
             </div>
             </div>
@@ -385,7 +564,7 @@ export default function Register() {
             <div className="flex gap-3 mt-6">
               <button
                 type="button"
-                onClick={() => setCurrentStep(1)}
+                onClick={() => goToStep(1)}
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors flex items-center justify-center"
               >
                 <HiArrowLeft className="w-5 h-5 mr-2" />
@@ -411,9 +590,9 @@ export default function Register() {
               <p className="text-sm text-gray-600">Create a secure password for your organisation account.</p>
             </div>
             
-            {(error || localError) && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                {error || localError}
+            {(error || formError) && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+                {error || formError}
               </div>
             )}
 
@@ -429,8 +608,20 @@ export default function Register() {
                     required
                     minLength={8}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      dispatch(clearError());
+                      setFormError('');
+                      if (fieldErrors.password) {
+                        setFieldErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.password;
+                          return next;
+                        });
+                      }
+                    }}
+                    aria-invalid={Boolean(fieldErrors.password)}
+                    className={`w-full px-4 py-3 pr-10 border rounded-lg focus:outline-none ${passwordFieldClass('password', fieldErrors)}`}
                     placeholder="Enter your password"
                   />
                   <button
@@ -445,6 +636,11 @@ export default function Register() {
                     )}
                   </button>
                 </div>
+                {fieldErrors.password ? (
+                  <p className="mt-1 text-sm text-red-600" role="alert">
+                    {fieldErrors.password}
+                  </p>
+                ) : null}
               </div>
 
               {/* Password Requirements */}
@@ -502,8 +698,20 @@ export default function Register() {
                     required
                     minLength={8}
                     value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      dispatch(clearError());
+                      setFormError('');
+                      if (fieldErrors.confirmPassword) {
+                        setFieldErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.confirmPassword;
+                          return next;
+                        });
+                      }
+                    }}
+                    aria-invalid={Boolean(fieldErrors.confirmPassword)}
+                    className={`w-full px-4 py-3 pr-10 border rounded-lg focus:outline-none ${passwordFieldClass('confirmPassword', fieldErrors)}`}
                     placeholder="Confirm your password"
                   />
                   <button
@@ -518,13 +726,18 @@ export default function Register() {
                     )}
                   </button>
                 </div>
+                {fieldErrors.confirmPassword ? (
+                  <p className="mt-1 text-sm text-red-600" role="alert">
+                    {fieldErrors.confirmPassword}
+                  </p>
+                ) : null}
               </div>
             </div>
 
             <div className="flex gap-3 mt-6">
               <button
                 type="button"
-                onClick={() => setCurrentStep(2)}
+                onClick={() => goToStep(2)}
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors flex items-center justify-center"
               >
                 <HiArrowLeft className="w-5 h-5 mr-2" />

@@ -341,7 +341,11 @@ export default function PhoneNumberInput({
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-2 px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:bg-gray-50 transition-colors min-w-[140px]"
+            className={`flex items-center gap-2 px-3 py-3 border rounded-lg focus:outline-none focus:ring-2 bg-white hover:bg-gray-50 transition-colors min-w-[140px] ${
+              error
+                ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+            }`}
           >
             <span className="text-xl">{selectedCountry.flag}</span>
             <span className="text-sm font-medium text-gray-700">{selectedCountry.dialCode}</span>
@@ -415,9 +419,12 @@ export default function PhoneNumberInput({
             value={displayNumber}
             onChange={handleNumberChange}
             placeholder={placeholder}
-            className={`w-full px-4 py-3 border ${
-              error ? 'border-red-300' : 'border-gray-300'
-            } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500`}
+            className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 ${
+              error
+                ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
+            }`}
+            aria-invalid={Boolean(error)}
             required={required}
           />
           {error && (
