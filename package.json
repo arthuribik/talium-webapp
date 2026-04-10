@@ -3,6 +3,7 @@
   "description": "Taldium web client — verified profiles for professionals and organisations.",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "pnpm@9.15.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
