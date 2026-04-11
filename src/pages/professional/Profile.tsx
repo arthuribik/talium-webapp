@@ -140,6 +140,10 @@ export default function Profile() {
   }, []);
 
   useEffect(() => {
+    setPhotoError(false);
+  }, [profile?.id, profile?.profileImageUrl, profile?.profileImage, profile?.livenessSelfieUrl]);
+
+  useEffect(() => {
     if (!profile) return;
     const saved = typeof profile.timezone === 'string' ? profile.timezone.trim() : '';
     if (!saved) setTimezoneEditorOpen(true);
@@ -388,8 +392,18 @@ export default function Profile() {
     window.open(`/professionals/${profile.id}`, '_blank', 'noopener,noreferrer');
   };
 
+  const profilePhotoRaw = (profile.profileImageUrl || profile.profileImage) as string | undefined;
   const profilePhotoUrl =
-    (profile.profileImageUrl || profile.profileImage) as string | undefined;
+    typeof profilePhotoRaw === 'string' && profilePhotoRaw.trim() ? profilePhotoRaw.trim() : undefined;
+  const livenessSelfieRaw = profile.livenessSelfieUrl as string | undefined;
+  const livenessSelfieUrl =
+    typeof livenessSelfieRaw === 'string' && livenessSelfieRaw.trim()
+      ? livenessSelfieRaw.trim()
+      : undefined;
+  /** Liveness check completed (personal verification flow); distinct from profileImageUrl. */
+  const livenessComplete = Boolean(livenessSelfieUrl);
+  /** Prefer uploaded profile photo; otherwise show liveness selfie without overwriting the stored profile field. */
+  const avatarDisplayUrl = profilePhotoUrl || livenessSelfieUrl || undefined;
 
   return (
     <ProfessionalLayout>
@@ -429,13 +443,13 @@ export default function Profile() {
                   className="sr-only"
                   aria-label="Upload profile photo"
                   onChange={handleProfilePhotoChange}
-                  disabled={uploadingPhoto}
+                  disabled={uploadingPhoto || !livenessComplete}
                 />
                 <div className="relative flex flex-col items-start">
                   <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-lg ring-4 ring-white sm:h-32 sm:w-32">
-                    {profilePhotoUrl && !photoError ? (
+                    {avatarDisplayUrl && !photoError ? (
                       <img
-                        src={profilePhotoUrl}
+                        src={avatarDisplayUrl}
                         alt=""
                         className="h-full w-full object-cover"
                         onError={() => setPhotoError(true)}
@@ -443,16 +457,18 @@ export default function Profile() {
                     ) : (
                       <HiUser className="h-14 w-14 text-gray-400 sm:h-16 sm:w-16" />
                     )}
-                    <button
-                      type="button"
-                      disabled={uploadingPhoto}
-                      onClick={() => photoInputRef.current?.click()}
-                      className="absolute bottom-0.5 right-0.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-white/80 bg-brand-500 text-white shadow-md hover:bg-brand-600 disabled:opacity-50 sm:bottom-1 sm:right-1"
-                      aria-label={profilePhotoUrl ? 'Change profile photo' : 'Add profile photo'}
-                      title={profilePhotoUrl ? 'Change photo' : 'Add photo'}
-                    >
-                      <HiCamera className="h-4 w-4 sm:h-5 sm:w-5" />
-                    </button>
+                    {livenessComplete ? (
+                      <button
+                        type="button"
+                        disabled={uploadingPhoto}
+                        onClick={() => photoInputRef.current?.click()}
+                        className="absolute bottom-0.5 right-0.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-white/80 bg-brand-500 text-white shadow-md hover:bg-brand-600 disabled:opacity-50 sm:bottom-1 sm:right-1"
+                        aria-label={profilePhotoUrl ? 'Change profile photo' : 'Add profile photo'}
+                        title={profilePhotoUrl ? 'Change photo' : 'Add photo'}
+                      >
+                        <HiCamera className="h-4 w-4 sm:h-5 sm:w-5" />
+                      </button>
+                    ) : null}
                     {uploadingPhoto ? (
                       <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-xs font-medium text-gray-700">
                         Uploading…
@@ -664,13 +680,13 @@ export default function Profile() {
                   </div>
               </div>
 
-              {!identityOk ? (
+              {!livenessComplete ? (
                 <div className="mt-6 flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
                   <HiShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
                   <p>
                     Verify your Personal Identity in the{' '}
-                    <VerificationLink>Verification Center</VerificationLink> to upload a profile picture
-                    and banner.
+                    <VerificationLink tab="personal">Verification Center</VerificationLink> to upload a
+                    profile picture and banner.
                   </p>
                 </div>
               ) : null}

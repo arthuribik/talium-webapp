@@ -28,10 +28,10 @@ import {
   HiDocumentText,
   HiArrowLeft,
   HiArrowRight,
-  HiStar,
   HiUpload,
   HiExclamationCircle,
   HiPaperAirplane,
+  HiTrash,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
 import {
@@ -78,7 +78,11 @@ type SelfDeclarationFlow =
   | { open: false }
   | { open: true; kind: 'personal' }
   | { open: true; kind: 'address'; locationIndex: number }
-  | { open: true; kind: 'work' };
+  | { open: true; kind: 'education'; educationIndex: number }
+  | { open: true; kind: 'work' }
+  | { open: true; kind: 'work_card'; workIndex: number }
+  | { open: true; kind: 'project_card'; projectIndex: number }
+  | { open: true; kind: 'cert_card'; certIndex: number };
 
 /** Pills shown above personal flow (identity verification has no separate tab — grouped under Add data). */
 const PERSONAL_FLOW_UI_GROUPS: { label: string; steps: readonly PersonalFlowStep[] }[] = [
@@ -262,6 +266,15 @@ function mapApiLocationToEntry(loc: any, index: number, length: number): Locatio
     documentType = '';
   }
 
+  let isDefault: boolean;
+  if (length === 1) {
+    isDefault = true;
+  } else if (typeof loc.isDefault === 'boolean') {
+    isDefault = loc.isDefault;
+  } else {
+    isDefault = index === 0;
+  }
+
   return {
     country: loc.country || '',
     address: loc.address || '',
@@ -270,7 +283,7 @@ function mapApiLocationToEntry(loc: any, index: number, length: number): Locatio
     documentType,
     documentUrl: loc.documentUrl || '',
     verificationStatus,
-    isDefault: length > 0 && index === 0,
+    isDefault,
     residenceType: typeof loc.residenceType === 'string' ? loc.residenceType : undefined,
   };
 }
@@ -318,6 +331,10 @@ type EducationEntry = {
   activitiesSocieties: string;
   associatedSkills: string;
   supportingMediaUrl: string;
+  /** Shown on profile as the primary education row when multiple exist. */
+  isDefault?: boolean;
+  /** How the user chose to verify (persisted on the education record). */
+  verificationMethod?: string | null;
   /** Local UI: education row verification (not necessarily from API). */
   eduVerificationStatus?: 'pending' | 'verified';
 };
@@ -350,6 +367,8 @@ const emptyEducation = (): EducationEntry => ({
   activitiesSocieties: '',
   associatedSkills: '',
   supportingMediaUrl: '',
+  isDefault: false,
+  verificationMethod: undefined,
   eduVerificationStatus: 'pending',
 });
 
@@ -472,6 +491,8 @@ type ProjectEntry = {
   mediaUrl: string;
   teamMembers: ProjectTeamMemberEntry[];
   projectVerificationStatus?: 'pending' | 'verified';
+  /** Local: user chose self-declaration path (not stored on project row today). */
+  projectSelfDeclared?: boolean;
 };
 
 const emptyProjectTeamMember = (): ProjectTeamMemberEntry => ({ name: '', role: '' });
@@ -643,6 +664,8 @@ type CertificateEntry = {
   reportingUrl: string;
   supportingMediaUrl: string;
   certVerificationStatus?: 'pending' | 'verified';
+  /** Local: user chose self-declaration path for this certification row. */
+  certSelfDeclared?: boolean;
 };
 
 const emptyCertificate = (): CertificateEntry => ({
@@ -1061,6 +1084,10 @@ export default function VerificationCenter() {
   const locationVerifyFileInputRef = useRef<HTMLInputElement>(null);
   const locationVerifyUploadIndexRef = useRef<number | null>(null);
   const [uploadingLocationIndex, setUploadingLocationIndex] = useState<number | null>(null);
+  const [locationRemoveConfirm, setLocationRemoveConfirm] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
 
   // Social (from profile.socialMedia)
   const [social, setSocial] = useState({
@@ -1076,21 +1103,69 @@ export default function VerificationCenter() {
   const [educationDraft, setEducationDraft] = useState<EducationEntry>(() => emptyEducation());
   const [educationSaving, setEducationSaving] = useState(false);
   const [educationAddFormOpen, setEducationAddFormOpen] = useState(false);
+  const [verifyEducationModal, setVerifyEducationModal] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
+  const [educationRemoveConfirm, setEducationRemoveConfirm] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
+  const educationVerifyFileInputRef = useRef<HTMLInputElement>(null);
+  const educationVerifyUploadIndexRef = useRef<number | null>(null);
+  const [uploadingEducationIndex, setUploadingEducationIndex] = useState<number | null>(null);
 
   // Work (list of entries like Location)
   const [workEntriesList, setWorkEntriesList] = useState<WorkEntry[]>([]);
   const [workDraft, setWorkDraft] = useState<WorkEntry>(() => emptyWork());
   const [workSaving, setWorkSaving] = useState(false);
+  const [workAddFormOpen, setWorkAddFormOpen] = useState(false);
+  const [verifyWorkModal, setVerifyWorkModal] = useState<{
+    open: boolean;
+    index: number | null;
+    step: 'method' | 'employer';
+  }>({ open: false, index: null, step: 'method' });
+  const [workVerifyEmployerDraft, setWorkVerifyEmployerDraft] = useState({ email: '', website: '' });
+  const [workRemoveConfirm, setWorkRemoveConfirm] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
 
   const [projectsList, setProjectsList] = useState<ProjectEntry[]>([]);
   const [projectDraft, setProjectDraft] = useState<ProjectEntry>(() => emptyProject());
-  const [projectEditingIndex, setProjectEditingIndex] = useState<number | null>(null);
   const [projectSaving, setProjectSaving] = useState(false);
+  const [projectAddFormOpen, setProjectAddFormOpen] = useState(false);
+  const [verifyProjectModal, setVerifyProjectModal] = useState<{
+    open: boolean;
+    index: number | null;
+    step: 'method' | 'evidence';
+  }>({ open: false, index: null, step: 'method' });
+  const [projectVerifyEvidenceDraft, setProjectVerifyEvidenceDraft] = useState({
+    projectLink: '',
+    mediaUrl: '',
+  });
+  const [projectRemoveConfirm, setProjectRemoveConfirm] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
+  const [verifyCertModal, setVerifyCertModal] = useState<{
+    open: boolean;
+    index: number | null;
+    step: 'method' | 'evidence';
+  }>({ open: false, index: null, step: 'method' });
+  const [certVerifyEvidenceDraft, setCertVerifyEvidenceDraft] = useState({
+    reportingUrl: '',
+    supportingMediaUrl: '',
+  });
+  const [certRemoveConfirm, setCertRemoveConfirm] = useState<{
+    open: boolean;
+    index: number | null;
+  }>({ open: false, index: null });
 
   // Certification (local only for now)
   const [certList, setCertList] = useState<CertificateEntry[]>([]);
   const [certDraft, setCertDraft] = useState<CertificateEntry>(() => emptyCertificate());
-  const [certEditingIndex, setCertEditingIndex] = useState<number | null>(null);
+  const [certAddFormOpen, setCertAddFormOpen] = useState(false);
   const [certDraftUploading, setCertDraftUploading] = useState(false);
 
   // Family & Relationship
@@ -1098,7 +1173,7 @@ export default function VerificationCenter() {
   const [spouseName, setSpouseName] = useState('');
   const [relationsList, setRelationsList] = useState<FamilyRelationEntry[]>([]);
   const [familyRelationDraft, setFamilyRelationDraft] = useState<FamilyRelationEntry>(() => emptyFamilyRelation());
-  const [familyRelationEditingIndex, setFamilyRelationEditingIndex] = useState<number | null>(null);
+  const [familyRelationAddFormOpen, setFamilyRelationAddFormOpen] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -1391,7 +1466,10 @@ export default function VerificationCenter() {
                 activitiesSocieties: e.activitiesSocieties || '',
                 associatedSkills: e.associatedSkills || '',
                 supportingMediaUrl: e.supportingMediaUrl || '',
-                eduVerificationStatus: (e as any).verified ? 'verified' : 'pending',
+                isDefault: !!e.isDefault,
+                verificationMethod: e.verificationMethod || undefined,
+                eduVerificationStatus:
+                  e.verificationStatus === 'verified' ? 'verified' : 'pending',
               };
             }),
           );
@@ -1467,6 +1545,7 @@ export default function VerificationCenter() {
                 mediaUrl: p.mediaUrl || '',
                 teamMembers,
                 projectVerificationStatus: (p as any).verified ? 'verified' : 'pending',
+                projectSelfDeclared: false,
               };
             }),
           );
@@ -1485,6 +1564,7 @@ export default function VerificationCenter() {
                 reportingUrl: c.reportingUrl || '',
                 supportingMediaUrl: c.supportingMediaUrl || '',
                 certVerificationStatus: (c as any).verified ? 'verified' : 'pending',
+                certSelfDeclared: false,
               })),
             );
           } else {
@@ -1839,6 +1919,7 @@ export default function VerificationCenter() {
         documentType: docTypeForApi,
         documentUrl: loc.documentUrl?.trim() || undefined,
         residenceType: loc.residenceType || undefined,
+        isDefault: !!loc.isDefault,
       };
     });
 
@@ -1906,12 +1987,11 @@ export default function VerificationCenter() {
     toast.success('Location added — verify to unlock full access');
   };
 
-  const setDefaultLocation = (index: number) => {
-    setLocationsList((prev) => {
-      const next = prev.map((loc, i) => ({ ...loc, isDefault: i === index }));
-      queueMicrotask(() => tryPersistLocations(next, true));
-      return next;
-    });
+  const markLocationAsDefault = (index: number) => {
+    const next = locationsList.map((loc, i) => ({ ...loc, isDefault: i === index }));
+    setLocationsList(next);
+    void tryPersistLocations(next, true);
+    toast.success('Default location updated');
   };
 
   const openVerifyAddressModal = (locationIndex: number) => {
@@ -1938,23 +2018,120 @@ export default function VerificationCenter() {
       ...educationDraft,
       id: undefined,
       eduVerificationStatus: 'pending',
+      isDefault: educationEntriesList.length === 0,
     });
-    setEducationEntriesList((prev) => {
-      const next = [entry, ...prev];
-      queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
-      return next;
-    });
+    const next = [entry, ...educationEntriesList];
+    setEducationEntriesList(next);
+    void syncEducationEntriesToApi(next, { silentSuccess: true });
     toast.success('Education added');
     setEducationDraft(emptyEducation());
     setEducationAddFormOpen(false);
   };
 
-  const removeEducationEntry = (index: number) => {
+  const closeVerifyEducationModal = () => {
+    setVerifyEducationModal({ open: false, index: null });
+  };
+
+  const applyEducationVerificationMethod = (index: number, method: string) => {
     setEducationEntriesList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      queueMicrotask(() => void syncEducationEntriesToApi(next, { silentSuccess: true }));
+      const next = prev.map((e, i) => (i === index ? { ...e, verificationMethod: method } : e));
+      void syncEducationEntriesToApi(next, { silentSuccess: true });
       return next;
     });
+    closeVerifyEducationModal();
+    toast.success(
+      method === 'self_declaration'
+        ? 'Self declaration selected for this education.'
+        : method === 'student_email'
+          ? 'Student email verification selected.'
+          : 'Verification method updated.',
+    );
+  };
+
+  const requestRemoveEducationEntry = (index: number) => {
+    setEducationRemoveConfirm({ open: true, index });
+  };
+
+  const confirmRemoveEducationEntry = async () => {
+    const index = educationRemoveConfirm.index;
+    if (index == null) return;
+    const entry = educationEntriesList[index];
+    setEducationRemoveConfirm({ open: false, index: null });
+    if (!entry) return;
+    if (entry.id) {
+      setEducationSaving(true);
+      try {
+        await api.delete(`/v1/professional/education/${entry.id}`);
+        const filtered = educationEntriesList.filter((_, i) => i !== index);
+        const next =
+          filtered.length === 0 || !entry.isDefault
+            ? filtered
+            : filtered.map((e, i) => ({ ...e, isDefault: i === 0 }));
+        setEducationEntriesList(next);
+        toast.success('Education removed');
+        fetchProfile();
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Failed to remove education');
+      } finally {
+        setEducationSaving(false);
+      }
+      return;
+    }
+    const filtered = educationEntriesList.filter((_, i) => i !== index);
+    const next =
+      filtered.length === 0 || !entry.isDefault
+        ? filtered
+        : filtered.map((e, i) => ({ ...e, isDefault: i === 0 }));
+    setEducationEntriesList(next);
+    toast.success('Education removed');
+  };
+
+  const triggerEducationVerifyDocumentUpload = () => {
+    const idx = verifyEducationModal.index;
+    if (idx == null) return;
+    educationVerifyUploadIndexRef.current = idx;
+    closeVerifyEducationModal();
+    setTimeout(() => educationVerifyFileInputRef.current?.click(), 0);
+  };
+
+  const handleEducationVerifyFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const idx = educationVerifyUploadIndexRef.current;
+    e.target.value = '';
+    if (!file || idx == null) return;
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!validTypes.includes(file.type)) {
+      toast.error('Please upload an image (JPEG, PNG, WebP) or PDF');
+      return;
+    }
+    setUploadingEducationIndex(idx);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post<{ url: string } | { data: { url: string } }>(
+        '/v1/professional/upload-id',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      const url = (res.data as any)?.data?.url ?? (res.data as any)?.url;
+      if (url) {
+        setEducationEntriesList((prev) => {
+          const next = prev.map((ent, i) =>
+            i === idx
+              ? { ...ent, supportingMediaUrl: url, verificationMethod: 'upload_document' }
+              : ent,
+          );
+          void syncEducationEntriesToApi(next, { silentSuccess: true });
+          return next;
+        });
+        toast.success('Document attached for verification');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Upload failed');
+    } finally {
+      setUploadingEducationIndex(null);
+      educationVerifyUploadIndexRef.current = null;
+    }
   };
 
   const updateWorkDraft = (updates: Partial<WorkEntry>) => {
@@ -1995,18 +2172,29 @@ export default function VerificationCenter() {
       endDate: primary.currentlyWorking ? '' : primary.endDate,
     };
     const entry = { ...synced, id: undefined, workVerificationStatus: 'pending' as const };
-    setWorkEntriesList((prev) => {
-      const next = [entry, ...prev];
-      queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-      return next;
-    });
+    const next = [entry, ...workEntriesList];
+    setWorkEntriesList(next);
+    void syncWorkEntriesToApi(next, { silentSuccess: true });
     toast.success('Work experience added');
     setWorkDraft(emptyWork());
+    setWorkAddFormOpen(false);
   };
 
   const onSelfDeclarationBackOrClose = () => {
     if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'personal') {
       setVerifyPersonalModalOpen(true);
+    }
+    if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'education') {
+      setVerifyEducationModal({ open: true, index: selfDeclarationFlow.educationIndex });
+    }
+    if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'work_card') {
+      setVerifyWorkModal({ open: true, index: selfDeclarationFlow.workIndex, step: 'method' });
+    }
+    if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'project_card') {
+      setVerifyProjectModal({ open: true, index: selfDeclarationFlow.projectIndex, step: 'method' });
+    }
+    if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'cert_card') {
+      setVerifyCertModal({ open: true, index: selfDeclarationFlow.certIndex, step: 'method' });
     }
     setSelfDeclarationFlow({ open: false });
   };
@@ -2034,6 +2222,46 @@ export default function VerificationCenter() {
       });
       closeVerifyAddressModal();
       toast.success('Self declaration saved. Full verification unlocks more network access.');
+    } else if (selfDeclarationFlow.kind === 'education') {
+      const idx = selfDeclarationFlow.educationIndex;
+      setEducationEntriesList((prev) => {
+        const next = prev.map((e, i) =>
+          i === idx ? { ...e, verificationMethod: 'self_declaration' } : e,
+        );
+        void syncEducationEntriesToApi(next, { silentSuccess: true });
+        return next;
+      });
+      closeVerifyEducationModal();
+      toast.success('Self declaration saved for this education.');
+    } else if (selfDeclarationFlow.kind === 'work_card') {
+      const idx = selfDeclarationFlow.workIndex;
+      setWorkEntriesList((prev) => {
+        const next = prev.map((e, i) =>
+          i === idx ? { ...e, selfDeclared: true, verifyHrEmail: '', verifyWebsite: '' } : e,
+        );
+        void syncWorkEntriesToApi(next, { silentSuccess: true });
+        return next;
+      });
+      setVerifyWorkModal({ open: false, index: null, step: 'method' });
+      toast.success('Self declaration recorded for this role.');
+    } else if (selfDeclarationFlow.kind === 'project_card') {
+      const idx = selfDeclarationFlow.projectIndex;
+      setProjectsList((prev) => {
+        const next = prev.map((p, i) => (i === idx ? { ...p, projectSelfDeclared: true } : p));
+        void syncProjectsListToApi(next, { silentSuccess: true });
+        return next;
+      });
+      setVerifyProjectModal({ open: false, index: null, step: 'method' });
+      toast.success('Self declaration recorded for this project.');
+    } else if (selfDeclarationFlow.kind === 'cert_card') {
+      const idx = selfDeclarationFlow.certIndex;
+      setCertList((prev) => {
+        const next = prev.map((c, i) => (i === idx ? { ...c, certSelfDeclared: true } : c));
+        void syncCertificationsToApi(next, { silentSuccess: true });
+        return next;
+      });
+      setVerifyCertModal({ open: false, index: null, step: 'method' });
+      toast.success('Self declaration recorded for this certification.');
     } else if (selfDeclarationFlow.kind === 'work') {
       updateWorkDraft({ selfDeclared: true });
       toast.success('Self declaration recorded');
@@ -2041,23 +2269,115 @@ export default function VerificationCenter() {
     setSelfDeclarationFlow({ open: false });
   };
 
-  const removeWorkEntry = (index: number) => {
-    setWorkEntriesList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-      return next;
+  const closeVerifyWorkModal = () => {
+    setVerifyWorkModal({ open: false, index: null, step: 'method' });
+  };
+
+  const openVerifyWorkModal = (index: number) => {
+    const entry = workEntriesList[index];
+    setWorkVerifyEmployerDraft({
+      email: entry?.verifyHrEmail?.trim() ?? '',
+      website: entry?.verifyWebsite?.trim() ?? '',
+    });
+    setVerifyWorkModal({
+      open: true,
+      index,
+      step: entry?.selfDeclared ? 'employer' : 'method',
     });
   };
 
-  const removeLocation = (index: number) => {
-    setLocationsList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      if (next.length === 0) return next;
-      const removedWasDefault = prev[index]?.isDefault;
-      const adjusted = !removedWasDefault ? next : next.map((l, i) => ({ ...l, isDefault: i === 0 }));
-      queueMicrotask(() => tryPersistLocations(adjusted, true));
-      return adjusted;
+  const submitWorkEmployerVerification = () => {
+    const idx = verifyWorkModal.index;
+    if (idx == null) return;
+    const email = workVerifyEmployerDraft.email.trim();
+    const website = workVerifyEmployerDraft.website.trim();
+    if (!email && !website) {
+      toast.error('Enter an HR / verification email or a company verification website.');
+      return;
+    }
+    setWorkEntriesList((prev) => {
+      const next = prev.map((e, i) =>
+        i === idx
+          ? {
+              ...e,
+              selfDeclared: false,
+              verifyHrEmail: email,
+              verifyWebsite: website,
+            }
+          : e,
+      );
+      void syncWorkEntriesToApi(next, { silentSuccess: true });
+      return next;
     });
+    closeVerifyWorkModal();
+    toast.success('Employer verification details saved.');
+  };
+
+  const requestRemoveWorkEntry = (index: number) => {
+    setWorkRemoveConfirm({ open: true, index });
+  };
+
+  const confirmRemoveWorkEntry = async () => {
+    const index = workRemoveConfirm.index;
+    if (index == null) return;
+    setWorkRemoveConfirm({ open: false, index: null });
+    const entry = workEntriesList[index];
+    if (!entry) return;
+    if (entry.id) {
+      setWorkSaving(true);
+      try {
+        await api.delete(`/v1/professional/experience/${entry.id}`);
+        const next = workEntriesList.filter((_, i) => i !== index);
+        setWorkEntriesList(next);
+        toast.success('Work experience removed');
+        fetchProfile();
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Failed to remove work experience');
+      } finally {
+        setWorkSaving(false);
+      }
+      return;
+    }
+    const next = workEntriesList.filter((_, i) => i !== index);
+    setWorkEntriesList(next);
+    void syncWorkEntriesToApi(next, { silentSuccess: true });
+    toast.success('Work experience removed');
+  };
+
+  const requestRemoveLocation = (index: number) => {
+    setLocationRemoveConfirm({ open: true, index });
+  };
+
+  const confirmRemoveLocation = () => {
+    const index = locationRemoveConfirm.index;
+    if (index == null) return;
+    setLocationRemoveConfirm({ open: false, index: null });
+
+    const nextList = locationsList.filter((_, i) => i !== index);
+    if (nextList.length === 0) {
+      setLocationsList([]);
+      void (async () => {
+        setSaving(true);
+        try {
+          await api.put('/v1/professional/profile', { locations: [] });
+          setFormFieldErrors((p) => omitKeysMatching(p, /^loc_/));
+          toast.success('Location removed');
+          fetchProfile();
+        } catch (err: any) {
+          toast.error(err.response?.data?.message || 'Failed to save');
+        } finally {
+          setSaving(false);
+        }
+      })();
+      return;
+    }
+    const removedWasDefault = locationsList[index]?.isDefault;
+    const adjusted = !removedWasDefault
+      ? nextList
+      : nextList.map((l, i) => ({ ...l, isDefault: i === 0 }));
+    setLocationsList(adjusted);
+    void tryPersistLocations(adjusted, true);
+    toast.success('Location removed');
   };
 
   const handleLocationDocumentUpload = async (
@@ -2198,6 +2518,8 @@ export default function VerificationCenter() {
           activitiesSocieties: entry.activitiesSocieties?.trim() || undefined,
           associatedSkills: entry.associatedSkills?.trim() || undefined,
           supportingMediaUrl: entry.supportingMediaUrl?.trim() || undefined,
+          isDefault: !!entry.isDefault,
+          verificationMethod: entry.verificationMethod?.trim() || undefined,
         };
         if (entry.id) {
           await api.put(`/v1/professional/education/${entry.id}`, payload);
@@ -2331,56 +2653,151 @@ export default function VerificationCenter() {
       return;
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
-    if (projectEditingIndex != null) {
-      const i = projectEditingIndex;
-      const merged = cloneProjectEntry(projectDraft);
-      setProjectsList((prev) => {
-        const next = prev.map((p, idx) => (idx === i ? merged : p));
-        queueMicrotask(() => void syncProjectsListToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      setProjectEditingIndex(null);
-      toast.success('Project updated');
-    } else {
-      const entry = cloneProjectEntry({
-        ...projectDraft,
-        id: undefined,
-        projectVerificationStatus: 'pending',
-      });
-      setProjectsList((prev) => {
-        const next = [...prev, entry];
-        queueMicrotask(() => void syncProjectsListToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      toast.success('Project added');
-    }
+    const entry = cloneProjectEntry({
+      ...projectDraft,
+      id: undefined,
+      projectVerificationStatus: 'pending',
+      projectSelfDeclared: false,
+    });
+    const next = [...projectsList, entry];
+    setProjectsList(next);
+    void syncProjectsListToApi(next, { silentSuccess: true });
+    toast.success('Project added');
     setProjectDraft(emptyProject());
+    setProjectAddFormOpen(false);
   };
 
-  const beginEditProjectEntry = (index: number) => {
-    const p = projectsList[index];
-    if (!p) return;
-    setProjectDraft(cloneProjectEntry(p));
-    setProjectEditingIndex(index);
+  const closeVerifyProjectModal = () => {
+    setVerifyProjectModal({ open: false, index: null, step: 'method' });
   };
 
-  const cancelProjectDraft = () => {
-    setProjectDraft(emptyProject());
-    setProjectEditingIndex(null);
+  const openVerifyProjectModal = (index: number) => {
+    const entry = projectsList[index];
+    setProjectVerifyEvidenceDraft({
+      projectLink: entry?.projectLink?.trim() ?? '',
+      mediaUrl: entry?.mediaUrl?.trim() ?? '',
+    });
+    setVerifyProjectModal({
+      open: true,
+      index,
+      step: entry?.projectSelfDeclared ? 'evidence' : 'method',
+    });
   };
 
-  const removeProjectEntry = (index: number) => {
-    if (projectEditingIndex === index) {
-      setProjectDraft(emptyProject());
-      setProjectEditingIndex(null);
-    } else if (projectEditingIndex != null && projectEditingIndex > index) {
-      setProjectEditingIndex(projectEditingIndex - 1);
+  const submitProjectVerificationEvidence = () => {
+    const idx = verifyProjectModal.index;
+    if (idx == null) return;
+    const link = projectVerifyEvidenceDraft.projectLink.trim();
+    const media = projectVerifyEvidenceDraft.mediaUrl.trim();
+    if (!link && !media) {
+      toast.error('Add a project link or media URL (or both).');
+      return;
     }
     setProjectsList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      queueMicrotask(() => void syncProjectsListToApi(next, { silentSuccess: true }));
+      const next = prev.map((p, i) =>
+        i === idx
+          ? {
+              ...p,
+              projectSelfDeclared: false,
+              projectLink: link,
+              mediaUrl: media,
+            }
+          : p,
+      );
+      void syncProjectsListToApi(next, { silentSuccess: true });
       return next;
     });
+    closeVerifyProjectModal();
+    toast.success('Project verification details saved.');
+  };
+
+  const requestRemoveProjectEntry = (index: number) => {
+    setProjectRemoveConfirm({ open: true, index });
+  };
+
+  const confirmRemoveProjectEntry = async () => {
+    const index = projectRemoveConfirm.index;
+    if (index == null) return;
+    setProjectRemoveConfirm({ open: false, index: null });
+    const entry = projectsList[index];
+    if (!entry) return;
+    if (entry.id) {
+      setProjectSaving(true);
+      try {
+        await api.delete(`/v1/professional/project/${entry.id}`);
+        const next = projectsList.filter((_, i) => i !== index);
+        setProjectsList(next);
+        toast.success('Project removed');
+        fetchProfile();
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Failed to remove project');
+      } finally {
+        setProjectSaving(false);
+      }
+      return;
+    }
+    const next = projectsList.filter((_, i) => i !== index);
+    setProjectsList(next);
+    void syncProjectsListToApi(next, { silentSuccess: true });
+    toast.success('Project removed');
+  };
+
+  const closeVerifyCertModal = () => {
+    setVerifyCertModal({ open: false, index: null, step: 'method' });
+  };
+
+  const openVerifyCertModal = (index: number) => {
+    const entry = certList[index];
+    setCertVerifyEvidenceDraft({
+      reportingUrl: entry?.reportingUrl?.trim() ?? '',
+      supportingMediaUrl: entry?.supportingMediaUrl?.trim() ?? '',
+    });
+    setVerifyCertModal({
+      open: true,
+      index,
+      step: entry?.certSelfDeclared ? 'evidence' : 'method',
+    });
+  };
+
+  const submitCertVerificationEvidence = () => {
+    const idx = verifyCertModal.index;
+    if (idx == null) return;
+    const reportingUrl = certVerifyEvidenceDraft.reportingUrl.trim();
+    const supportingMediaUrl = certVerifyEvidenceDraft.supportingMediaUrl.trim();
+    if (!reportingUrl && !supportingMediaUrl) {
+      toast.error('Add a credential reporting URL and/or supporting media URL.');
+      return;
+    }
+    setCertList((prev) => {
+      const next = prev.map((c, i) =>
+        i === idx
+          ? {
+              ...c,
+              certSelfDeclared: false,
+              reportingUrl,
+              supportingMediaUrl,
+            }
+          : c,
+      );
+      void syncCertificationsToApi(next, { silentSuccess: true });
+      return next;
+    });
+    closeVerifyCertModal();
+    toast.success('Certification verification details saved.');
+  };
+
+  const requestRemoveCertificate = (index: number) => {
+    setCertRemoveConfirm({ open: true, index });
+  };
+
+  const confirmRemoveCertificate = () => {
+    const index = certRemoveConfirm.index;
+    if (index == null) return;
+    setCertRemoveConfirm({ open: false, index: null });
+    const next = certList.filter((_, i) => i !== index);
+    setCertList(next);
+    void syncCertificationsToApi(next, { silentSuccess: true });
+    toast.success('Certification removed');
   };
 
   const syncProjectsListToApi = async (list: ProjectEntry[], options?: { silentSuccess?: boolean }) => {
@@ -2435,52 +2852,17 @@ export default function VerificationCenter() {
       return;
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
-    if (certEditingIndex != null) {
-      const i = certEditingIndex;
-      const merged = cloneCertificate(certDraft);
-      setCertList((prev) => {
-        const next = prev.map((c, idx) => (idx === i ? merged : c));
-        queueMicrotask(() => void syncCertificationsToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      setCertEditingIndex(null);
-      toast.success('Certification updated');
-    } else {
-      const entry = cloneCertificate({ ...certDraft, certVerificationStatus: 'pending' });
-      setCertList((prev) => {
-        const next = [...prev, entry];
-        queueMicrotask(() => void syncCertificationsToApi(next, { silentSuccess: true }));
-        return next;
-      });
-      toast.success('Certification added');
-    }
-    setCertDraft(emptyCertificate());
-  };
-
-  const beginEditCert = (index: number) => {
-    const c = certList[index];
-    if (!c) return;
-    setCertDraft(cloneCertificate(c));
-    setCertEditingIndex(index);
-  };
-
-  const cancelCertDraft = () => {
-    setCertDraft(emptyCertificate());
-    setCertEditingIndex(null);
-  };
-
-  const removeCertificate = (index: number) => {
-    if (certEditingIndex === index) {
-      setCertDraft(emptyCertificate());
-      setCertEditingIndex(null);
-    } else if (certEditingIndex != null && certEditingIndex > index) {
-      setCertEditingIndex(certEditingIndex - 1);
-    }
-    setCertList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      queueMicrotask(() => void syncCertificationsToApi(next, { silentSuccess: true }));
-      return next;
+    const entry = cloneCertificate({
+      ...certDraft,
+      certVerificationStatus: 'pending',
+      certSelfDeclared: false,
     });
+    const next = [...certList, entry];
+    setCertList(next);
+    void syncCertificationsToApi(next, { silentSuccess: true });
+    toast.success('Certification added');
+    setCertDraft(emptyCertificate());
+    setCertAddFormOpen(false);
   };
 
   const handleCertDraftFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2585,18 +2967,6 @@ export default function VerificationCenter() {
     setFamilyRelationDraft((d) => ({ ...d, ...updates }));
   };
 
-  const cancelFamilyRelationDraft = () => {
-    setFamilyRelationDraft(emptyFamilyRelation());
-    setFamilyRelationEditingIndex(null);
-  };
-
-  const beginEditFamilyRelation = (index: number) => {
-    const r = relationsList[index];
-    if (!r) return;
-    setFamilyRelationDraft({ relationType: r.relationType, fullName: r.fullName });
-    setFamilyRelationEditingIndex(index);
-  };
-
   const commitFamilyRelationDraft = () => {
     const draftFe = familyRelationDraftFieldErrors(familyRelationDraft);
     if (Object.keys(draftFe).length) {
@@ -2605,11 +2975,7 @@ export default function VerificationCenter() {
       return;
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^fam_draft_/));
-    const i = familyRelationEditingIndex;
-    const next =
-      i != null
-        ? relationsList.map((r, idx) => (idx === i ? { ...familyRelationDraft } : r))
-        : [...relationsList, { ...familyRelationDraft }];
+    const next = [...relationsList, { ...familyRelationDraft }];
     const famFe = familyFieldErrors(maritalStatus, spouseName, next);
     if (Object.keys(famFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^fam/), ...famFe }));
@@ -2617,26 +2983,16 @@ export default function VerificationCenter() {
       return;
     }
     setRelationsList(next);
-    setFamilyRelationEditingIndex(null);
     setFamilyRelationDraft(emptyFamilyRelation());
-    toast.success(i != null ? 'Relation updated' : 'Relation added');
+    setFamilyRelationAddFormOpen(false);
+    toast.success('Relation added');
     void syncFamilyToApi(maritalStatus, spouseName, next, { silentSuccess: true, exitEditMode: true });
   };
 
   const removeFamilyRelation = (index: number) => {
-    if (familyRelationEditingIndex === index) {
-      setFamilyRelationDraft(emptyFamilyRelation());
-      setFamilyRelationEditingIndex(null);
-    } else if (familyRelationEditingIndex != null && familyRelationEditingIndex > index) {
-      setFamilyRelationEditingIndex(familyRelationEditingIndex - 1);
-    }
-    setRelationsList((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      queueMicrotask(() =>
-        void syncFamilyToApi(maritalStatus, spouseName, next, { silentSuccess: true, exitEditMode: true }),
-      );
-      return next;
-    });
+    const next = relationsList.filter((_, i) => i !== index);
+    setRelationsList(next);
+    void syncFamilyToApi(maritalStatus, spouseName, next, { silentSuccess: true, exitEditMode: true });
   };
 
   const clearFormError = (key: string) => {
@@ -2653,6 +3009,14 @@ export default function VerificationCenter() {
   const showLocationAddForm = locationAddFormOpen || hasLocationDraftFieldErrors;
   const hasEducationDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('edu_draft_'));
   const showEducationAddForm = educationAddFormOpen || hasEducationDraftFieldErrors;
+  const hasWorkDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('work_draft_'));
+  const showWorkAddForm = workAddFormOpen || hasWorkDraftFieldErrors;
+  const hasProjectDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('proj_draft_'));
+  const showProjectAddForm = projectAddFormOpen || hasProjectDraftFieldErrors;
+  const hasCertDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('cert_draft_'));
+  const showCertificationAddForm = certAddFormOpen || hasCertDraftFieldErrors;
+  const hasFamilyRelationDraftFieldErrors = Object.keys(fe).some((k) => k.startsWith('fam_draft_'));
+  const showFamilyRelationAddForm = familyRelationAddFormOpen || hasFamilyRelationDraftFieldErrors;
   const errB3 = (k: string) => (fe[k] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-300');
   const errB2 = (k: string) => (fe[k] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-200');
 
@@ -3657,11 +4021,6 @@ export default function VerificationCenter() {
                         </div>
                         <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
                           <div className="flex flex-wrap gap-1.5 justify-end">
-                            {loc.isDefault && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                                Default
-                              </span>
-                            )}
                             {status === 'pending' && (
                               <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
                                 Pending
@@ -3695,14 +4054,18 @@ export default function VerificationCenter() {
 
                       <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          {locationsList.length > 1 && !loc.isDefault && (
+                          {loc.isDefault ? (
+                            <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+                              Default
+                            </span>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => setDefaultLocation(index)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                              onClick={() => markLocationAsDefault(index)}
+                              disabled={saving}
+                              className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
                             >
-                              <HiStar className="w-4 h-4 text-gray-500" />
-                              Set as Default
+                              Mark as default
                             </button>
                           )}
                           {status === 'pending' && (
@@ -3742,11 +4105,11 @@ export default function VerificationCenter() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeLocation(index)}
-                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                          onClick={() => requestRemoveLocation(index)}
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label="Remove location"
                         >
-                          <HiX className="w-4 h-4" />
-                          Remove
+                          <HiTrash className="w-5 h-5" />
                         </button>
                       </div>
                       {uploadingLocationIndex === index && (
@@ -3878,6 +4241,8 @@ export default function VerificationCenter() {
               <div className="space-y-4">
                 {educationEntriesList.map((entry, index) => {
                   const status = entry.eduVerificationStatus ?? 'pending';
+                  const isSelfDeclaredEducation =
+                    entry.verificationMethod === 'self_declaration' && status !== 'verified';
                   const title = entry.institutionName?.trim() || 'Education';
                   const subtitle = formatEducationCardSubtitle(entry);
                   const eduRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`edu_${index}_`));
@@ -3903,9 +4268,14 @@ export default function VerificationCenter() {
                         </div>
                         <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
                           <div className="flex flex-wrap gap-1.5 justify-end">
-                            {status === 'pending' && (
+                            {status === 'pending' && !isSelfDeclaredEducation && (
                               <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
                                 Pending
+                              </span>
+                            )}
+                            {isSelfDeclaredEducation && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
+                                Self Declared
                               </span>
                             )}
                             {status === 'verified' && (
@@ -3914,26 +4284,37 @@ export default function VerificationCenter() {
                               </span>
                             )}
                           </div>
+                          {isSelfDeclaredEducation && (
+                            <p className="text-xs text-gray-400">via Self Declaration</p>
+                          )}
                         </div>
                       </div>
 
+                      {isSelfDeclaredEducation && (
+                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
+                          <span>
+                            Self Declaration — limited network access. Upgrade by verifying with a document.
+                          </span>
+                        </div>
+                      )}
+
                       <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          {status === 'pending' && (
+                          {isSelfDeclaredEducation && (
                             <button
                               type="button"
-                              onClick={() => {
-                                setEducationEntriesList((prev) => {
-                                  const next = prev.map((e, i) =>
-                                    i === index ? { ...e, eduVerificationStatus: 'verified' as const } : e,
-                                  );
-                                  queueMicrotask(() =>
-                                    void syncEducationEntriesToApi(next, { silentSuccess: true }),
-                                  );
-                                  return next;
-                                });
-                                toast.success('Verification submitted for this education.');
-                              }}
+                              onClick={() => setVerifyEducationModal({ open: true, index })}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Upgrade Verification
+                            </button>
+                          )}
+                          {status === 'pending' && !isSelfDeclaredEducation && (
+                            <button
+                              type="button"
+                              onClick={() => setVerifyEducationModal({ open: true, index })}
                               className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
                             >
                               <HiShieldCheck className="w-4 h-4" />
@@ -3957,11 +4338,11 @@ export default function VerificationCenter() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeEducationEntry(index)}
-                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                          onClick={() => requestRemoveEducationEntry(index)}
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label="Remove education"
                         >
-                          <HiX className="w-4 h-4" />
-                          Remove
+                          <HiTrash className="w-5 h-5" />
                         </button>
                       </div>
                     </div>
@@ -4352,7 +4733,7 @@ export default function VerificationCenter() {
                                 Self Declared
                               </span>
                             )}
-                            {status === 'pending' && (
+                            {status === 'pending' && !entry.selfDeclared && (
                               <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
                                 Pending
                               </span>
@@ -4364,7 +4745,7 @@ export default function VerificationCenter() {
                             )}
                           </div>
                           {entry.selfDeclared && (
-                            <p className="text-xs text-gray-400">Self declared — employer verification skipped</p>
+                            <p className="text-xs text-gray-400">via Self Declaration</p>
                           )}
                         </div>
                       </div>
@@ -4380,19 +4761,20 @@ export default function VerificationCenter() {
 
                       <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          {status === 'pending' && (
+                          {status === 'pending' && entry.selfDeclared && (
                             <button
                               type="button"
-                              onClick={() => {
-                                setWorkEntriesList((prev) => {
-                                  const next = prev.map((e, i) =>
-                                    i === index ? { ...e, workVerificationStatus: 'verified' as const } : e,
-                                  );
-                                  queueMicrotask(() => void syncWorkEntriesToApi(next, { silentSuccess: true }));
-                                  return next;
-                                });
-                                toast.success('Verification submitted for this role.');
-                              }}
+                              onClick={() => openVerifyWorkModal(index)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Upgrade Verification
+                            </button>
+                          )}
+                          {status === 'pending' && !entry.selfDeclared && (
+                            <button
+                              type="button"
+                              onClick={() => openVerifyWorkModal(index)}
                               className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
                             >
                               <HiShieldCheck className="w-4 h-4" />
@@ -4416,11 +4798,11 @@ export default function VerificationCenter() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeWorkEntry(index)}
-                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                          onClick={() => requestRemoveWorkEntry(index)}
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label="Remove work experience"
                         >
-                          <HiX className="w-4 h-4" />
-                          Remove
+                          <HiTrash className="w-5 h-5" />
                         </button>
                       </div>
                     </div>
@@ -4428,10 +4810,24 @@ export default function VerificationCenter() {
                 })}
               </div>
 
+              {showWorkAddForm ? (
               <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex items-center gap-2">
-                  <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0" />
-                  <h3 className="text-base font-semibold text-gray-900">Add Work Experience</h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0" />
+                    <h3 className="text-base font-semibold text-gray-900">Add new work experience</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkAddFormOpen(false);
+                      setWorkDraft(emptyWork());
+                      setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
+                    }}
+                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Cancel
+                  </button>
                 </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -4761,6 +5157,34 @@ export default function VerificationCenter() {
                     {workSaving ? 'Saving...' : 'Add Work Experience'}
                   </button>
               </div>
+              ) : workEntriesList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiBriefcase className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No work experience added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Add your roles and employers to complete this step.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setWorkAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new work experience
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setWorkAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                >
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new work experience
+                </button>
+              )}
 
             </div>
           )}
@@ -4781,46 +5205,142 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-                {verificationStatus.projects?.completed &&
-                  !verificationStatus.projects?.verified &&
-                  !isSectionEditable('projects') && (
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, projects: true }))}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                    >
-                      <HiPencil className="w-4 h-4" />
-                      Edit
-                    </button>
-                  )}
               </div>
 
               {fe.proj_list && <p className="text-sm text-red-600">{fe.proj_list}</p>}
 
-              {isSectionEditable('projects') && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500">
-                        <HiFolder className="h-5 w-5 text-white" />
+              <div className="space-y-3">
+                {projectsList.map((entry, index) => {
+                  const status = entry.projectVerificationStatus ?? 'pending';
+                  const isSelfDeclaredProject =
+                    !!entry.projectSelfDeclared && status !== 'verified';
+                  const projRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`proj_${index}_`));
+                  return (
+                    <div
+                      key={entry.id ?? `proj-${index}`}
+                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
+                    >
+                      {projRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {projRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3 min-w-0">
+                          <HiFolder className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-900 truncate">{entry.title}</p>
+                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">
+                              {formatProjectCardSubtitle(entry)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                          <div className="flex flex-wrap gap-1.5 justify-end">
+                            {isSelfDeclaredProject && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
+                                Self Declared
+                              </span>
+                            )}
+                            {status === 'pending' && !isSelfDeclaredProject && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                                Pending
+                              </span>
+                            )}
+                            {status === 'verified' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          {isSelfDeclaredProject && (
+                            <p className="text-xs text-gray-400">via Self Declaration</p>
+                          )}
+                        </div>
                       </div>
-                      <h3 className="text-base font-semibold text-gray-900">Add Project</h3>
+
+                      {isSelfDeclaredProject && (
+                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
+                          <span>
+                            Self Declaration — limited network access. Upgrade by adding a project link or media
+                            URL.
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {status === 'pending' && isSelfDeclaredProject && (
+                            <button
+                              type="button"
+                              onClick={() => openVerifyProjectModal(index)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Upgrade Verification
+                            </button>
+                          )}
+                          {status === 'pending' && !isSelfDeclaredProject && (
+                            <button
+                              type="button"
+                              onClick={() => openVerifyProjectModal(index)}
+                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Verify
+                            </button>
+                          )}
+                          {entry.projectLink?.trim() && (
+                            <a
+                              href={
+                                entry.projectLink.startsWith('http')
+                                  ? entry.projectLink
+                                  : `https://${entry.projectLink}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            >
+                              Project link
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => requestRemoveProjectEntry(index)}
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label="Remove project"
+                        >
+                          <HiTrash className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
-                    {projectEditingIndex != null && (
-                      <button
-                        type="button"
-                        onClick={cancelProjectDraft}
-                        className="text-sm font-medium text-gray-600 hover:text-gray-800"
-                      >
-                        Cancel edit
-                      </button>
-                    )}
+                  );
+                })}
+              </div>
+
+              {showProjectAddForm ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <HiFolder className="w-5 h-5 text-brand-600 shrink-0" />
+                      <h3 className="text-base font-semibold text-gray-900">Add new project</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProjectAddFormOpen(false);
+                        setProjectDraft(emptyProject());
+                        setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
+                      }}
+                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                  {projectEditingIndex != null && (
-                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      Editing an existing project. Use &quot;Add Project&quot; below to apply; it syncs automatically.
-                    </p>
-                  )}
                   <div className="grid grid-cols-1 gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-800 mb-1">Project Title</label>
@@ -4950,97 +5470,37 @@ export default function VerificationCenter() {
                     className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
                     <HiPlus className="w-4 h-4" />
-                    {projectSaving
-                      ? 'Saving...'
-                      : projectEditingIndex != null
-                        ? 'Update project'
-                        : 'Add Project'}
+                    {projectSaving ? 'Saving...' : 'Add Project'}
                   </button>
                 </div>
+              ) : projectsList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiFolder className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No projects added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Showcase your work by adding projects you have contributed to.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setProjectAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new project
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setProjectAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                >
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new project
+                </button>
               )}
-
-              <div className="space-y-3">
-                {projectsList.map((entry, index) => {
-                  const isEditing = projectEditingIndex === index;
-                  const projRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`proj_${index}_`));
-                  return (
-                    <div
-                      key={entry.id ?? `proj-${index}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 ${
-                        isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
-                      }`}
-                    >
-                      {projRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
-                          {projRowErrs.map(([k, msg]) => (
-                            <li key={k}>{msg}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                      <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-                          <HiFolder className="h-5 w-5 text-brand-600" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-gray-900 truncate">{entry.title}</p>
-                          <p className="mt-0.5 text-sm text-gray-500 line-clamp-2">
-                            {formatProjectCardSubtitle(entry)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
-                        {isSectionEditable('projects') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => beginEditProjectEntry(index)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                            >
-                              <HiPencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeProjectEntry(index)}
-                              className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                            >
-                              <HiX className="h-4 w-4" />
-                              Remove
-                            </button>
-                          </>
-                        )}
-                        {entry.projectVerificationStatus === 'verified' ? (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                            <HiCheckCircle className="h-4 w-4" />
-                            Verified
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProjectsList((prev) => {
-                                const next = prev.map((p, i) =>
-                                  i === index ? { ...p, projectVerificationStatus: 'verified' as const } : p,
-                                );
-                                queueMicrotask(() => void syncProjectsListToApi(next, { silentSuccess: true }));
-                                return next;
-                              });
-                              toast.success('Verification submitted for this project.');
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                          >
-                            <HiShieldCheck className="h-4 w-4" />
-                            Verify
-                          </button>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
 
             </div>
           )}
@@ -5061,44 +5521,141 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-                {verificationStatus.certification?.completed &&
-                  !verificationStatus.certification?.verified &&
-                  !isSectionEditable('certification') && (
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, certification: true }))}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 hover:bg-brand-50 rounded-lg transition-colors"
-                    >
-                      <HiPencil className="w-4 h-4" />
-                      Edit
-                    </button>
-                  )}
               </div>
 
               {fe.cert_list && <p className="text-sm text-red-600">{fe.cert_list}</p>}
 
-              {isSectionEditable('certification') && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <HiBadgeCheck className="w-6 h-6 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add Certification</h3>
+              <div className="space-y-3">
+                {certList.map((cert, index) => {
+                  const status = cert.certVerificationStatus ?? 'pending';
+                  const isSelfDeclaredCert = !!cert.certSelfDeclared && status !== 'verified';
+                  const certRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`cert_${index}_`));
+                  return (
+                    <div
+                      key={`cert-${index}-${cert.name}`}
+                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
+                    >
+                      {certRowErrs.length > 0 && (
+                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                          {certRowErrs.map(([k, msg]) => (
+                            <li key={k}>{msg}</li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex gap-3 min-w-0">
+                          <HiBadgeCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-900 truncate">{cert.name}</p>
+                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">
+                              {formatCertificateCardSubtitle(cert)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                          <div className="flex flex-wrap gap-1.5 justify-end">
+                            {isSelfDeclaredCert && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
+                                Self Declared
+                              </span>
+                            )}
+                            {status === 'pending' && !isSelfDeclaredCert && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                                Pending
+                              </span>
+                            )}
+                            {status === 'verified' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          {isSelfDeclaredCert && (
+                            <p className="text-xs text-gray-400">via Self Declaration</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {isSelfDeclaredCert && (
+                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
+                          <span>
+                            Self Declaration — limited network access. Upgrade by adding a credential reporting URL
+                            or supporting media.
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {status === 'pending' && isSelfDeclaredCert && (
+                            <button
+                              type="button"
+                              onClick={() => openVerifyCertModal(index)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Upgrade Verification
+                            </button>
+                          )}
+                          {status === 'pending' && !isSelfDeclaredCert && (
+                            <button
+                              type="button"
+                              onClick={() => openVerifyCertModal(index)}
+                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                            >
+                              <HiShieldCheck className="w-4 h-4" />
+                              Verify
+                            </button>
+                          )}
+                          {cert.supportingMediaUrl?.trim() && (
+                            <a
+                              href={
+                                cert.supportingMediaUrl.startsWith('http')
+                                  ? cert.supportingMediaUrl
+                                  : `${api.defaults.baseURL || ''}${cert.supportingMediaUrl}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            >
+                              View media
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => requestRemoveCertificate(index)}
+                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          aria-label="Remove certification"
+                        >
+                          <HiTrash className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
-                    {certEditingIndex != null && (
-                      <button
-                        type="button"
-                        onClick={cancelCertDraft}
-                        className="text-sm font-medium text-gray-600 hover:text-gray-800"
-                      >
-                        Cancel edit
-                      </button>
-                    )}
+                  );
+                })}
+              </div>
+
+              {showCertificationAddForm ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <HiBadgeCheck className="w-5 h-5 text-brand-600 shrink-0" />
+                      <h3 className="text-base font-semibold text-gray-900">Add new certification</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCertAddFormOpen(false);
+                        setCertDraft(emptyCertificate());
+                        setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
+                      }}
+                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                  {certEditingIndex != null && (
-                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      Editing an existing certification. Use &quot;Add Data&quot; to apply; it syncs automatically.
-                    </p>
-                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Name of certificate</label>
@@ -5234,107 +5791,37 @@ export default function VerificationCenter() {
                     className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
                     <HiPlus className="w-4 h-4" />
-                    {saving ? 'Saving...' : certEditingIndex != null ? 'Update entry' : 'Add Data'}
+                    {saving ? 'Saving...' : 'Add Certification'}
                   </button>
                 </div>
+              ) : certList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiBadgeCheck className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No certifications added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Add certificates and credentials to strengthen your profile.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setCertAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new certification
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCertAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                >
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new certification
+                </button>
               )}
-
-              <div className="space-y-3">
-                {certList.map((cert, index) => {
-                  const isEditing = certEditingIndex === index;
-                  const certRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`cert_${index}_`));
-                  return (
-                    <div
-                      key={`cert-${index}-${cert.name}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 ${
-                        isEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
-                      }`}
-                    >
-                      {certRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
-                          {certRowErrs.map(([k, msg]) => (
-                            <li key={k}>{msg}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                      <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-                          <HiBadgeCheck className="h-5 w-5 text-brand-600" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-gray-900 truncate">{cert.name}</p>
-                          <p className="mt-0.5 text-sm text-gray-500 line-clamp-2">
-                            {formatCertificateCardSubtitle(cert)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
-                        {isSectionEditable('certification') && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => beginEditCert(index)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                            >
-                              <HiPencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => removeCertificate(index)}
-                              className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                            >
-                              <HiX className="h-4 w-4" />
-                              Remove
-                            </button>
-                          </>
-                        )}
-                        {cert.supportingMediaUrl && (
-                          <a
-                            href={
-                              cert.supportingMediaUrl.startsWith('http')
-                                ? cert.supportingMediaUrl
-                                : `${api.defaults.baseURL || ''}${cert.supportingMediaUrl}`
-                            }
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
-                          >
-                            Media
-                          </a>
-                        )}
-                        {cert.certVerificationStatus === 'verified' ? (
-                          <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-                            <HiCheckCircle className="h-4 w-4" />
-                            Verified
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCertList((prev) => {
-                                const next = prev.map((c, i) =>
-                                  i === index ? { ...c, certVerificationStatus: 'verified' as const } : c,
-                                );
-                                queueMicrotask(() => void syncCertificationsToApi(next, { silentSuccess: true }));
-                                return next;
-                              });
-                              toast.success('Verification submitted for this certification.');
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                          >
-                            <HiShieldCheck className="h-4 w-4" />
-                            Verify
-                          </button>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
 
             </div>
           )}
@@ -5355,169 +5842,75 @@ export default function VerificationCenter() {
                     Not completed
                   </span>
                 )}
-                {verificationStatus.family?.completed &&
-                  !verificationStatus.family?.verified &&
-                  !isSectionEditable('family') && (
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, family: true }))}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-50 hover:text-brand-700"
-                    >
-                      <HiPencil className="h-4 w-4" />
-                      Edit
-                    </button>
-                  )}
               </div>
 
-              {isSectionEditable('family') && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-6 shadow-sm">
-                  <div className="flex items-center gap-2 border-b border-gray-100 pb-4">
-                    <HiHeart className="h-5 w-5 shrink-0 text-brand-600" aria-hidden />
-                    <h2 className="text-lg font-semibold text-gray-900">Family &amp; Relationship</h2>
-                  </div>
+              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-6 shadow-sm">
+                <div className="flex items-center gap-2 border-b border-gray-100 pb-4">
+                  <HiHeart className="h-5 w-5 shrink-0 text-brand-600" aria-hidden />
+                  <h2 className="text-lg font-semibold text-gray-900">Family &amp; Relationship</h2>
+                </div>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Marital Status</label>
-                    <div className="relative">
-                      <select
-                        value={maritalStatus}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setMaritalStatus(v);
-                          clearFormError('fam_spouseName');
-                          setRelationsList((relList) => {
-                            queueMicrotask(() =>
-                              void syncFamilyToApi(v, spouseName, relList, { silentSuccess: true }),
-                            );
-                            return relList;
-                          });
-                        }}
-                        className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
-                      >
-                        <option value="">Select</option>
-                        {MARITAL_STATUS_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                      <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    </div>
-                  </div>
-
-                  {maritalStatus === 'married' && (
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-800">Spouse name</label>
-                      <input
-                        type="text"
-                        value={spouseName}
-                        onChange={(e) => {
-                          setSpouseName(e.target.value);
-                          clearFormError('fam_spouseName');
-                        }}
-                        onBlur={(e) => {
-                          setRelationsList((relList) => {
-                            queueMicrotask(() =>
-                              void syncFamilyToApi(maritalStatus, e.target.value, relList, {
-                                silentSuccess: true,
-                              }),
-                            );
-                            return relList;
-                          });
-                        }}
-                        className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_spouseName')}`}
-                        placeholder="Full name"
-                      />
-                      {fe.fam_spouseName ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.fam_spouseName}</p>
-                      ) : null}
-                    </div>
-                  )}
-
-                  <div className="border-t border-gray-100 pt-6 space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <HiUsers className="w-5 h-5 shrink-0 text-brand-600" aria-hidden />
-                        <h3 className="text-base font-semibold text-gray-900">Add family relation</h3>
-                      </div>
-                      {familyRelationEditingIndex != null && (
-                        <button
-                          type="button"
-                          onClick={cancelFamilyRelationDraft}
-                          className="text-sm font-medium text-gray-600 hover:text-gray-800"
-                        >
-                          Cancel edit
-                        </button>
-                      )}
-                    </div>
-                    {familyRelationEditingIndex != null && (
-                      <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                        You are editing an existing relation. Use &quot;Add Data&quot; to apply changes; they sync
-                        automatically.
-                      </p>
-                    )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Relation name</label>
-                        <input
-                          type="text"
-                          value={familyRelationDraft.fullName}
-                          onChange={(e) => {
-                            updateFamilyRelationDraft({ fullName: e.target.value });
-                            clearFormError('fam_draft_name');
-                          }}
-                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('fam_draft_name')}`}
-                          placeholder="Full name"
-                        />
-                        {fe.fam_draft_name ? (
-                          <p className="mt-1 text-sm text-red-600">{fe.fam_draft_name}</p>
-                        ) : null}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Relationship type</label>
-                        <div className="relative">
-                          <select
-                            value={familyRelationDraft.relationType}
-                            onChange={(e) => {
-                              updateFamilyRelationDraft({ relationType: e.target.value });
-                              clearFormError('fam_draft_type');
-                            }}
-                            className={`w-full appearance-none rounded-lg border bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_draft_type')}`}
-                          >
-                            <option value="">Select</option>
-                            {RELATION_TYPE_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                          <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                        </div>
-                        {fe.fam_draft_type ? (
-                          <p className="mt-1 text-sm text-red-600">{fe.fam_draft_type}</p>
-                        ) : null}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={commitFamilyRelationDraft}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-800">Marital Status</label>
+                  <div className="relative">
+                    <select
+                      value={maritalStatus}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setMaritalStatus(v);
+                        clearFormError('fam_spouseName');
+                        setRelationsList((relList) => {
+                          queueMicrotask(() =>
+                            void syncFamilyToApi(v, spouseName, relList, { silentSuccess: true }),
+                          );
+                          return relList;
+                        });
+                      }}
+                      className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
                     >
-                      <HiPlus className="w-4 h-4" />
-                      {saving
-                        ? 'Saving...'
-                        : familyRelationEditingIndex != null
-                          ? 'Update entry'
-                          : 'Add Data'}
-                    </button>
+                      <option value="">Select</option>
+                      {MARITAL_STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   </div>
                 </div>
-              )}
+
+                {maritalStatus === 'married' && (
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Spouse name</label>
+                    <input
+                      type="text"
+                      value={spouseName}
+                      onChange={(e) => {
+                        setSpouseName(e.target.value);
+                        clearFormError('fam_spouseName');
+                      }}
+                      onBlur={(e) => {
+                        setRelationsList((relList) => {
+                          queueMicrotask(() =>
+                            void syncFamilyToApi(maritalStatus, e.target.value, relList, {
+                              silentSuccess: true,
+                            }),
+                          );
+                          return relList;
+                        });
+                      }}
+                      className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_spouseName')}`}
+                      placeholder="Full name"
+                    />
+                    {fe.fam_spouseName ? (
+                      <p className="mt-1 text-sm text-red-600">{fe.fam_spouseName}</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
 
               <div className="space-y-3">
                 {relationsList.map((rel, index) => {
-                  const isRowEditing = familyRelationEditingIndex === index;
                   const typeLabel =
                     RELATION_TYPE_OPTIONS.find((o) => o.value === rel.relationType)?.label ||
                     rel.relationType ||
@@ -5527,9 +5920,7 @@ export default function VerificationCenter() {
                   return (
                     <div
                       key={`fam-${index}-${rel.fullName}-${rel.relationType}`}
-                      className={`flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${
-                        isRowEditing ? 'ring-2 ring-brand-400 ring-offset-2' : ''
-                      }`}
+                      className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                     >
                       {(famRelTypeErr || famRelNameErr) && (
                         <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5 w-full order-first">
@@ -5545,30 +5936,120 @@ export default function VerificationCenter() {
                           <p className="mt-0.5 text-sm text-gray-500">{typeLabel}</p>
                         </div>
                       </div>
-                      {isSectionEditable('family') && (
-                        <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => beginEditFamilyRelation(index)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                          >
-                            <HiPencil className="h-4 w-4" />
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeFamilyRelation(index)}
-                            className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
-                          >
-                            <HiX className="h-4 w-4" />
-                            Remove
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => removeFamilyRelation(index)}
+                          className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-700"
+                        >
+                          <HiX className="h-4 w-4" />
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
+
+              {showFamilyRelationAddForm ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <HiUsers className="w-5 h-5 shrink-0 text-brand-600" aria-hidden />
+                      <h3 className="text-base font-semibold text-gray-900">Add new family relation</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFamilyRelationAddFormOpen(false);
+                        setFamilyRelationDraft(emptyFamilyRelation());
+                        setFormFieldErrors((p) => omitKeysMatching(p, /^fam_draft_/));
+                      }}
+                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Relation name</label>
+                      <input
+                        type="text"
+                        value={familyRelationDraft.fullName}
+                        onChange={(e) => {
+                          updateFamilyRelationDraft({ fullName: e.target.value });
+                          clearFormError('fam_draft_name');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('fam_draft_name')}`}
+                        placeholder="Full name"
+                      />
+                      {fe.fam_draft_name ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.fam_draft_name}</p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Relationship type</label>
+                      <div className="relative">
+                        <select
+                          value={familyRelationDraft.relationType}
+                          onChange={(e) => {
+                            updateFamilyRelationDraft({ relationType: e.target.value });
+                            clearFormError('fam_draft_type');
+                          }}
+                          className={`w-full appearance-none rounded-lg border bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_draft_type')}`}
+                        >
+                          <option value="">Select</option>
+                          {RELATION_TYPE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      </div>
+                      {fe.fam_draft_type ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.fam_draft_type}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={commitFamilyRelationDraft}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                  >
+                    <HiPlus className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Add relation'}
+                  </button>
+                </div>
+              ) : relationsList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiUsers className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No family relations added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Add parents, children, or other relations to complete this step.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setFamilyRelationAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new family relation
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setFamilyRelationAddFormOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                >
+                  <HiPlus className="w-4 h-4 text-brand-600" />
+                  Add new family relation
+                </button>
+              )}
             </div>
           )}
 
@@ -5956,6 +6437,631 @@ export default function VerificationCenter() {
         onChange={handleLocationVerifyFileInputChange}
       />
 
+      <input
+        ref={educationVerifyFileInputRef}
+        type="file"
+        accept=".pdf,image/jpeg,image/png,image/webp"
+        className="hidden"
+        aria-hidden
+        onChange={handleEducationVerifyFileInputChange}
+      />
+
+      {verifyEducationModal.open && verifyEducationModal.index != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          onClick={closeVerifyEducationModal}
+        >
+          <div
+            className="bg-white rounded-2xl border border-gray-100 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 tracking-tight">Verify Education</h3>
+                <p className="text-sm text-gray-500 mt-1.5">Choose a verification method.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVerifyEducationModal}
+                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = verifyEducationModal.index;
+                  if (idx == null) return;
+                  setSelfDeclarationFlow({ open: true, kind: 'education', educationIndex: idx });
+                }}
+                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors"
+              >
+                <HiDocumentText className="w-6 h-6 text-teal-600 shrink-0" />
+                <div>
+                  <p className="font-semibold text-gray-900">Self Declaration</p>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Temporary verification — limited network access
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => triggerEducationVerifyDocumentUpload()}
+                disabled={uploadingEducationIndex !== null}
+                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors disabled:opacity-50"
+              >
+                <HiUpload className="w-6 h-6 text-teal-600 shrink-0" />
+                <div>
+                  <p className="font-semibold text-gray-900">Upload Document</p>
+                  <p className="text-sm text-gray-500 mt-0.5">Degree certificate, transcript, etc.</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = verifyEducationModal.index;
+                  if (idx == null) return;
+                  applyEducationVerificationMethod(idx, 'student_email');
+                }}
+                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors"
+              >
+                <HiMail className="w-6 h-6 text-teal-600 shrink-0" />
+                <div>
+                  <p className="font-semibold text-gray-900">Student Email</p>
+                  <p className="text-sm text-gray-500 mt-0.5">Verify with your institution email</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {educationRemoveConfirm.open && educationRemoveConfirm.index != null && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setEducationRemoveConfirm({ open: false, index: null })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Remove this education?</h3>
+            <p className="text-sm text-gray-600">
+              This will permanently delete this education entry from your profile. You can add it again
+              later if needed.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEducationRemoveConfirm({ open: false, index: null })}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRemoveEducationEntry()}
+                disabled={educationSaving}
+                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {educationSaving ? 'Removing…' : 'Remove education'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {locationRemoveConfirm.open && locationRemoveConfirm.index != null && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setLocationRemoveConfirm({ open: false, index: null })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Remove this location?</h3>
+            <p className="text-sm text-gray-600">
+              This will remove this address from your profile. You can add a location again at any time.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setLocationRemoveConfirm({ open: false, index: null })}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmRemoveLocation()}
+                disabled={saving}
+                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {saving ? 'Removing…' : 'Remove location'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {workRemoveConfirm.open && workRemoveConfirm.index != null && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setWorkRemoveConfirm({ open: false, index: null })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Remove this work experience?</h3>
+            <p className="text-sm text-gray-600">
+              This will permanently delete this role from your profile. You can add it again later if needed.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setWorkRemoveConfirm({ open: false, index: null })}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRemoveWorkEntry()}
+                disabled={workSaving}
+                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {workSaving ? 'Removing…' : 'Remove work experience'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {projectRemoveConfirm.open && projectRemoveConfirm.index != null && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setProjectRemoveConfirm({ open: false, index: null })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Remove this project?</h3>
+            <p className="text-sm text-gray-600">
+              This will permanently delete this project from your profile. You can add it again later if needed.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setProjectRemoveConfirm({ open: false, index: null })}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmRemoveProjectEntry()}
+                disabled={projectSaving}
+                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {projectSaving ? 'Removing…' : 'Remove project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {certRemoveConfirm.open && certRemoveConfirm.index != null && (
+        <div
+          className="fixed inset-0 z-[61] flex items-center justify-center p-4 bg-black/50"
+          onClick={() => setCertRemoveConfirm({ open: false, index: null })}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Remove this certification?</h3>
+            <p className="text-sm text-gray-600">
+              This will remove this certification from your profile. You can add it again later if needed.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCertRemoveConfirm({ open: false, index: null })}
+                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmRemoveCertificate()}
+                disabled={saving}
+                className="inline-flex items-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {saving ? 'Removing…' : 'Remove certification'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {verifyProjectModal.open && verifyProjectModal.index != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          onClick={closeVerifyProjectModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Verify Project</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {verifyProjectModal.step === 'method'
+                    ? 'Choose how you would like to verify this project.'
+                    : 'Add a public project link and/or media URL for reviewers.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVerifyProjectModal}
+                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {verifyProjectModal.step === 'evidence' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = verifyProjectModal.index;
+                  const entry = idx != null ? projectsList[idx] : undefined;
+                  if (entry?.projectSelfDeclared) {
+                    closeVerifyProjectModal();
+                  } else {
+                    setVerifyProjectModal((m) => ({ ...m, step: 'method' }));
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                <HiArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+            )}
+
+            {verifyProjectModal.step === 'method' && (
+              <div className="space-y-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idx = verifyProjectModal.index;
+                    if (idx == null) return;
+                    closeVerifyProjectModal();
+                    setSelfDeclarationFlow({ open: true, kind: 'project_card', projectIndex: idx });
+                  }}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Self Declaration</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Temporary verification — limited network access
+                    </p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVerifyProjectModal((m) => ({ ...m, step: 'evidence' }))}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiUpload className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Project link or media</p>
+                    <p className="text-sm text-gray-500 mt-0.5">Share a URL to the live project or supporting media</p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {verifyProjectModal.step === 'evidence' && (
+              <div className="space-y-4 pt-1">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Project link</label>
+                  <input
+                    type="url"
+                    value={projectVerifyEvidenceDraft.projectLink}
+                    onChange={(e) =>
+                      setProjectVerifyEvidenceDraft((d) => ({ ...d, projectLink: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Media URL (optional)</label>
+                  <input
+                    type="url"
+                    value={projectVerifyEvidenceDraft.mediaUrl}
+                    onChange={(e) =>
+                      setProjectVerifyEvidenceDraft((d) => ({ ...d, mediaUrl: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="Image or video URL"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => submitProjectVerificationEvidence()}
+                  disabled={projectSaving}
+                  className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  Save and submit for verification
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {verifyCertModal.open && verifyCertModal.index != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          onClick={closeVerifyCertModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Verify Certification</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {verifyCertModal.step === 'method'
+                    ? 'Choose how you would like to verify this credential.'
+                    : 'Add a credential registry URL and/or supporting media for reviewers.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVerifyCertModal}
+                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {verifyCertModal.step === 'evidence' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = verifyCertModal.index;
+                  const entry = idx != null ? certList[idx] : undefined;
+                  if (entry?.certSelfDeclared) {
+                    closeVerifyCertModal();
+                  } else {
+                    setVerifyCertModal((m) => ({ ...m, step: 'method' }));
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                <HiArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+            )}
+
+            {verifyCertModal.step === 'method' && (
+              <div className="space-y-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idx = verifyCertModal.index;
+                    if (idx == null) return;
+                    closeVerifyCertModal();
+                    setSelfDeclarationFlow({ open: true, kind: 'cert_card', certIndex: idx });
+                  }}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Self Declaration</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Temporary verification — limited network access
+                    </p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVerifyCertModal((m) => ({ ...m, step: 'evidence' }))}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiUpload className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Credential evidence</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Reporting URL (e.g. badge provider) and/or certificate file URL
+                    </p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {verifyCertModal.step === 'evidence' && (
+              <div className="space-y-4 pt-1">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Credential reporting URL</label>
+                  <input
+                    type="url"
+                    value={certVerifyEvidenceDraft.reportingUrl}
+                    onChange={(e) =>
+                      setCertVerifyEvidenceDraft((d) => ({ ...d, reportingUrl: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Supporting media URL (optional)
+                  </label>
+                  <input
+                    type="url"
+                    value={certVerifyEvidenceDraft.supportingMediaUrl}
+                    onChange={(e) =>
+                      setCertVerifyEvidenceDraft((d) => ({ ...d, supportingMediaUrl: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="PDF or image URL"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => submitCertVerificationEvidence()}
+                  disabled={saving}
+                  className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  Save and submit for verification
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {verifyWorkModal.open && verifyWorkModal.index != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          onClick={closeVerifyWorkModal}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Verify Work Experience</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {verifyWorkModal.step === 'method'
+                    ? 'Choose how you would like to verify this role.'
+                    : 'Add employer or company verification details.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeVerifyWorkModal}
+                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                aria-label="Close"
+              >
+                <HiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {verifyWorkModal.step === 'employer' && (
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = verifyWorkModal.index;
+                  const entry = idx != null ? workEntriesList[idx] : undefined;
+                  if (entry?.selfDeclared) {
+                    closeVerifyWorkModal();
+                  } else {
+                    setVerifyWorkModal((m) => ({ ...m, step: 'method' }));
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                <HiArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+            )}
+
+            {verifyWorkModal.step === 'method' && (
+              <div className="space-y-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idx = verifyWorkModal.index;
+                    if (idx == null) return;
+                    closeVerifyWorkModal();
+                    setSelfDeclarationFlow({ open: true, kind: 'work_card', workIndex: idx });
+                  }}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Self Declaration</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Temporary verification — limited network access
+                    </p>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVerifyWorkModal((m) => ({ ...m, step: 'employer' }))}
+                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                >
+                  <HiMail className="w-6 h-6 text-brand-600 shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Employer / company verification</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      HR email and/or a public careers or verification page
+                    </p>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {verifyWorkModal.step === 'employer' && (
+              <div className="space-y-4 pt-1">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">HR / verification email</label>
+                  <input
+                    type="email"
+                    value={workVerifyEmployerDraft.email}
+                    onChange={(e) =>
+                      setWorkVerifyEmployerDraft((d) => ({ ...d, email: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="hr@company.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Verification website (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={workVerifyEmployerDraft.website}
+                    onChange={(e) =>
+                      setWorkVerifyEmployerDraft((d) => ({ ...d, website: e.target.value }))
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    placeholder="careers.example.com"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => submitWorkEmployerVerification()}
+                  disabled={workSaving}
+                  className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  Save and submit for verification
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {verifyAddressModal.open && verifyAddressModal.locationIndex != null && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
@@ -5968,9 +7074,7 @@ export default function VerificationCenter() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Verify Address</h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Choose how you&apos;d like to verify your address.
-                </p>
+                <p className="text-sm text-gray-500 mt-1">Choose a verification method.</p>
               </div>
               <button
                 type="button"
@@ -6024,8 +7128,10 @@ export default function VerificationCenter() {
                 >
                   <HiUpload className="w-6 h-6 text-brand-600 shrink-0" />
                   <div>
-                    <p className="font-medium text-gray-900">Proof of Address Document</p>
-                    <p className="text-sm text-gray-500 mt-0.5">Upload a document to verify</p>
+                    <p className="font-medium text-gray-900">Upload Document</p>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Utility bill, lease agreement, bank statement, etc.
+                    </p>
                   </div>
                 </button>
                 <button
