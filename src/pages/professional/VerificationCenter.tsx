@@ -27,7 +27,6 @@ import {
   HiVideoCamera,
   HiDocumentText,
   HiArrowLeft,
-  HiArrowRight,
   HiUpload,
   HiExclamationCircle,
   HiPaperAirplane,
@@ -94,6 +93,32 @@ const PERSONAL_FLOW_UI_GROUPS: { label: string; steps: readonly PersonalFlowStep
 const PERSONAL_FLOW_STEP_STORAGE_KEY = 'taldium:verification:personalFlowStep';
 const PERSONAL_IDENTITY_AWAITING_STORAGE_KEY = 'taldium:verification:personalIdentityAwaiting';
 const PERSONAL_IDENTITY_PATH_STORAGE_KEY = 'taldium:verification:personalIdentityPath';
+/** Set when the user confirms personal identity self-declaration (so we do not treat "path chosen" alone as done). */
+const PERSONAL_SELF_DECLARATION_ACK_KEY = 'taldium:verification:personalSelfDeclarationAck';
+
+function readPersonalSelfDeclarationAcknowledged(): boolean {
+  try {
+    return sessionStorage.getItem(PERSONAL_SELF_DECLARATION_ACK_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setPersonalSelfDeclarationAcknowledgedStorage() {
+  try {
+    sessionStorage.setItem(PERSONAL_SELF_DECLARATION_ACK_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearPersonalSelfDeclarationAcknowledgedStorage() {
+  try {
+    sessionStorage.removeItem(PERSONAL_SELF_DECLARATION_ACK_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function parseStoredPersonalFlowStep(raw: string | null): PersonalFlowStep | null {
   if (!raw) return null;
@@ -124,23 +149,14 @@ function isPersonalFlowStepValidForProgress(
   userPhoneVerified: boolean,
   livenessCompleteLocal: boolean,
 ): boolean {
-  if (step === 'add_data') {
-    return !personalBasicComplete;
-  }
-  if (step === 'identity') {
-    return personalBasicComplete && !identityFlowComplete;
+  if (step === 'add_data' || step === 'identity') {
+    return !identityFlowComplete;
   }
   if (step === 'contact') {
-    return personalBasicComplete && identityFlowComplete && (!userEmailVerified || !userPhoneVerified);
+    return identityFlowComplete && (!userEmailVerified || !userPhoneVerified);
   }
   if (step === 'liveness') {
-    return (
-      personalBasicComplete &&
-      identityFlowComplete &&
-      userEmailVerified &&
-      userPhoneVerified &&
-      !livenessCompleteLocal
-    );
+    return identityFlowComplete && userEmailVerified && userPhoneVerified && !livenessCompleteLocal;
   }
   if (step === 'complete') {
     return (
@@ -1060,6 +1076,8 @@ export default function VerificationCenter() {
   const [emailOtpDigits, setEmailOtpDigits] = useState(['', '', '', '', '', '']);
   const [emailCodeSending, setEmailCodeSending] = useState(false);
   const [livenessCompleteLocal, setLivenessCompleteLocal] = useState(false);
+  /** True after user confirms self-declaration in the modal (persisted in session). */
+  const [personalSelfDeclarationAcknowledged, setPersonalSelfDeclarationAcknowledged] = useState(false);
   const [livenessSelfieModalOpen, setLivenessSelfieModalOpen] = useState(false);
   const [requestDataEditModalOpen, setRequestDataEditModalOpen] = useState(false);
   const [requestDataEditSelected, setRequestDataEditSelected] = useState<Record<string, boolean>>({});
@@ -1223,14 +1241,16 @@ export default function VerificationCenter() {
   }, [personal.dateOfBirth]);
 
   const identityFlowComplete = useMemo(() => {
-    if (identityVerificationPath !== 'none') return true;
     if (verificationStatus.personal.verified) return true;
     if (profile?.identityVerification) return true;
     const gov =
       !!(profile?.idType && String(profile?.idNumber || '').trim() && profile?.idDocumentUrl);
-    return gov;
+    if (gov) return true;
+    if (identityVerificationPath === 'self' && personalSelfDeclarationAcknowledged) return true;
+    return false;
   }, [
     identityVerificationPath,
+    personalSelfDeclarationAcknowledged,
     verificationStatus.personal.verified,
     profile?.identityVerification,
     profile?.idType,
@@ -1238,14 +1258,16 @@ export default function VerificationCenter() {
     profile?.idDocumentUrl,
   ]);
 
-  /** Show data-entry UI until identity is done, or until required personal fields are filled (covers new accounts with stray server identity). */
-  const showPersonalBasicEntryForm = !identityFlowComplete || !personalBasicComplete;
+  /** Keep personal form/summary in this card until identity is verified; never hide it just because fields validate locally. */
+  const showPersonalBasicEntryForm = !identityFlowComplete;
 
   useEffect(() => {
     if (loading) return;
     try {
       if (verificationStatus.personal.verified) {
         clearPersonalIdentityPathStorage();
+        clearPersonalSelfDeclarationAcknowledgedStorage();
+        setPersonalSelfDeclarationAcknowledged(false);
         return;
       }
       if (identityVerificationPath === 'self' || identityVerificationPath === 'gov') {
@@ -1255,6 +1277,11 @@ export default function VerificationCenter() {
       /* ignore */
     }
   }, [loading, identityVerificationPath, verificationStatus.personal.verified]);
+
+  useEffect(() => {
+    if (loading) return;
+    setPersonalSelfDeclarationAcknowledged(readPersonalSelfDeclarationAcknowledged());
+  }, [loading]);
 
   useEffect(() => {
     if (identityFlowComplete) {
@@ -1267,6 +1294,8 @@ export default function VerificationCenter() {
     if (!personalBasicComplete) {
       setPersonalIdentityAwaitingVerification(false);
       clearPersonalIdentityAwaitingStorage();
+      clearPersonalSelfDeclarationAcknowledgedStorage();
+      setPersonalSelfDeclarationAcknowledged(false);
     }
   }, [personalBasicComplete]);
 
@@ -1289,6 +1318,8 @@ export default function VerificationCenter() {
     }
     if (!personalBasicComplete) {
       clearPersonalIdentityAwaitingStorage();
+      clearPersonalSelfDeclarationAcknowledgedStorage();
+      setPersonalSelfDeclarationAcknowledged(false);
     } else {
       try {
         const raw = sessionStorage.getItem(PERSONAL_IDENTITY_AWAITING_STORAGE_KEY);
@@ -2212,6 +2243,8 @@ export default function VerificationCenter() {
     if (!selfDeclarationFlow.open) return;
     if (selfDeclarationFlow.kind === 'personal') {
       setIdentityVerificationPath('self');
+      setPersonalSelfDeclarationAcknowledgedStorage();
+      setPersonalSelfDeclarationAcknowledged(true);
       toast.success('Self declaration recorded');
     } else if (selfDeclarationFlow.kind === 'address') {
       const idx = selfDeclarationFlow.locationIndex;
@@ -3154,7 +3187,8 @@ export default function VerificationCenter() {
                     <div className="min-w-0">
                       <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
                       <p className="text-sm text-gray-600 mt-1">
-                        Update your details, then continue to return to your verification flow.
+                        Update your details, then tap Add Data to save. Use Verify Data on the main card when you are ready
+                        to open identity verification.
                       </p>
                     </div>
                     <button
@@ -3262,8 +3296,8 @@ export default function VerificationCenter() {
                     disabled={saving}
                     className="inline-flex items-center gap-2 px-4 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 font-medium"
                   >
-                    <HiArrowRight className="w-4 h-4" />
-                    {saving ? 'Saving...' : 'Continue'}
+                    <HiPlus className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Add Data'}
                   </button>
                 </div>
               ) : showPersonalBasicEntryForm ? (
@@ -3772,8 +3806,7 @@ export default function VerificationCenter() {
                     </div>
                   </div>
                 </div>
-              ) : personalFlowStep === 'liveness' ||
-                (personalFlowStep === 'complete' && !livenessCompleteLocal) ? (
+              ) : personalFlowStep === 'liveness' ? (
                 <div className="space-y-5 min-h-[280px]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -3976,18 +4009,7 @@ export default function VerificationCenter() {
                     Request Edit
                   </button>
                 </div>
-              ) : (
-                <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-10 text-center">
-                  <p className="text-sm text-gray-600">Setting up your verification step…</p>
-                  <button
-                    type="button"
-                    onClick={() => void fetchProfile({ soft: true })}
-                    className="text-sm font-semibold text-brand-600 hover:text-brand-700"
-                  >
-                    Refresh
-                  </button>
-                </div>
-              )}
+              ) : null}
             </div>
           )}
 
