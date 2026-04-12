@@ -124,14 +124,23 @@ function isPersonalFlowStepValidForProgress(
   userPhoneVerified: boolean,
   livenessCompleteLocal: boolean,
 ): boolean {
-  if (step === 'add_data' || step === 'identity') {
-    return !identityFlowComplete;
+  if (step === 'add_data') {
+    return !personalBasicComplete;
+  }
+  if (step === 'identity') {
+    return personalBasicComplete && !identityFlowComplete;
   }
   if (step === 'contact') {
-    return identityFlowComplete && (!userEmailVerified || !userPhoneVerified);
+    return personalBasicComplete && identityFlowComplete && (!userEmailVerified || !userPhoneVerified);
   }
   if (step === 'liveness') {
-    return identityFlowComplete && userEmailVerified && userPhoneVerified && !livenessCompleteLocal;
+    return (
+      personalBasicComplete &&
+      identityFlowComplete &&
+      userEmailVerified &&
+      userPhoneVerified &&
+      !livenessCompleteLocal
+    );
   }
   if (step === 'complete') {
     return (
@@ -1229,8 +1238,8 @@ export default function VerificationCenter() {
     profile?.idDocumentUrl,
   ]);
 
-  /** Keep personal form/summary in this card until identity is verified; never hide it just because fields validate locally. */
-  const showPersonalBasicEntryForm = !identityFlowComplete;
+  /** Show data-entry UI until identity is done, or until required personal fields are filled (covers new accounts with stray server identity). */
+  const showPersonalBasicEntryForm = !identityFlowComplete || !personalBasicComplete;
 
   useEffect(() => {
     if (loading) return;
@@ -3763,7 +3772,8 @@ export default function VerificationCenter() {
                     </div>
                   </div>
                 </div>
-              ) : personalFlowStep === 'liveness' ? (
+              ) : personalFlowStep === 'liveness' ||
+                (personalFlowStep === 'complete' && !livenessCompleteLocal) ? (
                 <div className="space-y-5 min-h-[280px]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -3826,7 +3836,7 @@ export default function VerificationCenter() {
                     )}
                   </div>
                 </div>
-              ) : (
+              ) : personalFlowStep === 'complete' && livenessCompleteLocal ? (
                 <div className="space-y-6 min-h-[280px]">
                   <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                     <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
@@ -3964,6 +3974,17 @@ export default function VerificationCenter() {
                   >
                     <HiLockClosed className="w-4 h-4 text-gray-500" aria-hidden />
                     Request Edit
+                  </button>
+                </div>
+              ) : (
+                <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/50 px-6 py-10 text-center">
+                  <p className="text-sm text-gray-600">Setting up your verification step…</p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchProfile({ soft: true })}
+                    className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+                  >
+                    Refresh
                   </button>
                 </div>
               )}
