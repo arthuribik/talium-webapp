@@ -218,6 +218,8 @@ type ReviewModalState =
       locationIndex: number;
       title: string;
       selfDeclared: boolean;
+      /** When true, admin can approve/reject document-backed rows. */
+      allowDecision: boolean;
     };
 
 function VerificationReviewModal({
@@ -245,7 +247,16 @@ function VerificationReviewModal({
     !selfDeclared &&
     onApprove &&
     onReject &&
-    (state.kind === 'identity' || state.kind === 'education' || state.kind === 'experience' || state.kind === 'project');
+    (state.kind === 'identity' ||
+      state.kind === 'education' ||
+      state.kind === 'experience' ||
+      state.kind === 'project');
+  const showLocationApproveReject =
+    state.variant === 'location' &&
+    state.allowDecision &&
+    !selfDeclared &&
+    onApprove &&
+    onReject;
 
   return (
     <div
@@ -290,7 +301,9 @@ function VerificationReviewModal({
             <p className="text-sm text-gray-600">
               {state.variant === 'cert'
                 ? 'Review the certificate details below. Admin verification actions are not available for certifications in this console.'
-                : 'Location entry details for your review.'}
+                : state.variant === 'location' && state.allowDecision && !selfDeclared
+                  ? 'Confirm the submitted evidence matches this address, then approve or reject. This updates the saved location row immediately.'
+                  : 'Location entry details for your review.'}
             </p>
           ) : null}
           {children}
@@ -303,7 +316,7 @@ function VerificationReviewModal({
           >
             Close
           </button>
-          {showApproveReject ? (
+          {showApproveReject || showLocationApproveReject ? (
             <>
               <button
                 type="button"
@@ -395,6 +408,20 @@ export default function ProfessionalDetail() {
     }
   };
 
+  const handleVerifyLocation = async (locationIndex: number, status: 'verified' | 'rejected' = 'verified') => {
+    if (!id) return;
+    setVerifying(`location-${locationIndex}`);
+    try {
+      await api.put(`/v1/admin/professionals/${id}/verify-location/${locationIndex}`, { status });
+      toast.success(status === 'verified' ? 'Location verified' : 'Location rejected');
+      fetchProfessional();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update location verification');
+    } finally {
+      setVerifying(null);
+    }
+  };
+
   const closeReviewModal = () => setReviewModal({ open: false });
 
   const confirmVerifyFromModal = async (status: 'verified' | 'rejected') => {
@@ -409,6 +436,12 @@ export default function ProfessionalDetail() {
             ? 'experience'
             : 'project';
     await handleVerify(type, entityId, status);
+    closeReviewModal();
+  };
+
+  const confirmLocationVerifyFromModal = async (status: 'verified' | 'rejected') => {
+    if (!reviewModal.open || reviewModal.variant !== 'location') return;
+    await handleVerifyLocation(reviewModal.locationIndex, status);
     closeReviewModal();
   };
 
@@ -1090,15 +1123,28 @@ export default function ProfessionalDetail() {
                           <div className="flex flex-wrap items-center justify-end gap-2 px-4 md:px-5 py-3 border-t border-gray-100 bg-gray-50/50">
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
+                                const vs = String(loc.verificationStatus ?? '').toLowerCase();
+                                const resolved = vs === 'verified' || vs === 'rejected';
+                                const dt = String(loc.documentType ?? '')
+                                  .toLowerCase()
+                                  .replace(/-/g, '_');
+                                const isDigitalVerify = dt === 'digital_verify';
+                                const hasUpload = !!String(loc.documentUrl ?? '').trim();
+                                const allowDecision =
+                                  !locSelf &&
+                                  !isDigitalVerify &&
+                                  !resolved &&
+                                  (hasUpload || (!!dt && dt !== 'self_declaration' && dt !== 'self_declared'));
                                 setReviewModal({
                                   open: true,
                                   variant: 'location',
                                   locationIndex: index,
                                   title: `Location ${index + 1}`,
                                   selfDeclared: locSelf,
-                                })
-                              }
+                                  allowDecision,
+                                });
+                              }}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100 transition-colors"
                             >
                               <HiLocationMarker className="w-4 h-4 flex-shrink-0" />
@@ -1772,14 +1818,22 @@ export default function ProfessionalDetail() {
             ? () => {
                 void confirmVerifyFromModal('verified');
               }
-            : undefined
+            : reviewModal.open && reviewModal.variant === 'location' && reviewModal.allowDecision && !reviewModal.selfDeclared
+              ? () => {
+                  void confirmLocationVerifyFromModal('verified');
+                }
+              : undefined
         }
         onReject={
           reviewModal.open && reviewModal.variant === 'verify' && reviewModal.allowDecision
             ? () => {
                 void confirmVerifyFromModal('rejected');
               }
-            : undefined
+            : reviewModal.open && reviewModal.variant === 'location' && reviewModal.allowDecision && !reviewModal.selfDeclared
+              ? () => {
+                  void confirmLocationVerifyFromModal('rejected');
+                }
+              : undefined
         }
         verifying={!!verifying}
       >

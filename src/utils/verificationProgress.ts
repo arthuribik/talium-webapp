@@ -25,6 +25,69 @@ export const VERIFICATION_TABS: { id: VerificationSectionKey; label: string }[] 
 
 export type VerificationSectionStatus = { completed: boolean; verified: boolean };
 
+function normalizeSelfDeclarationKey(v: unknown): string {
+  return String(v ?? '')
+    .toLowerCase()
+    .replace(/-/g, '_');
+}
+
+function isVerificationSelfDeclarationMethod(v: unknown): boolean {
+  const s = normalizeSelfDeclarationKey(v);
+  return s === 'self_declaration' || s === 'self_declared';
+}
+
+function isEducationSelfDeclaredForAggregate(e: { verificationMethod?: string | null }): boolean {
+  return isVerificationSelfDeclarationMethod(e?.verificationMethod);
+}
+
+function isWorkSelfDeclaredForAggregate(exp: { verificationContact?: unknown }): boolean {
+  const vc =
+    exp?.verificationContact && typeof exp.verificationContact === 'object'
+      ? (exp.verificationContact as Record<string, unknown>)
+      : {};
+  const email = String(vc['email'] ?? '').trim();
+  const website = String(vc['website'] ?? '').trim();
+  return !email && !website;
+}
+
+function isProjectSelfDeclaredForAggregate(proj: {
+  verificationMethod?: string | null;
+  selfDeclared?: boolean | null;
+  projectSelfDeclared?: boolean | null;
+}): boolean {
+  return (
+    isVerificationSelfDeclarationMethod(proj?.verificationMethod) ||
+    proj?.selfDeclared === true ||
+    proj?.projectSelfDeclared === true
+  );
+}
+
+function isLocationSelfDeclaredForAggregate(loc: Record<string, unknown>): boolean {
+  const dt = normalizeSelfDeclarationKey(loc.documentType);
+  if (dt === 'self_declaration' || dt === 'self_declared') return true;
+  return String(loc.verificationStatus ?? '').toLowerCase() === 'self_declared';
+}
+
+function isLocationRowVerifiedForAggregate(loc: Record<string, unknown>): boolean {
+  if (isLocationSelfDeclaredForAggregate(loc)) return true;
+  const dt = normalizeSelfDeclarationKey(loc.documentType);
+  if (dt === 'digital_verify') return true;
+  const vs = String(loc.verificationStatus ?? loc.documentVerificationStatus ?? '').toLowerCase();
+  return vs === 'verified';
+}
+
+function isCertSelfDeclaredForAggregate(cert: Record<string, unknown>): boolean {
+  return !!(cert.certSelfDeclared || cert.selfDeclared);
+}
+
+function isCertRowVerifiedForAggregate(cert: Record<string, unknown>): boolean {
+  if (isCertSelfDeclaredForAggregate(cert)) return true;
+  if (cert.verified === true) return true;
+  if (String(cert.certVerificationStatus ?? '').toLowerCase() === 'verified') return true;
+  if (String(cert.verificationStatus ?? '').toLowerCase() === 'verified') return true;
+  return false;
+}
+
 /** Mirrors API rules so progress works if /verification-status fails or omits sections. */
 export function deriveVerificationStatusFromProfile(data: unknown): Record<
   VerificationSectionKey,
@@ -57,11 +120,21 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
 
   const education = Array.isArray(d.education) ? d.education : [];
   const educationCompleted = education.length > 0;
-  const educationVerified = education.some((e: { verificationStatus?: string }) => e?.verificationStatus === 'verified');
+  const educationVerified =
+    educationCompleted &&
+    education.every(
+      (e: { verificationMethod?: string | null; verificationStatus?: string }) =>
+        isEducationSelfDeclaredForAggregate(e) || e?.verificationStatus === 'verified',
+    );
 
   const work = Array.isArray(d.workExperience) ? d.workExperience : [];
   const workCompleted = work.length > 0;
-  const workVerified = work.some((e: { verificationStatus?: string }) => e?.verificationStatus === 'verified');
+  const workVerified =
+    workCompleted &&
+    work.every(
+      (e: { verificationContact?: unknown; verificationStatus?: string }) =>
+        isWorkSelfDeclaredForAggregate(e) || e?.verificationStatus === 'verified',
+    );
 
   const projects = Array.isArray(d.professionalProjects)
     ? d.professionalProjects
@@ -69,7 +142,16 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
       ? d.projects
       : [];
   const projectsCompleted = projects.length > 0;
-  const projectsVerified = projects.some((p: { verificationStatus?: string }) => p?.verificationStatus === 'verified');
+  const projectsVerified =
+    projectsCompleted &&
+    projects.every(
+      (p: {
+        verificationMethod?: string | null;
+        selfDeclared?: boolean | null;
+        projectSelfDeclared?: boolean | null;
+        verificationStatus?: string;
+      }) => isProjectSelfDeclaredForAggregate(p) || p?.verificationStatus === 'verified',
+    );
 
   const locationsJson = d.locations;
   const locationsArr = Array.isArray(locationsJson)
@@ -92,16 +174,27 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
     !!(d.locationDocumentType && String(d.locationDocumentType).trim()) ||
     !!(d.country && String(d.country).trim());
 
+  const locationVerified =
+    locationsArr.length > 0 &&
+    locationsArr.every(
+      (loc) => loc && typeof loc === 'object' && isLocationRowVerifiedForAggregate(loc as Record<string, unknown>),
+    );
+
   const certsArr = Array.isArray(d.certifications) ? d.certifications : [];
   const certificationCompleted = certsArr.some((c: { name?: string; issuedBy?: string }) => {
     const name = typeof c?.name === 'string' ? c.name.trim() : '';
     const issuedBy = typeof c?.issuedBy === 'string' ? c.issuedBy.trim() : '';
     return !!(name && issuedBy);
   });
-  const certificationVerified = certsArr.some(
-    (c: { verified?: boolean; certVerificationStatus?: string }) =>
-      c?.verified === true || c?.certVerificationStatus === 'verified',
-  );
+  const certificationVerified =
+    certsArr.length > 0 &&
+    certsArr.every((c) => {
+      const cert = c as Record<string, unknown>;
+      const name = typeof cert.name === 'string' ? cert.name.trim() : '';
+      const issuedBy = typeof cert.issuedBy === 'string' ? cert.issuedBy.trim() : '';
+      if (!name || !issuedBy) return false;
+      return isCertRowVerifiedForAggregate(cert);
+    });
 
   let familyCompleted = false;
   const familyRaw = d.familyInfo;
@@ -120,7 +213,7 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
 
   return {
     personal: { completed: personalCompleted, verified: personalVerified },
-    location: { completed: locationCompleted, verified: false },
+    location: { completed: locationCompleted, verified: locationVerified },
     education: { completed: educationCompleted, verified: educationVerified },
     social: { completed: hasSocial, verified: hasSocial },
     work: { completed: workCompleted, verified: workVerified },

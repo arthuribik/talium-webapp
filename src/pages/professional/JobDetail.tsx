@@ -69,8 +69,8 @@ export default function ProfessionalJobDetail() {
   const [savingJob, setSavingJob] = useState(false);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [qualifyingAnswers, setQualifyingAnswers] = useState<Record<number, string>>({});
-  const [applicationProfile, setApplicationProfile] = useState<any>(null);
-  const [applicationProfileLoading, setApplicationProfileLoading] = useState(false);
+  const [professionalProfile, setProfessionalProfile] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [cvUrl, setCvUrl] = useState<string | null>(null);
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [cvUploading, setCvUploading] = useState(false);
@@ -79,24 +79,33 @@ export default function ProfessionalJobDetail() {
     if (id) fetchJob(id);
   }, [id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setProfileLoading(true);
+    api
+      .get('/v1/professional/profile')
+      .then((res) => {
+        if (!cancelled) setProfessionalProfile(res.data?.data ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setProfessionalProfile(null);
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Sync apply view with URL param (e.g. ?apply=true)
   useEffect(() => {
     const apply = searchParams.get('apply') === 'true';
     setShowApplyForm(apply);
   }, [searchParams]);
 
-  // When apply view is shown via URL, fetch profile if needed
-  useEffect(() => {
-    if (!showApplyForm || !job || hasApplied || applicationProfileLoading) return;
-    if (applicationProfile) return;
-    let cancelled = false;
-    setApplicationProfileLoading(true);
-    api.get('/v1/professional/profile')
-      .then((res) => { if (!cancelled) setApplicationProfile(res.data?.data ?? null); })
-      .catch(() => { if (!cancelled) setApplicationProfile(null); })
-      .finally(() => { if (!cancelled) setApplicationProfileLoading(false); });
-    return () => { cancelled = true; };
-  }, [showApplyForm, job?.id, hasApplied]);
+  const canApplyToJobs = professionalProfile?.canApplyToJobs === true;
+  const applyBlocked = !profileLoading && !canApplyToJobs;
 
   const fetchJob = async (jobId: string) => {
     setLoading(true);
@@ -143,7 +152,12 @@ export default function ProfessionalJobDetail() {
   const hasQuestions = questions.length > 0;
 
   const handleApplyClick = () => {
-    setApplicationProfile(null);
+    if (applyBlocked) {
+      toast.error(
+        'Finish account setup or wait for administrator activation before applying.',
+      );
+      return;
+    }
     setCvUrl(null);
     setCvFile(null);
     setSearchParams({ apply: 'true' });
@@ -214,6 +228,12 @@ export default function ProfessionalJobDetail() {
 
   const handleApplySubmit = async (applicationData?: Record<string, unknown>) => {
     if (!id) return;
+    if (applyBlocked) {
+      toast.error(
+        'Finish account setup or wait for administrator activation before applying.',
+      );
+      return;
+    }
     setApplying(true);
     try {
       const data = { ...(applicationData ?? {}), ...(cvUrl ? { cvUrl } : {}) };
@@ -363,19 +383,32 @@ export default function ProfessionalJobDetail() {
                   Applying to <span className="font-medium text-gray-700">{job.jobTitle}</span> at {job.organisation.companyName}
                 </p>
 
+                {applyBlocked && (
+                  <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-medium">Account not ready to apply</p>
+                    <p className="mt-1 text-amber-800">
+                      Verify your email and phone, complete identity verification (including liveness), or wait until an administrator activates your account. You can continue in{' '}
+                      <Link to="/professional/verification" className="font-medium text-brand-700 underline hover:text-brand-800">
+                        Verification Center
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                )}
+
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-base font-bold text-gray-900 mb-1">Required Applicant Data</h2>
                     <p className="text-sm text-gray-500 mb-3">
                       The following data will be shared with the employer when you apply. Shown below is what we will send from your profile.
                     </p>
-                    {applicationProfileLoading ? (
+                    {profileLoading ? (
                       <p className="text-sm text-gray-500">Loading your profile data...</p>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {requiredApplicantData.map((key) => {
                           const label = requiredDataLabels[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-                          const value = getRequiredDataValue(key, applicationProfile);
+                          const value = getRequiredDataValue(key, professionalProfile);
                           const hasValue = value && value !== '—';
                           return (
                             <div
@@ -502,7 +535,7 @@ export default function ProfessionalJobDetail() {
                 <div className="flex gap-3 mt-8 pt-6 border-t border-gray-200">
                   <button
                     onClick={hasQuestions ? handleApplyWithQuestions : () => handleApplySubmit({})}
-                    disabled={applying}
+                    disabled={applying || applyBlocked || profileLoading}
                     className="flex-1 px-6 py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
                   >
                     {applying ? 'Submitting...' : 'Submit application'}
@@ -593,10 +626,15 @@ export default function ProfessionalJobDetail() {
                   !showApplyForm ? (
                     <button
                       onClick={handleApplyClick}
-                      disabled={applying}
+                      disabled={applying || profileLoading || applyBlocked}
                       className="px-6 py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
+                      title={
+                        applyBlocked
+                          ? 'Finish account setup or wait for administrator activation'
+                          : undefined
+                      }
                     >
-                      Apply Now
+                      {profileLoading ? 'Loading…' : applyBlocked ? 'Apply unavailable' : 'Apply Now'}
                     </button>
                   ) : null
                 ) : (
@@ -608,6 +646,15 @@ export default function ProfessionalJobDetail() {
                 )}
               </div>
             </div>
+            {applyBlocked && !hasApplied && !showApplyForm && (
+              <div className="border-t border-amber-100 bg-amber-50/80 px-6 py-3 text-sm text-amber-900">
+                Applications are disabled until your account is activated or you finish setup (
+                <Link to="/professional/verification" className="font-medium text-brand-700 underline hover:text-brand-800">
+                  Verification Center
+                </Link>
+                ).
+              </div>
+            )}
           </div>
         </section>
 

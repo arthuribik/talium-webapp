@@ -31,8 +31,32 @@ import {
   HiExclamationCircle,
   HiPaperAirplane,
   HiTrash,
+  HiUserCircle,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+
+/** Same option list as signup country field; first row label reflects nationality. */
+const NATIONALITY_SEARCHABLE_OPTIONS = [
+  { value: '', label: 'Select nationality' },
+  ...COUNTRIES.map((c) => ({ value: c, label: c })),
+];
+
+function resolvedNationalityFromApi(data: {
+  nationality?: unknown;
+  country?: unknown;
+  identityVerification?: { nationality?: unknown } | null;
+}): string {
+  const fromProf = typeof data.nationality === 'string' ? data.nationality.trim() : '';
+  if (fromProf) return fromProf;
+  const fromIv =
+    typeof data.identityVerification?.nationality === 'string'
+      ? data.identityVerification.nationality.trim()
+      : '';
+  if (fromIv) return fromIv;
+  const fromSignupCountry = typeof data.country === 'string' ? data.country.trim() : '';
+  if (fromSignupCountry && COUNTRIES.includes(fromSignupCountry)) return fromSignupCountry;
+  return '';
+}
 import {
   DEFAULT_PHONE_DIAL_VALUE,
   buildE164FromDialAndNational,
@@ -54,6 +78,36 @@ import {
   verificationProgressFromMerged,
   type VerificationSectionKey,
 } from '@/utils/verificationProgress';
+
+/** Avoid splitting "+1" as US while the user is still typing the area code. */
+const MIN_NATIONAL_DIGITS_FOR_PHONE_AUTO_SPLIT = 8;
+
+function storedUserPhoneToDialAndNational(raw: string | undefined | null): {
+  dialValue: string;
+  national: string;
+} {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) {
+    return { dialValue: DEFAULT_PHONE_DIAL_VALUE, national: '' };
+  }
+  if (trimmed.startsWith('+')) {
+    const split = splitPlusPrefixedPhone(trimmed);
+    if (split) {
+      return { dialValue: split.dialValue, national: split.nationalNumber };
+    }
+  }
+  return { dialValue: DEFAULT_PHONE_DIAL_VALUE, national: trimmed };
+}
+
+function tryAutoSplitPhoneInputValue(value: string): { dialValue: string; national: string } | null {
+  const t = value.trim();
+  if (!t.startsWith('+')) return null;
+  const split = splitPlusPrefixedPhone(t);
+  if (!split) return null;
+  const nd = split.nationalNumber.replace(/\D/g, '');
+  if (nd.length < MIN_NATIONAL_DIGITS_FOR_PHONE_AUTO_SPLIT) return null;
+  return { dialValue: split.dialValue, national: split.nationalNumber };
+}
 
 type SectionKey = VerificationSectionKey;
 
@@ -150,6 +204,14 @@ function isPersonalFlowStepValidForProgress(
   livenessCompleteLocal: boolean,
 ): boolean {
   if (step === 'add_data' || step === 'identity') {
+    // Do not keep stale "add data" in session after liveness (or identity) is done — canonical step advances on refresh.
+    if (
+      step === 'add_data' &&
+      personalBasicComplete &&
+      (livenessCompleteLocal || identityFlowComplete)
+    ) {
+      return false;
+    }
     return !identityFlowComplete;
   }
   if (step === 'contact') {
@@ -242,7 +304,7 @@ const PROFILE_REQUEST_EDIT_REASON_OPTIONS: { value: string; label: string }[] = 
   { value: 'other', label: 'Other' },
 ];
 
-type LocationVerificationStatus = 'pending' | 'self_declared' | 'verified';
+type LocationVerificationStatus = 'pending' | 'self_declared' | 'verified' | 'rejected';
 
 type LocationEntry = {
   country: string;
@@ -279,16 +341,25 @@ type VerifyAddressModalStep = 'method' | 'residence' | 'document';
 function mapApiLocationToEntry(loc: any, index: number, length: number): LocationEntry {
   const docUrl = (loc.documentUrl || '').trim();
   const docTypeRaw = (loc.documentType || '').trim();
+  const adminVs = String(loc.verificationStatus ?? '').trim().toLowerCase();
+
   let verificationStatus: LocationVerificationStatus = 'pending';
   let documentType = docTypeRaw;
-  if (docUrl) {
-    verificationStatus = 'verified';
-    if (!documentType) documentType = 'other';
-  } else if (docTypeRaw === 'digital_verify') {
-    verificationStatus = 'verified';
-  } else if (docTypeRaw === 'self_declaration') {
+
+  if (docTypeRaw === 'self_declaration' || docTypeRaw === 'self_declared') {
     verificationStatus = 'self_declared';
     documentType = '';
+  } else if (docTypeRaw === 'digital_verify') {
+    verificationStatus = 'verified';
+  } else if (adminVs === 'verified') {
+    verificationStatus = 'verified';
+    if (!documentType && docUrl) documentType = 'other';
+  } else if (adminVs === 'rejected') {
+    verificationStatus = 'rejected';
+    if (!documentType && docUrl) documentType = 'other';
+  } else if (docUrl) {
+    verificationStatus = 'pending';
+    if (!documentType) documentType = 'other';
   }
 
   let isDefault: boolean;
@@ -550,6 +621,11 @@ function formatProjectCardSubtitle(entry: ProjectEntry): string {
   const n = entry.teamMembers.filter((m) => m.name.trim() || m.role.trim()).length;
   if (n > 0) parts.push(`${n} team member${n === 1 ? '' : 's'}`);
   return parts.length ? parts.join(' · ') : 'No details yet';
+}
+
+function projectEntryIsSelfDeclared(entry: ProjectEntry): boolean {
+  const status = entry.projectVerificationStatus ?? 'pending';
+  return !!entry.projectSelfDeclared && status !== 'verified';
 }
 
 const EDUCATION_LEVELS = [
@@ -1259,7 +1335,23 @@ export default function VerificationCenter() {
   ]);
 
   /** Keep personal form/summary in this card until identity is verified; never hide it just because fields validate locally. */
-  const showPersonalBasicEntryForm = !identityFlowComplete;
+  const showPersonalBasicEntryForm =
+    !identityFlowComplete && !profile?.isPersonalCompleted;
+
+  /** Read-only personal dashboard (matches post-liveness UX). Shown before step-specific UI so we never show the empty "identity" placeholder once identity + liveness are done. */
+  const showPersonalIdentityReadOnlySummary = useMemo(() => {
+    if (!livenessCompleteLocal || !personalBasicComplete) return false;
+    if (!userEmailVerified || !userPhoneVerified) return false;
+    if (profile?.isPersonalCompleted === true) return true;
+    return identityFlowComplete;
+  }, [
+    livenessCompleteLocal,
+    personalBasicComplete,
+    userEmailVerified,
+    userPhoneVerified,
+    identityFlowComplete,
+    profile?.isPersonalCompleted,
+  ]);
 
   useEffect(() => {
     if (loading) return;
@@ -1353,6 +1445,7 @@ export default function VerificationCenter() {
     userPhoneVerified,
     userEmailVerified,
     livenessCompleteLocal,
+    profile?.isPersonalCompleted,
   ]);
 
   useEffect(() => {
@@ -1385,9 +1478,12 @@ export default function VerificationCenter() {
       const data = profileRes.data?.data;
       setProfile(data);
       if (data && typeof data === 'object') {
-        setLivenessCompleteLocal(
-          Boolean((data as { livenessSelfieUrl?: string | null }).livenessSelfieUrl),
-        );
+        const d = data as {
+          livenessSelfieUrl?: string | null;
+          isPersonalCompleted?: boolean;
+        };
+        const hasSelfie = Boolean(d.livenessSelfieUrl && String(d.livenessSelfieUrl).trim());
+        setLivenessCompleteLocal(hasSelfie || d.isPersonalCompleted === true);
       }
       const status = statusRes.data?.data as Partial<Record<SectionKey, { completed?: boolean; verified?: boolean }>> | undefined;
       setVerificationStatus(mergeVerificationStatusFromSources(status, data));
@@ -1402,12 +1498,15 @@ export default function VerificationCenter() {
         };
         setUserEmailVerified(!!u.emailVerified);
         setUserPhoneVerified(!!u.phoneVerified);
+        const rawPhone = (u.phoneNumber || '').trim();
+        const phoneParts = storedUserPhoneToDialAndNational(rawPhone || undefined);
+        setPhoneDialSelection(phoneParts.dialValue);
         setPersonal((p) => ({
           ...p,
           firstName: u.firstName || '',
           lastName: u.lastName || '',
           email: u.email || '',
-          phoneNumber: u.phoneNumber || p.phoneNumber || '',
+          phoneNumber: rawPhone ? phoneParts.national : p.phoneNumber,
         }));
       }
       if (data) {
@@ -1416,7 +1515,7 @@ export default function VerificationCenter() {
           ...p,
           middleName: data.middleName ?? p.middleName ?? '',
           gender: data.gender ?? p.gender ?? '',
-          nationality: data.nationality || '',
+          nationality: resolvedNationalityFromApi(data),
           country: data.country || '',
           dateOfBirth: data.dateOfBirth
             ? new Date(data.dateOfBirth).toISOString().split('T')[0]
@@ -1431,7 +1530,11 @@ export default function VerificationCenter() {
         if (Array.isArray(data.locations) && data.locations.length > 0) {
           const len = data.locations.length;
           setLocationsList(data.locations.map((loc: any, i: number) => mapApiLocationToEntry(loc, i, len)));
-        } else if (data.country || data.locationDocumentUrl || (data as any).locationDocumentType) {
+        } else if (
+          (data.locationDocumentUrl && String(data.locationDocumentUrl).trim()) ||
+          ((data as any).locationDocumentType && String((data as any).locationDocumentType).trim())
+        ) {
+          // Legacy profile: location proof stored on professional, not in locations[] — do not infer from signup country alone.
           const addr = data.address && typeof data.address === 'object' ? (data.address as any) : {};
           setLocationsList([
             mapApiLocationToEntry(
@@ -1447,6 +1550,8 @@ export default function VerificationCenter() {
               1,
             ),
           ]);
+        } else {
+          setLocationsList([]);
         }
         const sm = data.socialMedia || {};
         setSocial({
@@ -1960,6 +2065,9 @@ export default function VerificationCenter() {
         documentUrl: loc.documentUrl?.trim() || undefined,
         residenceType: loc.residenceType || undefined,
         isDefault: !!loc.isDefault,
+        ...(loc.verificationStatus === 'verified' || loc.verificationStatus === 'rejected'
+          ? { verificationStatus: loc.verificationStatus }
+          : {}),
       };
     });
 
@@ -2447,7 +2555,7 @@ export default function VerificationCenter() {
       if (url) {
         const patch: Partial<LocationEntry> = { documentUrl: url };
         if (options?.fromVerifyModal) {
-          patch.verificationStatus = 'verified';
+          patch.verificationStatus = 'pending';
         }
         setLocationsList((prev) => {
           const next = prev.map((l, i) => (i === index ? { ...l, ...patch } : l));
@@ -3145,7 +3253,7 @@ export default function VerificationCenter() {
                 )}
               </div>
 
-              {!(sectionEditMode.personal && personalBasicComplete) && personalFlowStep !== 'complete' && (
+              {!(sectionEditMode.personal && personalBasicComplete) && !showPersonalIdentityReadOnlySummary && (
                 <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4">
                   {/* <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Personal verification flow</p> */}
                   <div className="flex flex-wrap gap-2">
@@ -3242,18 +3350,22 @@ export default function VerificationCenter() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label
+                        htmlFor="verification-personal-nationality"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
                         Nationality <span className="text-red-500">*</span>
                       </label>
                       <SearchableList
+                        id="verification-personal-nationality"
                         value={personal.nationality}
                         onChange={(nationality) => {
                           setPersonal((p) => ({ ...p, nationality }));
                           clearFormError('per_nationality');
                         }}
-                        options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                        placeholder="Select country"
-                        className="bg-gray-50"
+                        options={NATIONALITY_SEARCHABLE_OPTIONS}
+                        placeholder="Select nationality"
+                        className="w-full"
                         error={fe.per_nationality}
                       />
                     </div>
@@ -3298,6 +3410,154 @@ export default function VerificationCenter() {
                   >
                     <HiPlus className="w-4 h-4" />
                     {saving ? 'Saving...' : 'Add Data'}
+                  </button>
+                </div>
+              ) : showPersonalIdentityReadOnlySummary ? (
+                <div className="space-y-6 min-h-[280px]">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <h2 className="min-w-0 flex-1 text-lg font-semibold text-gray-900">
+                      Personal Identity Information
+                    </h2>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                      {verificationStatus.personal.verified ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Verified
+                        </span>
+                      ) : verificationStatus.personal.completed ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
+                          Pending verification
+                        </span>
+                      ) : null}
+                      {identityVerificationPath === 'self' && (
+                        <span className="text-xs text-gray-500">via Self Declaration</span>
+                      )}
+                      {identityVerificationPath === 'gov' && (
+                        <span className="text-xs text-gray-500">via Government ID</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 text-sm border-b border-gray-200 pb-6">
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
+                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                          {personal.firstName?.trim() || '—'}
+                          {!!personal.firstName?.trim() && (
+                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
+                        <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
+                        <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
+                          {personal.dateOfBirth
+                            ? (() => {
+                                const d = new Date(personal.dateOfBirth);
+                                return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
+                              })()
+                            : '—'}
+                          {personalAgeYears != null && (
+                            <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-5">
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
+                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                          {personal.lastName?.trim() || '—'}
+                          {!!personal.lastName?.trim() && (
+                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
+                        <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
+                        <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiMail className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Email Verification</span>
+                      </div>
+                      {userEmailVerified ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
+                          Verified
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiPhone className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Phone Verification</span>
+                      </div>
+                      {userPhoneVerified ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
+                          Verified
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <HiVideoCamera className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
+                        <span className="font-medium text-gray-900">Liveness Check</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {livenessCompleteLocal && profile?.livenessSelfieUrl?.trim() ? (
+                          <img
+                            src={profile.livenessSelfieUrl}
+                            alt=""
+                            className="h-8 w-8 rounded-md border border-gray-200 object-cover"
+                          />
+                        ) : livenessCompleteLocal && profile?.isPersonalCompleted ? (
+                          <HiUserCircle
+                            className="h-8 w-8 shrink-0 text-gray-400"
+                            title="Liveness check completed"
+                            aria-hidden
+                          />
+                        ) : null}
+                        {livenessCompleteLocal ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Completed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setRequestDataEditModalOpen(true)}
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 hover:text-brand-600"
+                  >
+                    <HiLockClosed className="w-4 h-4 text-gray-500" aria-hidden />
+                    Request Edit
                   </button>
                 </div>
               ) : showPersonalBasicEntryForm ? (
@@ -3357,18 +3617,22 @@ export default function VerificationCenter() {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label
+                          htmlFor="verification-personal-nationality-new"
+                          className="block text-sm font-medium text-gray-700 mb-1"
+                        >
                           Nationality <span className="text-red-500">*</span>
                         </label>
                         <SearchableList
+                          id="verification-personal-nationality-new"
                           value={personal.nationality}
                           onChange={(nationality) => {
                             setPersonal((p) => ({ ...p, nationality }));
                             clearFormError('per_nationality');
                           }}
-                          options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                          placeholder="Select country"
-                          className="bg-gray-50"
+                          options={NATIONALITY_SEARCHABLE_OPTIONS}
+                          placeholder="Select nationality"
+                          className="w-full"
                           error={fe.per_nationality}
                         />
                       </div>
@@ -3752,12 +4016,18 @@ export default function VerificationCenter() {
                                       e.nativeEvent instanceof InputEvent &&
                                       e.nativeEvent.inputType === 'insertFromPaste'
                                     ) {
-                                      const split = splitPlusPrefixedPhone(v);
+                                      const split = splitPlusPrefixedPhone(v.trim());
                                       if (split) {
                                         setPhoneDialSelection(split.dialValue);
                                         setPersonal((p) => ({ ...p, phoneNumber: split.nationalNumber }));
                                         return;
                                       }
+                                    }
+                                    const auto = tryAutoSplitPhoneInputValue(v);
+                                    if (auto) {
+                                      setPhoneDialSelection(auto.dialValue);
+                                      setPersonal((p) => ({ ...p, phoneNumber: auto.national }));
+                                      return;
                                     }
                                     setPersonal((p) => ({ ...p, phoneNumber: v }));
                                   }}
@@ -3830,11 +4100,17 @@ export default function VerificationCenter() {
                       <div className="flex items-center sm:justify-end sm:ml-auto min-h-[36px]">
                         {livenessCompleteLocal ? (
                           <div className="flex items-center gap-2">
-                            {profile?.livenessSelfieUrl ? (
+                            {profile?.livenessSelfieUrl?.trim() ? (
                               <img
                                 src={profile.livenessSelfieUrl}
                                 alt="Liveness selfie"
                                 className="h-9 w-9 rounded-lg border border-gray-200 object-cover"
+                              />
+                            ) : profile?.isPersonalCompleted ? (
+                              <HiUserCircle
+                                className="h-9 w-9 shrink-0 text-gray-400"
+                                title="Liveness check completed"
+                                aria-hidden
                               />
                             ) : null}
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-700">
@@ -3868,146 +4144,6 @@ export default function VerificationCenter() {
                       </div>
                     )}
                   </div>
-                </div>
-              ) : personalFlowStep === 'complete' && livenessCompleteLocal ? (
-                <div className="space-y-6 min-h-[280px]">
-                  <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                    <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      {verificationStatus.personal.verified ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Verified
-                        </span>
-                      ) : verificationStatus.personal.completed ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                          Pending verification
-                        </span>
-                      ) : null}
-                      {identityVerificationPath === 'self' && (
-                        <span className="text-xs text-gray-500">via Self Declaration</span>
-                      )}
-                      {identityVerificationPath === 'gov' && (
-                        <span className="text-xs text-gray-500">via Government ID</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 text-sm border-b border-gray-200 pb-6">
-                    <div className="space-y-5">
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
-                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                          {personal.firstName?.trim() || '—'}
-                          {!!personal.firstName?.trim() && (
-                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
-                          )}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
-                        <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
-                        <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
-                          {personal.dateOfBirth
-                            ? (() => {
-                                const d = new Date(personal.dateOfBirth);
-                                return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
-                              })()
-                            : '—'}
-                          {personalAgeYears != null && (
-                            <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-5">
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
-                        <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                          {personal.lastName?.trim() || '—'}
-                          {!!personal.lastName?.trim() && (
-                            <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
-                          )}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
-                        <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
-                        <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <HiMail className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
-                        <span className="font-medium text-gray-900">Email Verification</span>
-                      </div>
-                      {userEmailVerified ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
-                          Verified
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
-                          Pending
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <HiPhone className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
-                        <span className="font-medium text-gray-900">Phone Verification</span>
-                      </div>
-                      {userPhoneVerified ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 shrink-0">
-                          Verified
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 shrink-0">
-                          Pending
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <HiVideoCamera className="w-5 h-5 text-gray-400 shrink-0" aria-hidden />
-                        <span className="font-medium text-gray-900">Liveness Check</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {livenessCompleteLocal && profile?.livenessSelfieUrl ? (
-                          <img
-                            src={profile.livenessSelfieUrl}
-                            alt=""
-                            className="h-8 w-8 rounded-md border border-gray-200 object-cover"
-                          />
-                        ) : null}
-                        {livenessCompleteLocal ? (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            Completed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                            Pending
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setRequestDataEditModalOpen(true)}
-                    className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 hover:text-brand-600"
-                  >
-                    <HiLockClosed className="w-4 h-4 text-gray-500" aria-hidden />
-                    Request Edit
-                  </button>
                 </div>
               ) : null}
             </div>
@@ -4069,6 +4205,11 @@ export default function VerificationCenter() {
                                 Pending
                               </span>
                             )}
+                            {status === 'rejected' && (
+                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-900">
+                                Rejected
+                              </span>
+                            )}
                             {status === 'self_declared' && (
                               <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
                                 Self Declared
@@ -4111,7 +4252,7 @@ export default function VerificationCenter() {
                               Mark as default
                             </button>
                           )}
-                          {status === 'pending' && (
+                          {(status === 'pending' || status === 'rejected') && (
                             <button
                               type="button"
                               onClick={() => openVerifyAddressModal(index)}
@@ -4245,6 +4386,24 @@ export default function VerificationCenter() {
                   >
                     <HiPlus className="w-4 h-4" />
                     {saving ? 'Saving...' : 'Add Location'}
+                  </button>
+                </div>
+              ) : locationsList.length === 0 ? (
+                <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
+                    <HiLocationMarker className="h-7 w-7 text-brand-500" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-800">No locations added yet</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Add where you live or work so employers can verify your address.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setLocationAddFormOpen(true)}
+                    className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="w-4 h-4 text-brand-600" />
+                    Add new location
                   </button>
                 </div>
               ) : (
@@ -5255,8 +5414,7 @@ export default function VerificationCenter() {
               <div className="space-y-3">
                 {projectsList.map((entry, index) => {
                   const status = entry.projectVerificationStatus ?? 'pending';
-                  const isSelfDeclaredProject =
-                    !!entry.projectSelfDeclared && status !== 'verified';
+                  const isSelfDeclaredProject = projectEntryIsSelfDeclared(entry);
                   const projRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`proj_${index}_`));
                   return (
                     <div
@@ -5305,11 +5463,16 @@ export default function VerificationCenter() {
                       </div>
 
                       {isSelfDeclaredProject && (
-                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
-                          <span>
-                            Self Declaration — limited network access. Upgrade by adding a project link or media
-                            URL.
+                        <div className="flex gap-3 rounded-lg border border-amber-200 bg-[#fffbeb] px-3 py-3 text-sm text-gray-900 shadow-sm">
+                          <span
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white"
+                            aria-hidden
+                          >
+                            <HiExclamationCircle className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 pt-0.5 leading-snug">
+                            Self Declaration — limited network access. Upgrade by adding employer verification
+                            details.
                           </span>
                         </div>
                       )}
@@ -6419,15 +6582,22 @@ export default function VerificationCenter() {
             </button>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Country of Nationality</label>
+                <label
+                  htmlFor="verification-gov-nationality"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
+                  Country of Nationality
+                </label>
                 <SearchableList
+                  id="verification-gov-nationality"
                   value={personal.nationality}
                   onChange={(nationality) => {
                     setPersonal((p) => ({ ...p, nationality }));
                     clearFormError('gov_nationality');
                   }}
-                  options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                  placeholder="Select country"
+                  options={NATIONALITY_SEARCHABLE_OPTIONS}
+                  placeholder="Select nationality"
+                  className="w-full"
                   error={fe.gov_nationality}
                 />
               </div>

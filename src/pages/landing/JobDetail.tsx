@@ -59,6 +59,7 @@ export default function JobDetail() {
   const [error, setError] = useState('');
   const [showProfessionalModal, setShowProfessionalModal] = useState(false);
   const [hasApplied, setHasApplied] = useState(false);
+  const [canApplyToJobs, setCanApplyToJobs] = useState<boolean | null>(null);
 
   usePageSeo(
     job
@@ -79,6 +80,34 @@ export default function JobDetail() {
       fetchJob(id);
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!isAuthenticated || user?.userType !== 'PROFESSIONAL') {
+      setCanApplyToJobs(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get('/v1/professional/profile')
+      .then((res) => {
+        if (!cancelled) setCanApplyToJobs(res.data?.data?.canApplyToJobs === true);
+      })
+      .catch(() => {
+        if (!cancelled) setCanApplyToJobs(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.userType]);
+
+  const professionalApplyBlocked =
+    isAuthenticated &&
+    user?.userType === 'PROFESSIONAL' &&
+    canApplyToJobs === false;
+  const professionalApplyLoading =
+    isAuthenticated &&
+    user?.userType === 'PROFESSIONAL' &&
+    canApplyToJobs === null;
 
   const fetchJob = async (jobId: string) => {
     setLoading(true);
@@ -148,6 +177,13 @@ export default function JobDetail() {
       return;
     }
 
+    if (canApplyToJobs === false) {
+      toast.error(
+        'Finish account setup or wait for administrator activation before applying.',
+      );
+      return;
+    }
+
     setApplying(true);
     try {
       await api.post(`/v1/jobs/${id}/apply`, {});
@@ -168,11 +204,23 @@ export default function JobDetail() {
   // Check for redirect parameter after registration
   useEffect(() => {
     const redirect = searchParams.get('redirect');
-    if (redirect && isAuthenticated && user?.userType === 'PROFESSIONAL') {
-      // User just registered and came back, show a message
-      toast.success('Welcome! You can now apply for this job.');
+    if (
+      !redirect ||
+      !isAuthenticated ||
+      user?.userType !== 'PROFESSIONAL' ||
+      canApplyToJobs === null
+    ) {
+      return;
     }
-  }, [searchParams, isAuthenticated, user]);
+    if (canApplyToJobs) {
+      toast.success('Welcome back. You can apply from this page when you are ready.');
+    } else {
+      toast(
+        'Welcome back. Finish verification (email, phone, identity) or wait for account activation before applying.',
+        { icon: 'ℹ️' },
+      );
+    }
+  }, [searchParams, isAuthenticated, user?.userType, canApplyToJobs]);
 
   if (loading) {
     return (
@@ -274,11 +322,26 @@ export default function JobDetail() {
                     <>
                       <button
                         onClick={handleApply}
-                        disabled={applying}
+                        disabled={applying || professionalApplyLoading || professionalApplyBlocked}
                         className="px-8 py-3 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {applying ? 'Applying...' : 'Apply Now'}
+                        {applying
+                          ? 'Applying...'
+                          : professionalApplyLoading
+                            ? 'Loading…'
+                            : professionalApplyBlocked
+                              ? 'Apply unavailable'
+                              : 'Apply Now'}
                       </button>
+                      {professionalApplyBlocked && (
+                        <p className="text-xs text-amber-800 max-w-xs text-center">
+                          Complete setup in{' '}
+                          <Link to="/professional/verification" className="underline font-medium text-brand-700">
+                            Verification Center
+                          </Link>{' '}
+                          or wait for an administrator to activate your account.
+                        </p>
+                      )}
                       {!hasApplied && (
                         <button className="px-8 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors whitespace-nowrap">
                           Save Job
@@ -450,13 +513,21 @@ export default function JobDetail() {
                     <>
                       <button
                         onClick={handleApply}
-                        disabled={applying}
+                        disabled={applying || professionalApplyLoading || professionalApplyBlocked}
                         className="w-full px-6 py-4 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors text-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {applying ? 'Applying...' : 'Apply Now'}
+                        {applying
+                          ? 'Applying...'
+                          : professionalApplyLoading
+                            ? 'Loading…'
+                            : professionalApplyBlocked
+                              ? 'Apply unavailable'
+                              : 'Apply Now'}
                       </button>
                       <p className="text-xs text-gray-500 text-center mt-2">
-                        You'll need a verified profile to apply
+                        {professionalApplyBlocked
+                          ? 'Finish account setup or wait for activation to apply.'
+                          : "You'll need a verified profile to apply"}
                       </p>
                     </>
                   ) : (
