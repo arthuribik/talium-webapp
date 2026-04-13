@@ -110,9 +110,11 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
     String((d.idNumber as string) || '').trim() &&
     d.idDocumentUrl
   );
+  const isPersonalCompletedFlag = (d as { isPersonalCompleted?: unknown }).isPersonalCompleted === true;
+  /** Match API: signup-only country/DOB/nationality must not count as completed verification steps. */
   const personalCompleted =
     hasRequiredIdFields ||
-    !!(d.country || d.nationality || d.dateOfBirth) ||
+    isPersonalCompletedFlag ||
     !!d.identityVerification;
   const personalVerified =
     d.identityStatus === 'verified' ||
@@ -171,8 +173,7 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
       return !!(country || address || docUrl);
     }) ||
     !!(d.locationDocumentUrl && String(d.locationDocumentUrl).trim()) ||
-    !!(d.locationDocumentType && String(d.locationDocumentType).trim()) ||
-    !!(d.country && String(d.country).trim());
+    !!(d.locationDocumentType && String(d.locationDocumentType).trim());
 
   const locationVerified =
     locationsArr.length > 0 &&

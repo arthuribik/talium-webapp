@@ -32,6 +32,8 @@ import {
   HiPaperAirplane,
   HiTrash,
   HiUserCircle,
+  HiClock,
+  HiArrowUp,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
 
@@ -229,6 +231,26 @@ function isPersonalFlowStepValidForProgress(
       livenessCompleteLocal
     );
   }
+  return false;
+}
+
+/** True when an identity verification record exists and is waiting on admin (not yet verified). */
+function personalIdentityAwaitingAdminReview(profile: unknown): boolean {
+  if (!profile || typeof profile !== 'object') return false;
+  const p = profile as Record<string, unknown>;
+  const iv = p.identityVerification;
+  if (iv && typeof iv === 'object') {
+    const row = iv as Record<string, unknown>;
+    if (row.verifiedAt) return false;
+    const st = String(row.status ?? '')
+      .trim()
+      .toLowerCase();
+    if (st === 'pending' || st === 'under_review') return true;
+  }
+  const is = String(p.identityStatus ?? '')
+    .trim()
+    .toLowerCase();
+  if (is === 'pending' || is === 'under_review') return true;
   return false;
 }
 
@@ -569,12 +591,82 @@ function workModeLabel(value: string): string {
   return map[value] || value || '—';
 }
 
-function formatWorkCardSubtitle(entry: WorkEntry): string {
-  return [
-    entry.industry?.trim() || '—',
-    workEmploymentTypeLabel(entry.employmentType),
-    workModeLabel(entry.workMode),
-  ].join(' · ');
+/** Subtitle under job title: organisation · employment type · work mode (matches work card mock). */
+function formatWorkExperienceHeaderSubtitle(entry: WorkEntry): string {
+  const org = entry.organisationName?.trim() || '—';
+  return [org, workEmploymentTypeLabel(entry.employmentType), workModeLabel(entry.workMode)].join(' · ');
+}
+
+function parseWorkYmd(dateStr: string): Date | null {
+  const s = dateStr?.trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
+  const d = new Date(`${s.slice(0, 10)}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function workExperienceEffectiveEndDate(entry: WorkEntry): Date {
+  const rootEnd = parseWorkYmd(entry.endDate ?? '');
+  if (rootEnd) return rootEnd;
+  const primary = entry.workRoles[0];
+  if (primary?.currentlyWorking) return new Date();
+  const roleEnd = parseWorkYmd(primary?.endDate ?? '');
+  if (roleEnd) return roleEnd;
+  return new Date();
+}
+
+/** Years between entry start and end (or today if current); null if no valid start. */
+function workTenureYearsAtOrganisation(entry: WorkEntry): number | null {
+  const start = parseWorkYmd(entry.startDate ?? '');
+  if (!start) return null;
+  const end = workExperienceEffectiveEndDate(entry);
+  const ms = end.getTime() - start.getTime();
+  if (ms < 0) return 0;
+  return ms / (365.25 * 24 * 60 * 60 * 1000);
+}
+
+function formatWorkCardDateRange(entry: WorkEntry): string {
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const start = parseWorkYmd(entry.startDate ?? '');
+  const primary = entry.workRoles[0];
+  const endExplicit = parseWorkYmd(entry.endDate ?? '') ?? parseWorkYmd(primary?.endDate ?? '');
+  const startStr = start ? fmt(start) : (entry.startDate?.trim() || '—');
+  if (primary?.currentlyWorking && !entry.endDate?.trim() && !primary?.endDate?.trim()) {
+    return `${startStr} — Present`;
+  }
+  const endStr = endExplicit ? fmt(endExplicit) : '—';
+  return `${startStr} — ${endStr}`;
+}
+
+function workSalaryFrequencyDisplay(value: string): string {
+  const opt = WORK_SALARY_FREQUENCY_OPTIONS.find((o) => o.value === value);
+  if (opt) return opt.label;
+  const v = value?.trim();
+  return v || '—';
+}
+
+function formatWorkRemunerationLine(entry: WorkEntry): string {
+  const cur = entry.currency?.trim() || 'USD';
+  const sal = entry.salary?.trim();
+  if (!sal) return '—';
+  return `${cur} ${sal} / ${workSalaryFrequencyDisplay(entry.salaryFrequency)}`;
+}
+
+function formatWorkCompensationSummary(entry: WorkEntry): string {
+  const notes = entry.otherCompensationNotes?.trim();
+  if (notes) return notes;
+  const parts = (entry.otherCompensation ?? []).map((p) => p?.trim()).filter(Boolean);
+  if (parts.length) return parts.join(', ');
+  return '—';
+}
+
+function workAssociatedSkillTags(entry: WorkEntry): string[] {
+  const raw = entry.associatedSkills?.trim();
+  if (!raw) return [];
+  return raw
+    .split(/[,;|\n]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
 type ProjectTeamMemberEntry = { name: string; role: string };
@@ -1332,6 +1424,25 @@ export default function VerificationCenter() {
     profile?.idType,
     profile?.idNumber,
     profile?.idDocumentUrl,
+  ]);
+
+  const personalAdminReviewPending = useMemo(
+    () => personalIdentityAwaitingAdminReview(profile),
+    [profile],
+  );
+
+  /** Which flow group (0–2) is currently active for pill highlighting — matches stacked sections. */
+  const activePersonalFlowGroupIndex = useMemo(() => {
+    if (!personalBasicComplete || !identityFlowComplete) return 0;
+    if (!userEmailVerified || !userPhoneVerified) return 1;
+    if (!livenessCompleteLocal) return 2;
+    return -1;
+  }, [
+    personalBasicComplete,
+    identityFlowComplete,
+    userEmailVerified,
+    userPhoneVerified,
+    livenessCompleteLocal,
   ]);
 
   /** Keep personal form/summary in this card until identity is verified; never hide it just because fields validate locally. */
@@ -3242,6 +3353,10 @@ export default function VerificationCenter() {
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                     Verified
                   </span>
+                ) : personalAdminReviewPending ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-100 text-sky-900">
+                    Verification Request under Review
+                  </span>
                 ) : verificationStatus.personal.completed ? (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                     Pending verification
@@ -3253,16 +3368,15 @@ export default function VerificationCenter() {
                 )}
               </div>
 
-              {!(sectionEditMode.personal && personalBasicComplete) && !showPersonalIdentityReadOnlySummary && (
+              {!showPersonalIdentityReadOnlySummary && (
                 <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4">
-                  {/* <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Personal verification flow</p> */}
                   <div className="flex flex-wrap gap-2">
-                    {PERSONAL_FLOW_UI_GROUPS.map(({ label, steps: groupSteps }, i) => {
+                    {PERSONAL_FLOW_UI_GROUPS.map(({ label }, i) => {
                       const done =
                         (i === 0 && identityFlowComplete) ||
                         (i === 1 && userEmailVerified && userPhoneVerified) ||
                         (i === 2 && livenessCompleteLocal);
-                      const active = groupSteps.includes(personalFlowStep);
+                      const active = activePersonalFlowGroupIndex === i;
                       return (
                         <div
                           key={label}
@@ -3295,8 +3409,8 @@ export default function VerificationCenter() {
                     <div className="min-w-0">
                       <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
                       <p className="text-sm text-gray-600 mt-1">
-                        Update your details, then tap Add Data to save. Use Verify Data on the main card when you are ready
-                        to open identity verification.
+                        Update your details, then tap Add Data to save. Use Back to return to this tab and continue the
+                        verification steps (identity, email & phone, liveness) on one page.
                       </p>
                     </div>
                     <button
@@ -3422,6 +3536,10 @@ export default function VerificationCenter() {
                       {verificationStatus.personal.verified ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           Verified
+                        </span>
+                      ) : personalAdminReviewPending ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-100 text-sky-900">
+                          Verification Request under Review
                         </span>
                       ) : verificationStatus.personal.completed ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
@@ -3751,53 +3869,75 @@ export default function VerificationCenter() {
                     </div>
                   </div>
                 )
-              ) : personalFlowStep === 'identity' ? (
-                <div
-                  className={
-                    verifyPersonalModalOpen
-                      ? ''
-                      : 'min-h-[120px] flex flex-col items-center justify-center gap-3 text-center px-4 py-6'
-                  }
-                >
-                  {!verifyPersonalModalOpen && (
-                    <>
-                      <p className="text-sm text-gray-600">Choose how to verify your identity to continue.</p>
-                      <button
-                        type="button"
-                        onClick={() => setVerifyPersonalModalOpen(true)}
-                        className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+              ) : (
+                <div className="space-y-8">
+                  {/** Hide completed identity while Email & phone (1) or Liveness (2) is the active pill. */}
+                  {activePersonalFlowGroupIndex !== 1 && activePersonalFlowGroupIndex !== 2 ? (
+                    <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step 2</p>
+                          <h2 className="text-lg font-semibold text-gray-900">Identity verification</h2>
+                        </div>
+                        {identityFlowComplete ? (
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                            Completed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-900">
+                            To do
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className={
+                          verifyPersonalModalOpen
+                            ? ''
+                            : 'min-h-[120px] flex flex-col items-center justify-center gap-3 text-center px-4 py-6'
+                        }
                       >
-                        Open verification options
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                        className="text-xs text-gray-500 hover:text-gray-800"
-                      >
-                        Edit personal data
-                      </button>
-                    </>
-                  )}
-                </div>
-              ) : personalFlowStep === 'contact' ? (
-                <div className="w-full space-y-5 min-h-[280px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-lg font-semibold text-gray-900">Email & phone</h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {userEmailVerified
-                          ? 'Add your phone number and confirm the code we send by SMS or to your account email.'
-                          : 'Verify your account email, then verify your phone number to continue.'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                      className="shrink-0 text-sm font-semibold text-gray-900 hover:text-brand-600"
-                    >
-                      Edit Data
-                    </button>
-                  </div>
+                        {!verifyPersonalModalOpen && (
+                          <>
+                            <p className="text-sm text-gray-600">Choose how to verify your identity to continue.</p>
+                            <button
+                              type="button"
+                              onClick={() => setVerifyPersonalModalOpen(true)}
+                              className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+                            >
+                              Open verification options
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                              className="text-xs text-gray-500 hover:text-gray-800"
+                            >
+                              Edit personal data
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {!identityFlowComplete ? (
+                    <p className="text-sm text-gray-600 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-4 py-3">
+                      Complete Step 2 above to unlock email & phone and liveness on this same page.
+                    </p>
+                  ) : null}
+
+                  {identityFlowComplete && activePersonalFlowGroupIndex !== 2 ? (
+                    <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6 space-y-5">
+                      <div className="border-b border-gray-100 pb-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Step {activePersonalFlowGroupIndex === 1 ? '2' : '3'}
+                        </p>
+                        <h2 className="text-lg font-semibold text-gray-900">Email & phone</h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {userEmailVerified
+                            ? 'Add your phone number and confirm the code we send by SMS or to your account email.'
+                            : 'Verify your account email, then verify your phone number to continue.'}
+                        </p>
+                      </div>
                   <div className="flex flex-col gap-4 w-full">
                     <div className="rounded-lg border border-gray-200 bg-white px-3 py-3 w-full">
                       <div className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -4075,23 +4215,19 @@ export default function VerificationCenter() {
                       </div>
                     </div>
                   </div>
-                </div>
-              ) : personalFlowStep === 'liveness' ? (
-                <div className="space-y-5 min-h-[280px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-lg font-semibold text-gray-900">Liveness check</h2>
-                      <p className="text-sm text-gray-600 mt-1">Complete a quick camera check to confirm it is you.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                      className="shrink-0 text-sm font-semibold text-gray-900 hover:text-brand-600"
-                    >
-                      Edit Data
-                    </button>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                    </section>
+                  ) : null}
+
+                  {identityFlowComplete && userEmailVerified && userPhoneVerified ? (
+                    <section className="rounded-xl border border-gray-200 bg-white p-5 md:p-6 space-y-5">
+                      <div className="border-b border-gray-100 pb-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Step {activePersonalFlowGroupIndex === 2 ? '2' : '4'}
+                        </p>
+                        <h2 className="text-lg font-semibold text-gray-900">Liveness check</h2>
+                        <p className="text-sm text-gray-600 mt-1">Complete a quick camera check to confirm it is you.</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-3 shrink-0">
                         <HiVideoCamera className="w-5 h-5 text-gray-400 flex-shrink-0" />
@@ -4144,8 +4280,10 @@ export default function VerificationCenter() {
                       </div>
                     )}
                   </div>
+                    </section>
+                  ) : null}
                 </div>
-              ) : null}
+              )}
             </div>
           )}
 
@@ -4899,113 +5037,191 @@ export default function VerificationCenter() {
 
               {fe.work_list && <p className="text-sm text-red-600">{fe.work_list}</p>}
 
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {workEntriesList.map((entry, index) => {
                   const status = entry.workVerificationStatus ?? 'pending';
                   const org = entry.organisationName?.trim() || '';
                   const role = entry.role?.trim() || '';
-                  const title = org || role || 'Work experience';
-                  const subtitle =
-                    org && role ? `${role} · ${formatWorkCardSubtitle(entry)}` : formatWorkCardSubtitle(entry);
+                  const headerTitle = role || org || 'Work experience';
+                  const headerSubtitle = formatWorkExperienceHeaderSubtitle(entry);
+                  const tenureYears = workTenureYearsAtOrganisation(entry);
+                  const dateRange = formatWorkCardDateRange(entry);
+                  const skillTags = workAssociatedSkillTags(entry);
                   const workRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`work_${index}_`));
+                  const showSelfDeclarationBanner = entry.selfDeclared && status === 'pending';
+
                   return (
-                    <div
-                      key={entry.id ?? `work-${index}`}
-                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
-                    >
+                    <div key={entry.id ?? `work-${index}`} className="space-y-3">
                       {workRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                        <ul className="list-disc space-y-0.5 pl-5 text-sm text-red-600">
                           {workRowErrs.map(([k, msg]) => (
                             <li key={k}>{msg}</li>
                           ))}
                         </ul>
                       )}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                          <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-900">{title}</p>
-                            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-                          <div className="flex flex-wrap gap-1.5 justify-end">
-                            {entry.selfDeclared && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
-                                Self Declared
-                              </span>
-                            )}
-                            {status === 'pending' && !entry.selfDeclared && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                                Pending
-                              </span>
-                            )}
-                            {status === 'verified' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                                Verified
-                              </span>
-                            )}
-                          </div>
-                          {entry.selfDeclared && (
-                            <p className="text-xs text-gray-400">via Self Declaration</p>
-                          )}
-                        </div>
-                      </div>
 
-                      {entry.selfDeclared && (
-                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
-                          <span>
-                            Self Declaration — limited network access. Upgrade by adding employer verification details.
-                          </span>
+                      {showSelfDeclarationBanner ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/90 bg-[#fffbeb] px-4 py-3.5">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <HiExclamationCircle
+                              className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+                              aria-hidden
+                            />
+                            <p className="text-sm font-medium leading-snug text-amber-950">
+                              Self Declaration — limited network access. Upgrade to full verification.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => openVerifyWorkModal(index)}
+                            className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                          >
+                            <span
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                              aria-hidden
+                            >
+                              <HiArrowUp className="h-3.5 w-3.5" />
+                            </span>
+                            Upgrade Verification
+                          </button>
                         </div>
-                      )}
+                      ) : null}
 
-                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {status === 'pending' && entry.selfDeclared && (
-                            <button
-                              type="button"
-                              onClick={() => openVerifyWorkModal(index)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                        <div className="space-y-4 p-5 sm:p-6">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 gap-4">
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+                                <HiBriefcase className="h-6 w-6 text-brand-600" aria-hidden />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-lg font-semibold leading-tight text-gray-900">{headerTitle}</p>
+                                <p className="mt-1 text-sm text-gray-500">{headerSubtitle}</p>
+                                {tenureYears != null ? (
+                                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
+                                    <HiClock className="h-4 w-4 shrink-0" aria-hidden />
+                                    {tenureYears.toFixed(1)} years at this organisation
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
+                              {status === 'verified' ? (
+                                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                                  Verified
+                                </span>
+                              ) : (
+                                <>
+                                  {entry.selfDeclared ? (
+                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
+                                      Self Declared
+                                    </span>
+                                  ) : null}
+                                  {!entry.selfDeclared ? (
+                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                      Pending
+                                    </span>
+                                  ) : null}
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-start gap-2 text-sm text-gray-800">
+                            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+                            <span>
+                              <span className="font-medium text-gray-900">{org || '—'}</span>
+                              <span className="text-gray-500"> · {dateRange}</span>
+                            </span>
+                          </div>
+
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Remuneration
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-gray-900">
+                                {formatWorkRemunerationLine(entry)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Compensation
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-gray-900">
+                                {formatWorkCompensationSummary(entry)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {(
+                            [
+                              { label: 'Job description', text: entry.jobDescription },
+                              { label: 'Responsibilities', text: entry.responsibilitiesText },
+                              { label: 'Achievements', text: entry.achievementsText },
+                            ] as const
+                          ).map((block) => (
+                            <div
+                              key={block.label}
+                              className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3"
                             >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Upgrade Verification
-                            </button>
-                          )}
-                          {status === 'pending' && !entry.selfDeclared && (
-                            <button
-                              type="button"
-                              onClick={() => openVerifyWorkModal(index)}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                            >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Verify
-                            </button>
-                          )}
-                          {!entry.selfDeclared && entry.verifyWebsite?.trim() && (
-                            <a
-                              href={
-                                entry.verifyWebsite.startsWith('http')
-                                  ? entry.verifyWebsite
-                                  : `https://${entry.verifyWebsite}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
-                            >
-                              Verification website
-                            </a>
-                          )}
+                              <p className="text-xs font-medium text-gray-500">{block.label}</p>
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                                {block.text?.trim() ? block.text.trim() : '—'}
+                              </p>
+                            </div>
+                          ))}
+
+                          {skillTags.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {skillTags.map((t) => (
+                                <span
+                                  key={`${entry.id ?? index}-${t}`}
+                                  className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-100"
+                                >
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => requestRemoveWorkEntry(index)}
-                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Remove work experience"
-                        >
-                          <HiTrash className="w-5 h-5" />
-                        </button>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:px-6">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {status === 'pending' && !entry.selfDeclared ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyWorkModal(index)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                              >
+                                <HiShieldCheck className="h-4 w-4" />
+                                Verify
+                              </button>
+                            ) : null}
+                            {!entry.selfDeclared && entry.verifyWebsite?.trim() ? (
+                              <a
+                                href={
+                                  entry.verifyWebsite.startsWith('http')
+                                    ? entry.verifyWebsite
+                                    : `https://${entry.verifyWebsite}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                Verification website
+                              </a>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => requestRemoveWorkEntry(index)}
+                            className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            aria-label="Remove work experience"
+                          >
+                            <HiTrash className="h-5 w-5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -5013,6 +5229,7 @@ export default function VerificationCenter() {
               </div>
 
               {showWorkAddForm ? (
+              <div className={workEntriesList.length > 0 ? 'mt-6 border-t border-gray-200 pt-6' : ''}>
               <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -5359,6 +5576,7 @@ export default function VerificationCenter() {
                     {workSaving ? 'Saving...' : 'Add Work Experience'}
                   </button>
               </div>
+              </div>
               ) : workEntriesList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -5378,14 +5596,16 @@ export default function VerificationCenter() {
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setWorkAddFormOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
-                >
-                  <HiPlus className="w-4 h-4 text-brand-600" />
-                  Add new work experience
-                </button>
+                <div className="border-t border-gray-200 pt-6">
+                  <button
+                    type="button"
+                    onClick={() => setWorkAddFormOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
+                  >
+                    <HiPlus className="h-4 w-4 text-brand-600" />
+                    Add more data
+                  </button>
+                </div>
               )}
 
             </div>
@@ -6510,6 +6730,9 @@ export default function VerificationCenter() {
               </button>
             </div>
             <div className="grid gap-3">
+              {!(
+                identityVerificationPath === 'self' && personalSelfDeclarationAcknowledged
+              ) ? (
               <button
                 type="button"
                 onClick={() => {
@@ -6526,6 +6749,11 @@ export default function VerificationCenter() {
                   <p className="text-sm text-gray-500 mt-0.5">Declare your identity information yourself</p>
                 </div>
               </button>
+              ) : (
+                <p className="text-sm text-gray-600 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                  You have already confirmed self declaration. To upgrade verification, use Government ID below.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => {
