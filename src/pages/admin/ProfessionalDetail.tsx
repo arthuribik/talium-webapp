@@ -153,11 +153,7 @@ function isEducationSelfDeclared(edu: any): boolean {
 }
 
 function isWorkSelfDeclared(exp: any): boolean {
-  const vc =
-    exp?.verificationContact && typeof exp.verificationContact === 'object' ? exp.verificationContact : {};
-  const email = String((vc as any).email ?? '').trim();
-  const website = String((vc as any).website ?? '').trim();
-  return !email && !website;
+  return isSelfDeclarationMethod(exp?.verificationMethod);
 }
 
 function isProjectSelfDeclared(proj: any): boolean {
@@ -1408,10 +1404,6 @@ export default function ProfessionalDetail() {
                           salaryRange.min != null || salaryRange.max != null
                             ? `${exp.currency || ''} ${[salaryRange.min, salaryRange.max].filter((v) => v != null && v !== '').join(' – ')}`.trim()
                             : null;
-                        const vc =
-                          exp.verificationContact && typeof exp.verificationContact === 'object'
-                            ? exp.verificationContact
-                            : {};
                         const workSelf = isWorkSelfDeclared(exp);
                         const workEff = effectiveVerificationStatus(exp.verificationStatus, workSelf);
                         const responsibilities = Array.isArray(exp.responsibilities)
@@ -1437,7 +1429,7 @@ export default function ProfessionalDetail() {
                                 {workSelf ? (
                                   <Pill tone="yes">Self-declared</Pill>
                                 ) : (
-                                  <Pill tone="yes">HR / org verification path</Pill>
+                                  <Pill tone="yes">Standard verification</Pill>
                                 )}
                               </div>
                             </div>
@@ -1466,20 +1458,28 @@ export default function ProfessionalDetail() {
                                   <FieldRow label="Work location" value={locationLine} />
                                 </div>
                               ) : null}
-                              {(vc as any).email || (vc as any).website ? (
+                              {exp.verificationMethod || exp.workVerificationEmail || exp.supportingMediaUrl ? (
                                 <div className="md:col-span-2 rounded-lg border border-gray-100 bg-white p-3 space-y-2">
                                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                    Verification contact (organisation)
+                                    Verification
                                   </p>
-                                  <FieldRow label="HR / contact email" value={(vc as any).email} />
-                                  <FieldRow
-                                    label="Company website"
-                                    value={
-                                      (vc as any).website ? (
-                                        <DocLink href={String((vc as any).website)}>Open site</DocLink>
-                                      ) : null
-                                    }
-                                  />
+                                  {exp.verificationMethod ? (
+                                    <FieldRow
+                                      label="Method"
+                                      value={humanizeKey(String(exp.verificationMethod))}
+                                    />
+                                  ) : null}
+                                  {exp.workVerificationEmail ? (
+                                    <FieldRow label="Work verification email" value={exp.workVerificationEmail} />
+                                  ) : null}
+                                  {exp.supportingMediaUrl ? (
+                                    <FieldRow
+                                      label="Supporting document"
+                                      value={
+                                        <DocLink href={String(exp.supportingMediaUrl)}>Open document</DocLink>
+                                      }
+                                    />
+                                  ) : null}
                                 </div>
                               ) : null}
                             </div>

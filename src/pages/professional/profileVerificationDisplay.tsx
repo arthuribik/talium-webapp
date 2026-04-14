@@ -172,6 +172,15 @@ function resolveWorkVerificationRowStatus(exp: any): 'pending' | 'verified' {
   return 'pending';
 }
 
+function isWorkSelfDeclaredForProfile(exp: any): boolean {
+  const m = String(exp?.verificationMethod ?? '')
+    .toLowerCase()
+    .replace(/-/g, '_');
+  if (m === 'self_declaration' || m === 'self_declared') return true;
+  if (m === 'work_email' || m === 'upload_document') return false;
+  return exp.selfDeclared === true;
+}
+
 function formatEducationProfileSubtitle(edu: any): string {
   const level =
     EDUCATION_LEVEL_LABELS[displayText(edu.levelOfEducation)] ||
@@ -264,15 +273,7 @@ export function ProfileWorkSection({ items }: { items: any[] }) {
               : `${a ?? '—'} – ${b ?? '—'}`;
           }
         }
-        const vc =
-          exp.verificationContact && typeof exp.verificationContact === 'object'
-            ? exp.verificationContact
-            : {};
-        const website = displayText((vc as any).website);
-        const hrEmail = displayText((vc as any).email);
-        const verifyWebsite = displayText(exp.verifyWebsite);
-        const selfDeclared =
-          exp.selfDeclared === true || (!website && !hrEmail && !verifyWebsite);
+        const selfDeclared = isWorkSelfDeclaredForProfile(exp);
         const otherComp = Array.isArray(exp.achievements) ? exp.achievements : [];
         const rowStatus = resolveWorkVerificationRowStatus(exp);
         const org = displayText(exp.organisationName);
@@ -310,7 +311,7 @@ export function ProfileWorkSection({ items }: { items: any[] }) {
                   )}
                 </div>
                 {selfDeclared ? (
-                  <p className="text-[11px] text-gray-400">Self declared — employer verification skipped</p>
+                  <p className="text-[11px] text-gray-400">Self declared — optional full verification</p>
                 ) : null}
               </div>
             </div>
@@ -319,8 +320,8 @@ export function ProfileWorkSection({ items }: { items: any[] }) {
               <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-950">
                 <HiExclamationCircle className="w-4 h-4 shrink-0 text-amber-700 mt-0.5" />
                 <span>
-                  Self Declaration — limited network access. Upgrade by adding employer verification details in
-                  the Verification Center.
+                  Self Declaration — limited network access. Use the Verification Center to verify with work email
+                  or a supporting document.
                 </span>
               </div>
             ) : null}
@@ -376,20 +377,30 @@ export function ProfileWorkSection({ items }: { items: any[] }) {
                     'Self declared'
                   ) : (
                     <span className="space-y-1">
-                      {website ? (
+                      {displayText(exp.verificationMethod) ? (
+                        <div>Method: {displayText(exp.verificationMethod)}</div>
+                      ) : null}
+                      {displayText(exp.workVerificationEmail) ? (
+                        <div>Work email: {displayText(exp.workVerificationEmail)}</div>
+                      ) : null}
+                      {displayText(exp.supportingMediaUrl) ? (
                         <div>
-                          Website:{' '}
+                          Document:{' '}
                           <a
-                            href={resolveUrl(website)}
+                            href={resolveUrl(displayText(exp.supportingMediaUrl))}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-medium text-brand-600 hover:underline"
                           >
-                            {website}
+                            Open
                           </a>
                         </div>
                       ) : null}
-                      {hrEmail ? <div>HR email: {hrEmail}</div> : null}
+                      {!displayText(exp.verificationMethod) &&
+                      !displayText(exp.workVerificationEmail) &&
+                      !displayText(exp.supportingMediaUrl) ? (
+                        <span>—</span>
+                      ) : null}
                     </span>
                   )}
                 </dd>

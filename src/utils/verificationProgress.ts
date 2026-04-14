@@ -40,14 +40,8 @@ function isEducationSelfDeclaredForAggregate(e: { verificationMethod?: string | 
   return isVerificationSelfDeclarationMethod(e?.verificationMethod);
 }
 
-function isWorkSelfDeclaredForAggregate(exp: { verificationContact?: unknown }): boolean {
-  const vc =
-    exp?.verificationContact && typeof exp.verificationContact === 'object'
-      ? (exp.verificationContact as Record<string, unknown>)
-      : {};
-  const email = String(vc['email'] ?? '').trim();
-  const website = String(vc['website'] ?? '').trim();
-  return !email && !website;
+function isWorkSelfDeclaredForAggregate(exp: { verificationMethod?: string | null }): boolean {
+  return isVerificationSelfDeclarationMethod(exp?.verificationMethod);
 }
 
 function isProjectSelfDeclaredForAggregate(proj: {
@@ -134,7 +128,7 @@ export function deriveVerificationStatusFromProfile(data: unknown): Record<
   const workVerified =
     workCompleted &&
     work.every(
-      (e: { verificationContact?: unknown; verificationStatus?: string }) =>
+      (e: { verificationMethod?: string | null; verificationStatus?: string }) =>
         isWorkSelfDeclaredForAggregate(e) || e?.verificationStatus === 'verified',
     );
 

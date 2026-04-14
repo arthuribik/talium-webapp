@@ -10,6 +10,7 @@ import {
   HiShare,
   HiBriefcase,
   HiBadgeCheck,
+  HiCalendar,
   HiUsers,
   HiPlus,
   HiX,
@@ -119,7 +120,7 @@ function isSectionKey(value: string | null): value is SectionKey {
   return value !== null && VALID_SECTION_KEYS.includes(value as SectionKey);
 }
 
-const GENDERS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
+const GENDERS = ['Male', 'Female'];
 const ID_TYPE_OPTIONS = [
   { value: 'national_id', label: 'National ID' },
   { value: 'passport', label: 'Passport' },
@@ -134,7 +135,6 @@ type SelfDeclarationFlow =
   | { open: true; kind: 'personal' }
   | { open: true; kind: 'address'; locationIndex: number }
   | { open: true; kind: 'education'; educationIndex: number }
-  | { open: true; kind: 'work' }
   | { open: true; kind: 'work_card'; workIndex: number }
   | { open: true; kind: 'project_card'; projectIndex: number }
   | { open: true; kind: 'cert_card'; certIndex: number };
@@ -406,6 +406,21 @@ function mapApiLocationToEntry(loc: any, index: number, length: number): Locatio
   };
 }
 
+function locationVerificationMethodLabel(loc: LocationEntry): string | null {
+  const t = (loc.documentType || '').trim().toLowerCase();
+  const st = loc.verificationStatus ?? 'pending';
+  const map: Record<string, string> = {
+    utility_bill: 'Utility bill',
+    bank_statement: 'Bank statement',
+    lease_agreement: 'Lease or tenancy agreement',
+    digital_verify: 'Digital verification',
+    other: 'Proof document',
+  };
+  if (t && map[t]) return map[t];
+  if ((st === 'pending' || st === 'verified') && loc.documentUrl?.trim()) return 'Proof document';
+  return null;
+}
+
 type EducationProgramMilestoneEntry = {
   title: string;
   startDate: string;
@@ -453,6 +468,8 @@ type EducationEntry = {
   isDefault?: boolean;
   /** How the user chose to verify (persisted on the education record). */
   verificationMethod?: string | null;
+  /** Institution email used for student-email verification (from API after send/verify). */
+  studentVerificationEmail?: string;
   /** Local UI: education row verification (not necessarily from API). */
   eduVerificationStatus?: 'pending' | 'verified';
 };
@@ -487,8 +504,25 @@ const emptyEducation = (): EducationEntry => ({
   supportingMediaUrl: '',
   isDefault: false,
   verificationMethod: undefined,
+  studentVerificationEmail: '',
   eduVerificationStatus: 'pending',
 });
+
+function educationVerificationMethodLabel(entry: EducationEntry): string | null {
+  const st = entry.eduVerificationStatus ?? 'pending';
+  const m = (entry.verificationMethod || '').trim().toLowerCase();
+  if (m === 'self_declaration' && st !== 'verified') return null;
+  const map: Record<string, string> = {
+    student_email: 'Student email',
+    upload_document: 'Uploaded document',
+    digital_verify: 'Digital verification',
+  };
+  if (m && map[m]) return map[m];
+  if (entry.supportingMediaUrl?.trim() && (st === 'pending' || st === 'verified')) {
+    return 'Supporting document';
+  }
+  return null;
+}
 
 type WorkRoleEntry = {
   title: string;
@@ -525,10 +559,28 @@ type WorkEntry = {
   otherCompensationInput: string;
   otherCompensationNotes: string;
   selfDeclared: boolean;
-  verifyWebsite: string;
-  verifyHrEmail: string;
   workVerificationStatus?: 'pending' | 'verified';
+  /** How the user chose to verify (synced with API `verificationMethod`). */
+  verificationMethod?: string | null;
+  /** Work email used for OTP verification (from API after send/verify). */
+  workVerificationEmail?: string;
+  supportingMediaUrl?: string;
 };
+
+function workVerificationMethodLabel(entry: WorkEntry): string | null {
+  const st = entry.workVerificationStatus ?? 'pending';
+  const m = (entry.verificationMethod || '').trim().toLowerCase();
+  if (m === 'self_declaration' && st !== 'verified') return null;
+  const map: Record<string, string> = {
+    work_email: 'Work email',
+    upload_document: 'Uploaded document',
+  };
+  if (m && map[m]) return map[m];
+  if (entry.supportingMediaUrl?.trim() && (st === 'pending' || st === 'verified')) {
+    return 'Supporting document';
+  }
+  return null;
+}
 
 const emptyWork = (): WorkEntry => ({
   organisationName: '',
@@ -549,10 +601,11 @@ const emptyWork = (): WorkEntry => ({
   otherCompensation: [],
   otherCompensationInput: '',
   otherCompensationNotes: '',
-  selfDeclared: true,
-  verifyWebsite: '',
-  verifyHrEmail: '',
+  selfDeclared: false,
   workVerificationStatus: 'pending',
+  verificationMethod: undefined,
+  workVerificationEmail: '',
+  supportingMediaUrl: '',
 });
 
 const WORK_SALARY_FREQUENCY_OPTIONS = [
@@ -624,17 +677,39 @@ function workTenureYearsAtOrganisation(entry: WorkEntry): number | null {
   return ms / (365.25 * 24 * 60 * 60 * 1000);
 }
 
-function formatWorkCardDateRange(entry: WorkEntry): string {
+/** Parses `Other roles: Title (start – end); …` produced when syncing multiple roles to the API. */
+function parseOtherRolesLine(line: string): WorkRoleEntry[] {
+  const m = line.trim().match(/^Other roles:\s*(.+)$/i);
+  if (!m?.[1]) return [];
+  const segments = m[1].split(/;\s+/).map((s) => s.trim()).filter(Boolean);
+  const out: WorkRoleEntry[] = [];
+  for (const seg of segments) {
+    const inner = seg.match(/^(.+?)\s*\(\s*(.*?)\s*[–-]\s*(.*?)\s*\)\s*$/);
+    if (!inner) continue;
+    const title = inner[1].trim();
+    const d1 = inner[2].trim();
+    const d2 = inner[3].trim();
+    const currentlyWorking = d2.toLowerCase() === 'present';
+    out.push({
+      title,
+      startDate: d1 === '?' ? '' : d1,
+      endDate: currentlyWorking ? '' : d2 === '?' ? '' : d2,
+      currentlyWorking,
+    });
+  }
+  return out;
+}
+
+function formatWorkRoleDateRange(role: WorkRoleEntry): string {
   const fmt = (d: Date) =>
     d.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-  const start = parseWorkYmd(entry.startDate ?? '');
-  const primary = entry.workRoles[0];
-  const endExplicit = parseWorkYmd(entry.endDate ?? '') ?? parseWorkYmd(primary?.endDate ?? '');
-  const startStr = start ? fmt(start) : (entry.startDate?.trim() || '—');
-  if (primary?.currentlyWorking && !entry.endDate?.trim() && !primary?.endDate?.trim()) {
+  const start = parseWorkYmd(role.startDate ?? '');
+  const startStr = start ? fmt(start) : role.startDate?.trim() || '—';
+  const endExplicit = parseWorkYmd(role.endDate ?? '');
+  if (role.currentlyWorking && !role.endDate?.trim()) {
     return `${startStr} — Present`;
   }
-  const endStr = endExplicit ? fmt(endExplicit) : '—';
+  const endStr = endExplicit ? fmt(endExplicit) : role.endDate?.trim() || '—';
   return `${startStr} — ${endStr}`;
 }
 
@@ -679,7 +754,9 @@ type ProjectEntry = {
   mediaUrl: string;
   teamMembers: ProjectTeamMemberEntry[];
   projectVerificationStatus?: 'pending' | 'verified';
-  /** Local: user chose self-declaration path (not stored on project row today). */
+  /** Persisted via API as `verificationMethod` (e.g. self_declaration). */
+  verificationMethod?: string | null;
+  /** Optimistic flag until sync completes. */
   projectSelfDeclared?: boolean;
 };
 
@@ -715,9 +792,27 @@ function formatProjectCardSubtitle(entry: ProjectEntry): string {
   return parts.length ? parts.join(' · ') : 'No details yet';
 }
 
+function normalizeProjectVerificationMethodKey(v: string | null | undefined): string {
+  return String(v ?? '')
+    .toLowerCase()
+    .replace(/-/g, '_');
+}
+
+function isProjectMethodSelfDeclaration(v: string | null | undefined): boolean {
+  const s = normalizeProjectVerificationMethodKey(v);
+  return s === 'self_declaration' || s === 'self_declared';
+}
+
+function projectVerificationSubtext(entry: ProjectEntry): string | null {
+  if (isProjectMethodSelfDeclaration(entry.verificationMethod)) return 'Self Declaration';
+  return null;
+}
+
 function projectEntryIsSelfDeclared(entry: ProjectEntry): boolean {
   const status = entry.projectVerificationStatus ?? 'pending';
-  return !!entry.projectSelfDeclared && status !== 'verified';
+  const viaMethod = isProjectMethodSelfDeclaration(entry.verificationMethod);
+  const viaFlag = !!entry.projectSelfDeclared;
+  return (viaMethod || viaFlag) && status !== 'verified';
 }
 
 const EDUCATION_LEVELS = [
@@ -823,6 +918,45 @@ function formatEducationCardSubtitle(entry: EducationEntry): string {
   ].join(' · ');
 }
 
+function formatEducationDurationLine(entry: EducationEntry): string {
+  const sm = monthShortCode(entry.startMonth);
+  const sy = entry.startYear;
+  const em = monthShortCode(entry.endMonth);
+  const ey = entry.endYear;
+  const start = sm && sy ? `${sm}/${sy}` : sy || sm || '';
+  if (entry.expectedEndOngoing) {
+    return start ? `${start} — Present` : 'Present';
+  }
+  const end = em && ey ? `${em}/${ey}` : [em, ey].filter(Boolean).join('/');
+  if (start && end) return `${start} — ${end}`;
+  if (start) return `${start} — …`;
+  if (end) return end;
+  return '—';
+}
+
+function educationLevelLabel(value: string): string {
+  return EDUCATION_LEVELS.find((o) => o.value === value)?.label || value?.trim() || '—';
+}
+
+function educationQualificationDisplay(value: string): string {
+  const v = value?.trim();
+  if (!v) return '—';
+  return QUALIFICATION_OPTIONS.find((o) => o.value === v)?.label || v;
+}
+
+function educationSkillChipsFromEntry(entry: EducationEntry): string[] {
+  return (entry.associatedSkills || '')
+    .split(/[,;|\n]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function formatEducationMoneyLine(currency: string | undefined, amount: string | undefined): string | null {
+  const a = amount?.trim();
+  if (!a) return null;
+  return `${(currency || 'USD').trim()} ${a}`;
+}
+
 function cloneEducationEntry(e: EducationEntry): EducationEntry {
   return {
     ...e,
@@ -856,9 +990,15 @@ type CertificateEntry = {
   credentialId: string;
   reportingUrl: string;
   supportingMediaUrl: string;
+  /** Comma-separated skills linked to this credential (optional). */
+  associatedSkills?: string;
+  /** When true, the credential has no expiry date (not sent to API). */
+  noExpiration?: boolean;
   certVerificationStatus?: 'pending' | 'verified';
   /** Local: user chose self-declaration path for this certification row. */
   certSelfDeclared?: boolean;
+  /** Persisted on profile JSON; mirrors projects/work (e.g. self_declaration). */
+  verificationMethod?: string | null;
 };
 
 const emptyCertificate = (): CertificateEntry => ({
@@ -869,6 +1009,8 @@ const emptyCertificate = (): CertificateEntry => ({
   credentialId: '',
   reportingUrl: '',
   supportingMediaUrl: '',
+  associatedSkills: '',
+  noExpiration: false,
   certVerificationStatus: 'pending',
 });
 
@@ -880,8 +1022,10 @@ function formatCertificateCardSubtitle(c: CertificateEntry): string {
   const parts: string[] = [];
   if (c.issuedBy?.trim()) parts.push(`Issued by ${c.issuedBy.trim()}`);
   if (c.issuedDate?.trim()) parts.push(`Issued ${c.issuedDate}`);
-  if (c.expirationDate?.trim()) parts.push(`Expires ${c.expirationDate}`);
+  if (!c.noExpiration && c.expirationDate?.trim()) parts.push(`Expires ${c.expirationDate}`);
+  if (c.noExpiration) parts.push('No expiration');
   if (c.credentialId?.trim()) parts.push(`ID ${c.credentialId.trim()}`);
+  if (c.associatedSkills?.trim()) parts.push(`Skills: ${c.associatedSkills.trim()}`);
   return parts.length ? parts.join(' · ') : 'No dates or credential ID';
 }
 
@@ -1040,18 +1184,6 @@ function workEntryFieldErrors(entry: WorkEntry, slug: string): Record<string, st
       o[k(`role${ri}_endDate`)] = 'End date is required, or mark as current';
     }
   }
-  if (!entry.selfDeclared) {
-    const web = entry.verifyWebsite?.trim();
-    const em = entry.verifyHrEmail?.trim();
-    if (!web && !em) {
-      o[k('verifyWebsite')] = 'Add a verification website or HR email, or check “Self declared”';
-    }
-    if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
-      o[k('verifyHrEmail')] = 'Enter a valid HR email address';
-    }
-    const siteErr = web ? validateOptionalHttpUrl('Verification website', web) : null;
-    if (siteErr) o[k('verifyWebsite')] = siteErr.replace(/^Verification website /, '');
-  }
   const salErr = validateAmountField('Salary', entry.salary);
   if (salErr) o[k('salary')] = salErr.replace(/^Salary /, '');
   return o;
@@ -1086,7 +1218,12 @@ function certificateEntryFieldErrors(c: CertificateEntry, slug: string): Record<
   if (reportErr) o[k('reportingUrl')] = reportErr;
   const mediaErr = validateOptionalHttpUrl('Supporting media URL', c.supportingMediaUrl);
   if (mediaErr) o[k('supportingMediaUrl')] = mediaErr;
-  if (c.issuedDate && c.expirationDate && c.issuedDate > c.expirationDate) {
+  if (
+    !c.noExpiration &&
+    c.issuedDate &&
+    c.expirationDate &&
+    c.issuedDate > c.expirationDate
+  ) {
     o[k('expirationDate')] = 'Expiration date cannot be before issued date';
   }
   return o;
@@ -1185,6 +1322,8 @@ function certificationListFieldErrors(list: CertificateEntry[]): Record<string, 
 
 export default function VerificationCenter() {
   const [loading, setLoading] = useState(true);
+  /** After the first profile load, refreshes use `soft` mode so saves do not flash the full-page loader. */
+  const profileInitialFetchCompletedRef = useRef(false);
   const [profile, setProfile] = useState<any>(null);
   const [verificationStatus, setVerificationStatus] = useState<Record<SectionKey, { completed: boolean; verified: boolean }>>({
     personal: { completed: false, verified: false },
@@ -1298,14 +1437,38 @@ export default function VerificationCenter() {
   const [educationDraft, setEducationDraft] = useState<EducationEntry>(() => emptyEducation());
   const [educationSaving, setEducationSaving] = useState(false);
   const [educationAddFormOpen, setEducationAddFormOpen] = useState(false);
+  const [educationSkillInput, setEducationSkillInput] = useState('');
+  const educationDraftSkillChips = useMemo(
+    () =>
+      educationDraft.associatedSkills
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [educationDraft.associatedSkills],
+  );
   const [verifyEducationModal, setVerifyEducationModal] = useState<{
     open: boolean;
     index: number | null;
-  }>({ open: false, index: null });
+    screen: 'pick' | 'student_email' | 'student_success';
+    studentEmail: string;
+    otp: string;
+    otpSent: boolean;
+    studentFlowBusy: boolean;
+  }>({
+    open: false,
+    index: null,
+    screen: 'pick',
+    studentEmail: '',
+    otp: '',
+    otpSent: false,
+    studentFlowBusy: false,
+  });
   const [educationRemoveConfirm, setEducationRemoveConfirm] = useState<{
     open: boolean;
     index: number | null;
   }>({ open: false, index: null });
+  /** Collapsible education cards on verification tab; omitted key defaults to collapsed. */
+  const [educationCardExpanded, setEducationCardExpanded] = useState<Record<string, boolean>>({});
   const educationVerifyFileInputRef = useRef<HTMLInputElement>(null);
   const educationVerifyUploadIndexRef = useRef<number | null>(null);
   const [uploadingEducationIndex, setUploadingEducationIndex] = useState<number | null>(null);
@@ -1318,13 +1481,38 @@ export default function VerificationCenter() {
   const [verifyWorkModal, setVerifyWorkModal] = useState<{
     open: boolean;
     index: number | null;
-    step: 'method' | 'employer';
-  }>({ open: false, index: null, step: 'method' });
-  const [workVerifyEmployerDraft, setWorkVerifyEmployerDraft] = useState({ email: '', website: '' });
+    screen: 'pick' | 'work_email' | 'work_email_success';
+    workEmail: string;
+    otp: string;
+    otpSent: boolean;
+    workEmailFlowBusy: boolean;
+  }>({
+    open: false,
+    index: null,
+    screen: 'pick',
+    workEmail: '',
+    otp: '',
+    otpSent: false,
+    workEmailFlowBusy: false,
+  });
   const [workRemoveConfirm, setWorkRemoveConfirm] = useState<{
     open: boolean;
     index: number | null;
   }>({ open: false, index: null });
+  /** Collapsible work cards on verification tab; omitted key defaults to collapsed. */
+  const [workCardExpanded, setWorkCardExpanded] = useState<Record<string, boolean>>({});
+  const workVerifyFileInputRef = useRef<HTMLInputElement>(null);
+  const workVerifyUploadIndexRef = useRef<number | null>(null);
+  const [uploadingWorkIndex, setUploadingWorkIndex] = useState<number | null>(null);
+  const [workSkillInput, setWorkSkillInput] = useState('');
+  const workDraftSkillChips = useMemo(
+    () =>
+      workDraft.associatedSkills
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [workDraft.associatedSkills],
+  );
 
   const [projectsList, setProjectsList] = useState<ProjectEntry[]>([]);
   const [projectDraft, setProjectDraft] = useState<ProjectEntry>(() => emptyProject());
@@ -1580,7 +1768,8 @@ export default function VerificationCenter() {
   }, [personalIdentityAwaitingVerification, loading]);
 
   const fetchProfile = async (opts?: { soft?: boolean }) => {
-    if (!opts?.soft) setLoading(true);
+    const blockWholePage = !opts?.soft && !profileInitialFetchCompletedRef.current;
+    if (blockWholePage) setLoading(true);
     try {
       const [profileRes, statusRes] = await Promise.all([
         api.get('/v1/professional/profile'),
@@ -1724,6 +1913,8 @@ export default function VerificationCenter() {
                 supportingMediaUrl: e.supportingMediaUrl || '',
                 isDefault: !!e.isDefault,
                 verificationMethod: e.verificationMethod || undefined,
+                studentVerificationEmail:
+                  typeof e.studentVerificationEmail === 'string' ? e.studentVerificationEmail : '',
                 eduVerificationStatus:
                   e.verificationStatus === 'verified' ? 'verified' : 'pending',
               };
@@ -1736,14 +1927,27 @@ export default function VerificationCenter() {
         if (Array.isArray(workList) && workList.length > 0) {
           setWorkEntriesList(
             workList.map((w: any) => {
-              const vc = w.verificationContact && typeof w.verificationContact === 'object' ? w.verificationContact : {};
               const sr = w.salaryRange && typeof w.salaryRange === 'object' ? w.salaryRange : null;
               const startD = w.startDate ? (typeof w.startDate === 'string' ? w.startDate.slice(0, 10) : '') : '';
               const endD = w.endDate ? (typeof w.endDate === 'string' ? w.endDate.slice(0, 10) : '') : '';
               const respArr = Array.isArray(w.responsibilities) ? w.responsibilities.filter((x: unknown) => typeof x === 'string') : [];
+              const otherIdx = respArr.findIndex((a: string) => /^Other roles:\s*/i.test(a));
+              const respWithoutOther =
+                otherIdx >= 0 ? [...respArr.slice(0, otherIdx), ...respArr.slice(otherIdx + 1)] : [...respArr];
+              const parsedExtras =
+                otherIdx >= 0 && typeof respArr[otherIdx] === 'string'
+                  ? parseOtherRolesLine(respArr[otherIdx] as string)
+                  : [];
               const achArr = Array.isArray(w.achievements) ? w.achievements.filter((x: unknown) => typeof x === 'string') : [];
               const skillsLine = achArr.find((a: string) => /^Skills:\s*/i.test(a));
               const achievementsOnly = achArr.filter((a: string) => !/^Skills:\s*/i.test(a));
+              const vMethod = typeof w.verificationMethod === 'string' ? w.verificationMethod : '';
+              const verified = w.verificationStatus === 'verified';
+              const selfDeclared = !verified && vMethod === 'self_declaration';
+              const jobDescFromApi =
+                typeof (w as { jobDescription?: unknown }).jobDescription === 'string'
+                  ? String((w as { jobDescription?: string }).jobDescription).trim()
+                  : '';
               return {
                 id: w.id,
                 organisationName: w.organisationName || '',
@@ -1763,18 +1967,21 @@ export default function VerificationCenter() {
                     endDate: endD,
                     currentlyWorking: !!w.currentlyWorking || !endD,
                   },
+                  ...parsedExtras,
                 ],
-                jobDescription: '',
-                responsibilitiesText: respArr.join('\n'),
+                jobDescription: jobDescFromApi,
+                responsibilitiesText: respWithoutOther.join('\n'),
                 achievementsText: achievementsOnly.join('\n'),
                 associatedSkills: skillsLine ? skillsLine.replace(/^Skills:\s*/i, '').trim() : '',
                 otherCompensation: [],
                 otherCompensationInput: '',
                 otherCompensationNotes: '',
-                selfDeclared: !vc.email && !vc.website,
-                verifyWebsite: vc.website || '',
-                verifyHrEmail: vc.email || '',
-                workVerificationStatus: (w as any).verified ? 'verified' : 'pending',
+                selfDeclared,
+                workVerificationStatus: verified ? 'verified' : 'pending',
+                verificationMethod: vMethod || undefined,
+                workVerificationEmail:
+                  typeof w.workVerificationEmail === 'string' ? w.workVerificationEmail : '',
+                supportingMediaUrl: typeof w.supportingMediaUrl === 'string' ? w.supportingMediaUrl : '',
               };
             }),
           );
@@ -1793,6 +2000,14 @@ export default function VerificationCenter() {
                   role: typeof m?.role === 'string' ? m.role : '',
                 }));
               }
+              const vmRaw =
+                typeof (p as any).verificationMethod === 'string' ? (p as any).verificationMethod : null;
+              const apiVs = String((p as any).verificationStatus ?? 'pending').toLowerCase();
+              const isVerifiedRow = apiVs === 'verified' || (p as any).verified === true;
+              const selfDeclFromApi =
+                (p as any).selfDeclared === true ||
+                (p as any).projectSelfDeclared === true ||
+                isProjectMethodSelfDeclaration(vmRaw);
               return {
                 id: p.id,
                 title: p.title || '',
@@ -1800,8 +2015,9 @@ export default function VerificationCenter() {
                 projectLink: p.projectLink || '',
                 mediaUrl: p.mediaUrl || '',
                 teamMembers,
-                projectVerificationStatus: (p as any).verified ? 'verified' : 'pending',
-                projectSelfDeclared: false,
+                projectVerificationStatus: isVerifiedRow ? 'verified' : 'pending',
+                verificationMethod: vmRaw,
+                projectSelfDeclared: selfDeclFromApi && !isVerifiedRow,
               };
             }),
           );
@@ -1811,17 +2027,36 @@ export default function VerificationCenter() {
         if (Array.isArray(data.certifications)) {
           if (data.certifications.length > 0) {
             setCertList(
-              data.certifications.map((c: any) => ({
-                name: c.name || '',
-                issuedBy: c.issuedBy || '',
-                issuedDate: c.issuedDate || '',
-                expirationDate: c.expirationDate || '',
-                credentialId: c.credentialId || '',
-                reportingUrl: c.reportingUrl || '',
-                supportingMediaUrl: c.supportingMediaUrl || '',
-                certVerificationStatus: (c as any).verified ? 'verified' : 'pending',
-                certSelfDeclared: false,
-              })),
+              data.certifications.map((c: any) => {
+                const exp = typeof c.expirationDate === 'string' ? c.expirationDate.trim() : '';
+                const vmRaw =
+                  typeof c.verificationMethod === 'string' ? c.verificationMethod.trim() : '';
+                const apiVs = String(
+                  c.certVerificationStatus ?? c.verificationStatus ?? '',
+                ).toLowerCase();
+                const isVerifiedRow =
+                  apiVs === 'verified' || c.verified === true || c.verified === 'true';
+                const selfDeclFromApi =
+                  c.certSelfDeclared === true ||
+                  c.selfDeclared === true ||
+                  vmRaw === 'self_declaration' ||
+                  vmRaw === 'self_declared';
+                return {
+                  name: c.name || '',
+                  issuedBy: c.issuedBy || '',
+                  issuedDate: c.issuedDate || '',
+                  expirationDate: exp,
+                  credentialId: c.credentialId || '',
+                  reportingUrl: c.reportingUrl || '',
+                  supportingMediaUrl: c.supportingMediaUrl || '',
+                  associatedSkills:
+                    typeof c.associatedSkills === 'string' ? c.associatedSkills : '',
+                  noExpiration: !exp,
+                  certVerificationStatus: isVerifiedRow ? 'verified' : 'pending',
+                  certSelfDeclared: selfDeclFromApi && !isVerifiedRow,
+                  verificationMethod: vmRaw || null,
+                };
+              }),
             );
           } else {
             setCertList([]);
@@ -1847,7 +2082,10 @@ export default function VerificationCenter() {
       console.error(err);
       toast.error('Failed to load profile');
     } finally {
-      if (!opts?.soft) setLoading(false);
+      if (blockWholePage) {
+        setLoading(false);
+        profileInitialFetchCompletedRef.current = true;
+      }
     }
   };
 
@@ -1887,7 +2125,7 @@ export default function VerificationCenter() {
       toast.success('Personal data added');
       setVerifyPersonalModalOpen(false);
       setPersonalIdentityAwaitingVerification(true);
-      await fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -1927,7 +2165,7 @@ export default function VerificationCenter() {
       });
       toast.success('Personal information saved');
       setSectionEditMode((prev) => ({ ...prev, personal: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -1967,7 +2205,7 @@ export default function VerificationCenter() {
       setIdentityVerificationPath('gov');
       setVerifyGovIdModalOpen(false);
       setVerifyPersonalModalOpen(false);
-      await fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -2191,7 +2429,7 @@ export default function VerificationCenter() {
       setFormFieldErrors((p) => omitKeysMatching(p, /^loc_/));
       if (!options?.silentSuccess) toast.success('Location saved');
       setSectionEditMode((prev) => ({ ...prev, location: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -2265,8 +2503,38 @@ export default function VerificationCenter() {
     setEducationDraft((d) => ({ ...d, ...updates }));
   };
 
+  const addEducationDraftSkill = () => {
+    const t = educationSkillInput.trim();
+    if (!t) return;
+    const prev = educationDraftSkillChips;
+    if (prev.includes(t)) {
+      setEducationSkillInput('');
+      return;
+    }
+    updateEducationDraft({ associatedSkills: [...prev, t].join(', ') });
+    setEducationSkillInput('');
+  };
+
+  const removeEducationDraftSkill = (token: string) => {
+    updateEducationDraft({
+      associatedSkills: educationDraftSkillChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
   const commitEducationDraft = () => {
-    const eduFe = educationEntryFieldErrors(educationDraft, 'draft');
+    let draft = educationDraft;
+    const pendingSkill = educationSkillInput.trim();
+    if (pendingSkill) {
+      const prev = draft.associatedSkills
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!prev.includes(pendingSkill)) {
+        draft = { ...draft, associatedSkills: [...prev, pendingSkill].join(', ') };
+      }
+    }
+    setEducationSkillInput('');
+    const eduFe = educationEntryFieldErrors(draft, 'draft');
     if (Object.keys(eduFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^edu_draft_/), ...eduFe }));
       toast.error('Please fix the highlighted fields');
@@ -2274,7 +2542,7 @@ export default function VerificationCenter() {
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
     const entry = cloneEducationEntry({
-      ...educationDraft,
+      ...draft,
       id: undefined,
       eduVerificationStatus: 'pending',
       isDefault: educationEntriesList.length === 0,
@@ -2288,23 +2556,107 @@ export default function VerificationCenter() {
   };
 
   const closeVerifyEducationModal = () => {
-    setVerifyEducationModal({ open: false, index: null });
+    setVerifyEducationModal({
+      open: false,
+      index: null,
+      screen: 'pick',
+      studentEmail: '',
+      otp: '',
+      otpSent: false,
+      studentFlowBusy: false,
+    });
   };
 
-  const applyEducationVerificationMethod = (index: number, method: string) => {
-    setEducationEntriesList((prev) => {
-      const next = prev.map((e, i) => (i === index ? { ...e, verificationMethod: method } : e));
-      void syncEducationEntriesToApi(next, { silentSuccess: true });
-      return next;
+  const openVerifyEducationModal = (index: number) => {
+    setVerifyEducationModal({
+      open: true,
+      index,
+      screen: 'pick',
+      studentEmail: '',
+      otp: '',
+      otpSent: false,
+      studentFlowBusy: false,
     });
-    closeVerifyEducationModal();
-    toast.success(
-      method === 'self_declaration'
-        ? 'Self declaration selected for this education.'
-        : method === 'student_email'
-          ? 'Student email verification selected.'
-          : 'Verification method updated.',
-    );
+  };
+
+  const sendEducationStudentEmailOtp = async () => {
+    const idx = verifyEducationModal.index;
+    if (idx == null) return;
+    const entry = educationEntriesList[idx];
+    if (!entry?.id) {
+      toast.error('Save your education entry before verifying by email.');
+      return;
+    }
+    const email = verifyEducationModal.studentEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Enter a valid student email address.');
+      return;
+    }
+    setVerifyEducationModal((p) => ({ ...p, studentFlowBusy: true }));
+    try {
+      const res = await api.post<{ message?: string; code?: string }>(
+        `/v1/professional/education/${entry.id}/student-email/send-otp`,
+        { email },
+      );
+      const data = res.data as { message?: string; code?: string };
+      setVerifyEducationModal((p) => ({
+        ...p,
+        otpSent: true,
+        otp: '',
+        studentFlowBusy: false,
+      }));
+      toast.success(data?.message || 'Verification code sent');
+      if (data?.code) {
+        console.info('[dev] Education verification OTP:', data.code);
+      }
+      void fetchProfile({ soft: true });
+    } catch (err: any) {
+      setVerifyEducationModal((p) => ({ ...p, studentFlowBusy: false }));
+      toast.error(err.response?.data?.message || 'Failed to send verification code');
+    }
+  };
+
+  const submitEducationStudentEmailOtp = async () => {
+    const idx = verifyEducationModal.index;
+    if (idx == null) return;
+    const entry = educationEntriesList[idx];
+    if (!entry?.id) return;
+    const email = verifyEducationModal.studentEmail.trim();
+    const code = verifyEducationModal.otp.trim();
+    if (code.length !== 6) {
+      toast.error('Enter the 6-digit code from your email.');
+      return;
+    }
+    setVerifyEducationModal((p) => ({ ...p, studentFlowBusy: true }));
+    try {
+      await api.post(`/v1/professional/education/${entry.id}/student-email/verify-otp`, {
+        email,
+        code,
+      });
+      const emailNorm = email.toLowerCase();
+      setEducationEntriesList((prev) =>
+        prev.map((e, i) =>
+          i === idx
+            ? {
+                ...e,
+                eduVerificationStatus: 'verified' as const,
+                verificationMethod: 'student_email',
+                studentVerificationEmail: emailNorm,
+              }
+            : e,
+        ),
+      );
+      setVerifyEducationModal((p) => ({
+        ...p,
+        screen: 'student_success',
+        studentFlowBusy: false,
+      }));
+      toast.success('Education verified successfully');
+      void fetchProfile({ soft: true });
+    } catch (err: any) {
+      setVerifyEducationModal((p) => ({ ...p, studentFlowBusy: false }));
+      toast.error(err.response?.data?.message || 'Verification failed');
+    }
   };
 
   const requestRemoveEducationEntry = (index: number) => {
@@ -2328,7 +2680,7 @@ export default function VerificationCenter() {
             : filtered.map((e, i) => ({ ...e, isDefault: i === 0 }));
         setEducationEntriesList(next);
         toast.success('Education removed');
-        fetchProfile();
+        await fetchProfile({ soft: true });
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Failed to remove education');
       } finally {
@@ -2415,27 +2767,63 @@ export default function VerificationCenter() {
     });
   };
 
+  const addWorkDraftSkill = () => {
+    const t = workSkillInput.trim();
+    if (!t) return;
+    const prev = workDraftSkillChips;
+    if (prev.includes(t)) {
+      setWorkSkillInput('');
+      return;
+    }
+    updateWorkDraft({ associatedSkills: [...prev, t].join(', ') });
+    setWorkSkillInput('');
+  };
+
+  const removeWorkDraftSkill = (token: string) => {
+    updateWorkDraft({
+      associatedSkills: workDraftSkillChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
   const commitWorkDraft = () => {
-    const workFe = workEntryFieldErrors(workDraft, 'draft');
+    const pendingSkill = workSkillInput.trim();
+    let mergedSkillsLine = workDraft.associatedSkills;
+    if (pendingSkill) {
+      const chips = workDraftSkillChips;
+      mergedSkillsLine = chips.includes(pendingSkill)
+        ? workDraft.associatedSkills
+        : [...chips, pendingSkill].join(', ');
+    }
+    setWorkSkillInput('');
+    const draftForValidate: WorkEntry = { ...workDraft, associatedSkills: mergedSkillsLine };
+    const workFe = workEntryFieldErrors(draftForValidate, 'draft');
     if (Object.keys(workFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^work_draft_/), ...workFe }));
       toast.error('Please fix the highlighted fields');
       return;
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
-    const primary = workDraft.workRoles[0];
+    const primary = draftForValidate.workRoles[0];
     const synced: WorkEntry = {
-      ...cloneWorkEntry(workDraft),
+      ...cloneWorkEntry(draftForValidate),
       role: primary.title.trim(),
       startDate: primary.startDate,
       endDate: primary.currentlyWorking ? '' : primary.endDate,
     };
-    const entry = { ...synced, id: undefined, workVerificationStatus: 'pending' as const };
+    const entry = {
+      ...synced,
+      id: undefined,
+      workVerificationStatus: 'pending' as const,
+      selfDeclared: false,
+      workVerificationEmail: '',
+      supportingMediaUrl: '',
+    };
     const next = [entry, ...workEntriesList];
     setWorkEntriesList(next);
     void syncWorkEntriesToApi(next, { silentSuccess: true });
     toast.success('Work experience added');
     setWorkDraft(emptyWork());
+    setWorkSkillInput('');
     setWorkAddFormOpen(false);
   };
 
@@ -2444,10 +2832,18 @@ export default function VerificationCenter() {
       setVerifyPersonalModalOpen(true);
     }
     if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'education') {
-      setVerifyEducationModal({ open: true, index: selfDeclarationFlow.educationIndex });
+      openVerifyEducationModal(selfDeclarationFlow.educationIndex);
     }
     if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'work_card') {
-      setVerifyWorkModal({ open: true, index: selfDeclarationFlow.workIndex, step: 'method' });
+      setVerifyWorkModal({
+        open: true,
+        index: selfDeclarationFlow.workIndex,
+        screen: 'pick',
+        workEmail: '',
+        otp: '',
+        otpSent: false,
+        workEmailFlowBusy: false,
+      });
     }
     if (selfDeclarationFlow.open && selfDeclarationFlow.kind === 'project_card') {
       setVerifyProjectModal({ open: true, index: selfDeclarationFlow.projectIndex, step: 'method' });
@@ -2498,17 +2894,27 @@ export default function VerificationCenter() {
       const idx = selfDeclarationFlow.workIndex;
       setWorkEntriesList((prev) => {
         const next = prev.map((e, i) =>
-          i === idx ? { ...e, selfDeclared: true, verifyHrEmail: '', verifyWebsite: '' } : e,
+          i === idx
+            ? {
+                ...e,
+                selfDeclared: true,
+                verificationMethod: 'self_declaration',
+              }
+            : e,
         );
         void syncWorkEntriesToApi(next, { silentSuccess: true });
         return next;
       });
-      setVerifyWorkModal({ open: false, index: null, step: 'method' });
+      closeVerifyWorkModal();
       toast.success('Self declaration recorded for this role.');
     } else if (selfDeclarationFlow.kind === 'project_card') {
       const idx = selfDeclarationFlow.projectIndex;
       setProjectsList((prev) => {
-        const next = prev.map((p, i) => (i === idx ? { ...p, projectSelfDeclared: true } : p));
+        const next = prev.map((p, i) =>
+          i === idx
+            ? { ...p, projectSelfDeclared: true, verificationMethod: 'self_declaration' }
+            : p,
+        );
         void syncProjectsListToApi(next, { silentSuccess: true });
         return next;
       });
@@ -2517,61 +2923,174 @@ export default function VerificationCenter() {
     } else if (selfDeclarationFlow.kind === 'cert_card') {
       const idx = selfDeclarationFlow.certIndex;
       setCertList((prev) => {
-        const next = prev.map((c, i) => (i === idx ? { ...c, certSelfDeclared: true } : c));
+        const next = prev.map((c, i) =>
+          i === idx ? { ...c, certSelfDeclared: true, verificationMethod: 'self_declaration' } : c,
+        );
         void syncCertificationsToApi(next, { silentSuccess: true });
         return next;
       });
       setVerifyCertModal({ open: false, index: null, step: 'method' });
       toast.success('Self declaration recorded for this certification.');
-    } else if (selfDeclarationFlow.kind === 'work') {
-      updateWorkDraft({ selfDeclared: true });
-      toast.success('Self declaration recorded');
     }
     setSelfDeclarationFlow({ open: false });
   };
 
   const closeVerifyWorkModal = () => {
-    setVerifyWorkModal({ open: false, index: null, step: 'method' });
+    setVerifyWorkModal({
+      open: false,
+      index: null,
+      screen: 'pick',
+      workEmail: '',
+      otp: '',
+      otpSent: false,
+      workEmailFlowBusy: false,
+    });
   };
 
   const openVerifyWorkModal = (index: number) => {
-    const entry = workEntriesList[index];
-    setWorkVerifyEmployerDraft({
-      email: entry?.verifyHrEmail?.trim() ?? '',
-      website: entry?.verifyWebsite?.trim() ?? '',
-    });
     setVerifyWorkModal({
       open: true,
       index,
-      step: entry?.selfDeclared ? 'employer' : 'method',
+      screen: 'pick',
+      workEmail: '',
+      otp: '',
+      otpSent: false,
+      workEmailFlowBusy: false,
     });
   };
 
-  const submitWorkEmployerVerification = () => {
+  const sendWorkEmailOtp = async () => {
     const idx = verifyWorkModal.index;
     if (idx == null) return;
-    const email = workVerifyEmployerDraft.email.trim();
-    const website = workVerifyEmployerDraft.website.trim();
-    if (!email && !website) {
-      toast.error('Enter an HR / verification email or a company verification website.');
+    const entry = workEntriesList[idx];
+    if (!entry?.id) {
+      toast.error('Save your work experience before verifying by email.');
       return;
     }
-    setWorkEntriesList((prev) => {
-      const next = prev.map((e, i) =>
-        i === idx
-          ? {
-              ...e,
-              selfDeclared: false,
-              verifyHrEmail: email,
-              verifyWebsite: website,
-            }
-          : e,
+    const email = verifyWorkModal.workEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Enter a valid work email address.');
+      return;
+    }
+    setVerifyWorkModal((p) => ({ ...p, workEmailFlowBusy: true }));
+    try {
+      const res = await api.post<{ message?: string; code?: string }>(
+        `/v1/professional/experience/${entry.id}/work-email/send-otp`,
+        { email },
       );
-      void syncWorkEntriesToApi(next, { silentSuccess: true });
-      return next;
-    });
+      const data = res.data as { message?: string; code?: string };
+      setVerifyWorkModal((p) => ({
+        ...p,
+        otpSent: true,
+        otp: '',
+        workEmailFlowBusy: false,
+      }));
+      toast.success(data?.message || 'Verification code sent');
+      if (data?.code) {
+        console.info('[dev] Work verification OTP:', data.code);
+      }
+      void fetchProfile({ soft: true });
+    } catch (err: any) {
+      setVerifyWorkModal((p) => ({ ...p, workEmailFlowBusy: false }));
+      toast.error(err.response?.data?.message || 'Failed to send verification code');
+    }
+  };
+
+  const submitWorkEmailOtp = async () => {
+    const idx = verifyWorkModal.index;
+    if (idx == null) return;
+    const entry = workEntriesList[idx];
+    if (!entry?.id) return;
+    const email = verifyWorkModal.workEmail.trim();
+    const code = verifyWorkModal.otp.trim();
+    if (code.length !== 6) {
+      toast.error('Enter the 6-digit code from your email.');
+      return;
+    }
+    setVerifyWorkModal((p) => ({ ...p, workEmailFlowBusy: true }));
+    try {
+      await api.post(`/v1/professional/experience/${entry.id}/work-email/verify-otp`, {
+        email,
+        code,
+      });
+      const emailNorm = email.toLowerCase();
+      setWorkEntriesList((prev) =>
+        prev.map((e, i) =>
+          i === idx
+            ? {
+                ...e,
+                selfDeclared: false,
+                workVerificationStatus: 'verified' as const,
+                verificationMethod: 'work_email',
+                workVerificationEmail: emailNorm,
+              }
+            : e,
+        ),
+      );
+      setVerifyWorkModal((p) => ({
+        ...p,
+        screen: 'work_email_success',
+        workEmailFlowBusy: false,
+      }));
+      toast.success('Work experience verified successfully');
+      void fetchProfile({ soft: true });
+    } catch (err: any) {
+      setVerifyWorkModal((p) => ({ ...p, workEmailFlowBusy: false }));
+      toast.error(err.response?.data?.message || 'Verification failed');
+    }
+  };
+
+  const triggerWorkVerifyDocumentUpload = () => {
+    const idx = verifyWorkModal.index;
+    if (idx == null) return;
+    workVerifyUploadIndexRef.current = idx;
     closeVerifyWorkModal();
-    toast.success('Employer verification details saved.');
+    setTimeout(() => workVerifyFileInputRef.current?.click(), 0);
+  };
+
+  const handleWorkVerifyFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const idx = workVerifyUploadIndexRef.current;
+    e.target.value = '';
+    if (!file || idx == null) return;
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!validTypes.includes(file.type)) {
+      toast.error('Please upload an image (JPEG, PNG, WebP) or PDF');
+      return;
+    }
+    setUploadingWorkIndex(idx);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post<{ url: string } | { data: { url: string } }>(
+        '/v1/professional/upload-id',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      const url = (res.data as any)?.data?.url ?? (res.data as any)?.url;
+      if (url) {
+        setWorkEntriesList((prev) => {
+          const next = prev.map((ent, i) =>
+            i === idx
+              ? {
+                  ...ent,
+                  supportingMediaUrl: url,
+                  verificationMethod: 'upload_document',
+                  selfDeclared: false,
+                }
+              : ent,
+          );
+          void syncWorkEntriesToApi(next, { silentSuccess: true });
+          return next;
+        });
+        toast.success('Document attached for verification');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Upload failed');
+    } finally {
+      setUploadingWorkIndex(null);
+      workVerifyUploadIndexRef.current = null;
+    }
   };
 
   const requestRemoveWorkEntry = (index: number) => {
@@ -2591,7 +3110,7 @@ export default function VerificationCenter() {
         const next = workEntriesList.filter((_, i) => i !== index);
         setWorkEntriesList(next);
         toast.success('Work experience removed');
-        fetchProfile();
+        await fetchProfile({ soft: true });
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Failed to remove work experience');
       } finally {
@@ -2623,7 +3142,7 @@ export default function VerificationCenter() {
           await api.put('/v1/professional/profile', { locations: [] });
           setFormFieldErrors((p) => omitKeysMatching(p, /^loc_/));
           toast.success('Location removed');
-          fetchProfile();
+          await fetchProfile({ soft: true });
         } catch (err: any) {
           toast.error(err.response?.data?.message || 'Failed to save');
         } finally {
@@ -2718,7 +3237,7 @@ export default function VerificationCenter() {
         socialMedia: social,
       });
       toast.success('Social profiles saved');
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save');
     } finally {
@@ -2781,6 +3300,7 @@ export default function VerificationCenter() {
           supportingMediaUrl: entry.supportingMediaUrl?.trim() || undefined,
           isDefault: !!entry.isDefault,
           verificationMethod: entry.verificationMethod?.trim() || undefined,
+          studentVerificationEmail: entry.studentVerificationEmail?.trim() || undefined,
         };
         if (entry.id) {
           await api.put(`/v1/professional/education/${entry.id}`, payload);
@@ -2791,7 +3311,7 @@ export default function VerificationCenter() {
       setFormFieldErrors((p) => omitKeysMatching(p, /^edu_/));
       if (!options?.silentSuccess) toast.success('Education saved');
       setSectionEditMode((prev) => ({ ...prev, education: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save education');
     } finally {
@@ -2809,7 +3329,6 @@ export default function VerificationCenter() {
           `${r.title.trim()} (${r.startDate || '?'} – ${r.currentlyWorking ? 'present' : r.endDate || '?'})`,
       );
     const responsibilitiesLines = [
-      ...entry.jobDescription.split('\n').map((s) => s.trim()).filter(Boolean),
       ...entry.responsibilitiesText.split('\n').map((s) => s.trim()).filter(Boolean),
       ...(extraRoles.length ? [`Other roles: ${extraRoles.join('; ')}`] : []),
     ];
@@ -2822,6 +3341,9 @@ export default function VerificationCenter() {
     const startDate =
       primary.startDate?.trim() || entry.startDate?.trim() || new Date().toISOString().split('T')[0];
     const endDate = primary.currentlyWorking ? undefined : primary.endDate?.trim() || undefined;
+    const verificationMethod =
+      entry.verificationMethod?.trim() ||
+      (entry.selfDeclared ? 'self_declaration' : undefined);
     return {
       organisationName: entry.organisationName.trim(),
       industry: entry.industry.trim(),
@@ -2839,14 +3361,10 @@ export default function VerificationCenter() {
         ? { min: parseFloat(entry.salary) || 0, max: parseFloat(entry.salary) || 0 }
         : undefined,
       currency: entry.currency,
-      ...(entry.selfDeclared
-        ? {}
-        : {
-            verificationContact: {
-              email: entry.verifyHrEmail?.trim() || undefined,
-              website: entry.verifyWebsite?.trim() || undefined,
-            },
-          }),
+      verificationMethod: verificationMethod || undefined,
+      supportingMediaUrl: entry.supportingMediaUrl?.trim() || undefined,
+      workVerificationEmail: entry.workVerificationEmail?.trim() || undefined,
+      jobDescription: entry.jobDescription?.trim() || undefined,
     };
   };
 
@@ -2873,7 +3391,7 @@ export default function VerificationCenter() {
       setFormFieldErrors((p) => omitKeysMatching(p, /^work_/));
       if (!options?.silentSuccess) toast.success('Work experience saved');
       setSectionEditMode((prev) => ({ ...prev, work: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save work experience');
     } finally {
@@ -2919,6 +3437,7 @@ export default function VerificationCenter() {
       id: undefined,
       projectVerificationStatus: 'pending',
       projectSelfDeclared: false,
+      verificationMethod: null,
     });
     const next = [...projectsList, entry];
     setProjectsList(next);
@@ -2941,7 +3460,7 @@ export default function VerificationCenter() {
     setVerifyProjectModal({
       open: true,
       index,
-      step: entry?.projectSelfDeclared ? 'evidence' : 'method',
+      step: entry && projectEntryIsSelfDeclared(entry) ? 'evidence' : 'method',
     });
   };
 
@@ -2960,6 +3479,8 @@ export default function VerificationCenter() {
           ? {
               ...p,
               projectSelfDeclared: false,
+              verificationMethod: null,
+              projectVerificationStatus: 'pending' as const,
               projectLink: link,
               mediaUrl: media,
             }
@@ -2989,7 +3510,7 @@ export default function VerificationCenter() {
         const next = projectsList.filter((_, i) => i !== index);
         setProjectsList(next);
         toast.success('Project removed');
-        fetchProfile();
+        await fetchProfile({ soft: true });
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Failed to remove project');
       } finally {
@@ -3035,6 +3556,7 @@ export default function VerificationCenter() {
           ? {
               ...c,
               certSelfDeclared: false,
+              verificationMethod: null,
               reportingUrl,
               supportingMediaUrl,
             }
@@ -3077,12 +3599,16 @@ export default function VerificationCenter() {
         const teamMembers = entry.teamMembers
           .filter((m) => m.name.trim() || m.role.trim())
           .map((m) => ({ name: m.name.trim(), role: m.role.trim() }));
+        const verificationMethod =
+          entry.verificationMethod?.trim() ||
+          (entry.projectSelfDeclared ? 'self_declaration' : null);
         const payload = {
           title: entry.title.trim(),
           description: entry.description?.trim() || undefined,
           projectLink: entry.projectLink?.trim() || undefined,
           mediaUrl: entry.mediaUrl?.trim() || undefined,
           teamMembers: teamMembers.length ? teamMembers : undefined,
+          verificationMethod,
         };
         if (entry.id) {
           await api.put(`/v1/professional/project/${entry.id}`, payload);
@@ -3093,7 +3619,7 @@ export default function VerificationCenter() {
       setFormFieldErrors((p) => omitKeysMatching(p, /^proj_/));
       if (!options?.silentSuccess) toast.success('Projects saved');
       setSectionEditMode((prev) => ({ ...prev, projects: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save projects');
     } finally {
@@ -3115,8 +3641,10 @@ export default function VerificationCenter() {
     setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
     const entry = cloneCertificate({
       ...certDraft,
+      expirationDate: certDraft.noExpiration ? '' : certDraft.expirationDate,
       certVerificationStatus: 'pending',
       certSelfDeclared: false,
+      verificationMethod: null,
     });
     const next = [...certList, entry];
     setCertList(next);
@@ -3167,20 +3695,34 @@ export default function VerificationCenter() {
     setSaving(true);
     try {
       await api.put('/v1/professional/profile', {
-        certifications: list.map((c) => ({
-          name: c.name,
-          issuedBy: c.issuedBy,
-          issuedDate: c.issuedDate || undefined,
-          expirationDate: c.expirationDate || undefined,
-          credentialId: c.credentialId,
-          reportingUrl: c.reportingUrl || undefined,
-          supportingMediaUrl: c.supportingMediaUrl || undefined,
-        })),
+        certifications: list.map((c) => {
+          const isVerified = c.certVerificationStatus === 'verified';
+          const base: Record<string, unknown> = {
+            name: c.name,
+            issuedBy: c.issuedBy,
+            issuedDate: c.issuedDate || undefined,
+            expirationDate: c.noExpiration ? undefined : c.expirationDate || undefined,
+            credentialId: c.credentialId,
+            reportingUrl: c.reportingUrl?.trim() || undefined,
+            supportingMediaUrl: c.supportingMediaUrl?.trim() || undefined,
+            associatedSkills: c.associatedSkills?.trim() || undefined,
+            certVerificationStatus: isVerified ? 'verified' : 'pending',
+            verified: isVerified,
+            certSelfDeclared: !isVerified && !!c.certSelfDeclared,
+          };
+          const vm = c.verificationMethod?.trim();
+          if (!isVerified && c.certSelfDeclared) {
+            base.verificationMethod = vm || 'self_declaration';
+          } else if (!isVerified && vm) {
+            base.verificationMethod = vm;
+          }
+          return base;
+        }),
       });
       setFormFieldErrors((p) => omitKeysMatching(p, /^cert_/));
       if (!options?.silentSuccess) toast.success('Certifications saved');
       setSectionEditMode((prev) => ({ ...prev, certification: false }));
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save certifications');
     } finally {
@@ -3216,7 +3758,7 @@ export default function VerificationCenter() {
       if (options?.exitEditMode) {
         setSectionEditMode((prev) => ({ ...prev, family: false }));
       }
-      fetchProfile();
+      await fetchProfile({ soft: true });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to save family information');
     } finally {
@@ -3320,8 +3862,8 @@ export default function VerificationCenter() {
           </p>
         </div>
 
-        <div className="mb-6 rounded-lg bg-gray-100 p-0.5">
-          <nav className="flex flex-wrap gap-0.5 overflow-x-auto" aria-label="Verification sections">
+        <div className="mb-4 rounded-lg bg-gray-100 p-px">
+          <nav className="flex flex-wrap gap-px overflow-x-auto" aria-label="Verification sections">
             {VERIFICATION_TABS.map(({ id, label }) => {
               const status = verificationStatus[id];
               const verified = status?.verified ?? false;
@@ -3331,14 +3873,14 @@ export default function VerificationCenter() {
                   key={id}
                   type="button"
                   onClick={() => setSearchParams({ tab: id })}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium whitespace-nowrap rounded-md transition-colors ${
+                  className={`flex items-center gap-1 px-2 py-1 text-[13px] leading-tight font-medium whitespace-nowrap rounded-md transition-colors ${
                     isActive
                       ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
                       : 'text-gray-600 hover:bg-gray-50/80 border border-transparent'
                   }`}
                 >
                   {label}
-                  {verified && <HiCheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" aria-hidden />}
+                  {verified && <HiCheckCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" aria-hidden />}
                 </button>
               );
             })}
@@ -3370,7 +3912,7 @@ export default function VerificationCenter() {
 
               {!showPersonalIdentityReadOnlySummary && (
                 <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4">
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {PERSONAL_FLOW_UI_GROUPS.map(({ label }, i) => {
                       const done =
                         (i === 0 && identityFlowComplete) ||
@@ -3380,7 +3922,7 @@ export default function VerificationCenter() {
                       return (
                         <div
                           key={label}
-                          className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium border ${
+                          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs leading-tight font-medium border ${
                             done
                               ? 'border-brand-200 bg-brand-50 text-brand-800'
                               : active
@@ -3528,6 +4070,33 @@ export default function VerificationCenter() {
                 </div>
               ) : showPersonalIdentityReadOnlySummary ? (
                 <div className="space-y-6 min-h-[280px]">
+                  {identityVerificationPath === 'self' && !verificationStatus.personal.verified ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/90 bg-[#fffbeb] px-4 py-3.5">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <HiExclamationCircle
+                          className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+                          aria-hidden
+                        />
+                        <p className="text-sm font-medium leading-snug text-amber-950">
+                          Self Declaration — limited network access. Upgrade to full verification.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVerifyPersonalModalOpen(true)}
+                        className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                      >
+                        <span
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                          aria-hidden
+                        >
+                          <HiArrowUp className="h-3.5 w-3.5" />
+                        </span>
+                        Upgrade Verification
+                      </button>
+                    </div>
+                  ) : null}
+
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     <h2 className="min-w-0 flex-1 text-lg font-semibold text-gray-900">
                       Personal Identity Information
@@ -3543,7 +4112,7 @@ export default function VerificationCenter() {
                         </span>
                       ) : verificationStatus.personal.completed ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                          Pending verification
+                          Pending review
                         </span>
                       ) : null}
                       {identityVerificationPath === 'self' && (
@@ -4309,134 +4878,203 @@ export default function VerificationCenter() {
                 <p className="text-sm text-red-600">{fe.loc_list || fe.loc_default}</p>
               )}
 
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {locationsList.map((loc, index) => {
                   const status = loc.verificationStatus ?? 'pending';
+                  const hasDoc = !!loc.documentUrl?.trim();
+                  const pendingWithProof = status === 'pending' && hasDoc;
+                  const methodLabel = locationVerificationMethodLabel(loc);
                   const title =
                     [loc.city, loc.state].filter((s) => s?.trim()).join(', ') || 'Location';
                   const subtitle = `${loc.country?.trim() || '—'} · ${loc.address?.trim() || '—'}`;
                   const locRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`loc_${index}_`));
+                  const showSelfDeclBanner = status === 'self_declared';
+                  const showVerifyCta =
+                    status === 'rejected' || (status === 'pending' && !hasDoc);
+                  const docHref =
+                    loc.documentUrl &&
+                    (loc.documentUrl.startsWith('http')
+                      ? loc.documentUrl
+                      : `${api.defaults.baseURL || ''}${loc.documentUrl}`);
+
                   return (
-                    <div
-                      key={`loc-${index}-${title}`}
-                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
-                    >
+                    <div key={`loc-${index}-${title}`} className="space-y-3">
                       {locRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                        <ul className="list-disc space-y-0.5 pl-5 text-sm text-red-600">
                           {locRowErrs.map(([k, msg]) => (
                             <li key={k}>{msg}</li>
                           ))}
                         </ul>
                       )}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                          <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-900">{title}</p>
-                            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-                          <div className="flex flex-wrap gap-1.5 justify-end">
-                            {status === 'pending' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                                Pending
-                              </span>
-                            )}
-                            {status === 'rejected' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-900">
-                                Rejected
-                              </span>
-                            )}
-                            {status === 'self_declared' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
-                                Self Declared
-                              </span>
-                            )}
-                            {status === 'verified' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                                Verified
-                              </span>
-                            )}
-                          </div>
-                          {status === 'self_declared' && (
-                            <p className="text-xs text-gray-400">via Self Declaration</p>
-                          )}
-                        </div>
-                      </div>
 
-                      {status === 'self_declared' && (
-                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
-                          <span>
-                            Self Declaration — limited network access. Upgrade by verifying with a document.
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {loc.isDefault ? (
-                            <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-                              Default
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => markLocationAsDefault(index)}
-                              disabled={saving}
-                              className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
-                            >
-                              Mark as default
-                            </button>
-                          )}
-                          {(status === 'pending' || status === 'rejected') && (
+                      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                        {showSelfDeclBanner ? (
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 bg-[#fffbeb] px-4 py-3.5 sm:px-6">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <HiExclamationCircle
+                                className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+                                aria-hidden
+                              />
+                              <p className="text-sm font-medium leading-snug text-amber-950">
+                                Self Declaration — limited network access. Upgrade to full verification.
+                              </p>
+                            </div>
                             <button
                               type="button"
                               onClick={() => openVerifyAddressModal(index)}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                              className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
                             >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Verify
-                            </button>
-                          )}
-                          {status === 'self_declared' && (
-                            <button
-                              type="button"
-                              onClick={() => openVerifyAddressModal(index)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
-                            >
-                              <HiShieldCheck className="w-4 h-4" />
+                              <span
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                                aria-hidden
+                              >
+                                <HiArrowUp className="h-3.5 w-3.5" />
+                              </span>
                               Upgrade Verification
                             </button>
-                          )}
-                          {status === 'verified' && loc.documentUrl && (
-                            <a
-                              href={
-                                loc.documentUrl.startsWith('http')
-                                  ? loc.documentUrl
-                                  : `${api.defaults.baseURL || ''}${loc.documentUrl}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
-                            >
-                              View proof document
-                            </a>
-                          )}
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-4 p-5 sm:p-6">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 gap-4">
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+                                <HiLocationMarker className="h-6 w-6 text-brand-600" aria-hidden />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-lg font-semibold leading-tight text-gray-900">{title}</p>
+                                <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                              <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                {loc.isDefault ? (
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-800">
+                                    Default
+                                  </span>
+                                ) : null}
+                                {status === 'pending' && !pendingWithProof ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                    Pending
+                                  </span>
+                                ) : null}
+                                {pendingWithProof ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                    Pending verification
+                                  </span>
+                                ) : null}
+                                {status === 'rejected' ? (
+                                  <span className="inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-900">
+                                    Rejected
+                                  </span>
+                                ) : null}
+                                {status === 'self_declared' ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
+                                    Self Declared
+                                  </span>
+                                ) : null}
+                                {status === 'verified' ? (
+                                  <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                                    Verified
+                                  </span>
+                                ) : null}
+                              </div>
+                              {status === 'self_declared' ? (
+                                <p className="text-xs text-gray-400">via Self Declaration</p>
+                              ) : null}
+                              {methodLabel ? (
+                                <p className="text-xs font-medium text-gray-600">
+                                  Verification method: <span className="text-gray-900">{methodLabel}</span>
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {uploadingLocationIndex === index || pendingWithProof ? (
+                            <div className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                              <HiUpload
+                                className={`mt-0.5 h-5 w-5 shrink-0 text-brand-600 ${uploadingLocationIndex === index ? 'animate-pulse' : ''}`}
+                                aria-hidden
+                              />
+                              <div className="min-w-0">
+                                {uploadingLocationIndex === index ? (
+                                  <p className="text-sm font-medium text-gray-900">Uploading document…</p>
+                                ) : (
+                                  <>
+                                    <p className="text-sm font-medium text-gray-900">Proof document on file</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                      Submitted for review — you can open your upload below.
+                                    </p>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => requestRemoveLocation(index)}
-                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Remove location"
-                        >
-                          <HiTrash className="w-5 h-5" />
-                        </button>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:px-6">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!loc.isDefault ? (
+                              <button
+                                type="button"
+                                onClick={() => markLocationAsDefault(index)}
+                                disabled={saving}
+                                className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                Mark as default
+                              </button>
+                            ) : null}
+                            {showVerifyCta ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyAddressModal(index)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                              >
+                                <HiShieldCheck className="h-4 w-4" />
+                                Verify
+                              </button>
+                            ) : null}
+                            {showSelfDeclBanner ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyAddressModal(index)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                              >
+                                <HiShieldCheck className="h-4 w-4" />
+                                Upgrade Verification
+                              </button>
+                            ) : null}
+                            {status === 'verified' && loc.documentUrl && docHref ? (
+                              <a
+                                href={docHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                View proof document
+                              </a>
+                            ) : null}
+                            {pendingWithProof && docHref && uploadingLocationIndex !== index ? (
+                              <a
+                                href={docHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                View uploaded document
+                              </a>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => requestRemoveLocation(index)}
+                            className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            aria-label="Remove location"
+                          >
+                            <HiTrash className="h-5 w-5" />
+                          </button>
+                        </div>
                       </div>
-                      {uploadingLocationIndex === index && (
-                        <p className="text-sm text-gray-500">Uploading document…</p>
-                      )}
                     </div>
                   );
                 })}
@@ -4578,112 +5216,318 @@ export default function VerificationCenter() {
 
               {fe.edu_list && <p className="text-sm text-red-600">{fe.edu_list}</p>}
 
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {educationEntriesList.map((entry, index) => {
                   const status = entry.eduVerificationStatus ?? 'pending';
                   const isSelfDeclaredEducation =
                     entry.verificationMethod === 'self_declaration' && status !== 'verified';
-                  const title = entry.institutionName?.trim() || 'Education';
+                  const hasMedia = !!entry.supportingMediaUrl?.trim();
+                  const pendingWithProof = status === 'pending' && hasMedia && !isSelfDeclaredEducation;
+                  const methodLabel = educationVerificationMethodLabel(entry);
+                  const showVerifyCta =
+                    status === 'pending' && !isSelfDeclaredEducation && !hasMedia;
                   const subtitle = formatEducationCardSubtitle(entry);
                   const eduRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`edu_${index}_`));
+                  const eduCardKey = entry.id ? String(entry.id) : `tmp-${index}`;
+                  const expanded = educationCardExpanded[eduCardKey] === true;
+                  const qualShort = entry.degreeType?.trim();
+                  const instName = entry.institutionName?.trim();
+                  const headerTitle =
+                    qualShort && instName
+                      ? `${qualShort} — ${instName}`
+                      : instName || qualShort || 'Education';
+                  const skillChips = educationSkillChipsFromEntry(entry);
+                  const costLine = formatEducationMoneyLine(entry.currency, entry.costOfEducation);
+                  const loanLine = formatEducationMoneyLine(entry.loanCurrency, entry.pendingLoanAmount);
+                  const mediaHref = entry.supportingMediaUrl?.trim()
+                    ? entry.supportingMediaUrl.startsWith('http')
+                      ? entry.supportingMediaUrl
+                      : `${api.defaults.baseURL || ''}${entry.supportingMediaUrl}`
+                    : null;
+
                   return (
-                    <div
-                      key={entry.id ?? `edu-${index}`}
-                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
-                    >
+                    <div key={entry.id ?? `edu-${index}`} className="space-y-3">
                       {eduRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                        <ul className="list-disc space-y-0.5 pl-5 text-sm text-red-600">
                           {eduRowErrs.map(([k, msg]) => (
                             <li key={k}>{msg}</li>
                           ))}
                         </ul>
                       )}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                          <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-900">{title}</p>
-                            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-                          <div className="flex flex-wrap gap-1.5 justify-end">
-                            {status === 'pending' && !isSelfDeclaredEducation && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                                Pending
-                              </span>
-                            )}
-                            {isSelfDeclaredEducation && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
-                                Self Declared
-                              </span>
-                            )}
-                            {status === 'verified' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                                Verified
-                              </span>
-                            )}
-                          </div>
-                          {isSelfDeclaredEducation && (
-                            <p className="text-xs text-gray-400">via Self Declaration</p>
-                          )}
-                        </div>
-                      </div>
 
-                      {isSelfDeclaredEducation && (
-                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
-                          <span>
-                            Self Declaration — limited network access. Upgrade by verifying with a document.
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {isSelfDeclaredEducation && (
+                      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                        {isSelfDeclaredEducation ? (
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 bg-[#fffbeb] px-4 py-3.5 sm:px-6">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <HiExclamationCircle
+                                className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+                                aria-hidden
+                              />
+                              <p className="text-sm font-medium leading-snug text-amber-950">
+                                Self Declaration — limited network access. Upgrade to full verification.
+                              </p>
+                            </div>
                             <button
                               type="button"
-                              onClick={() => setVerifyEducationModal({ open: true, index })}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                              onClick={() => openVerifyEducationModal(index)}
+                              className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
                             >
-                              <HiShieldCheck className="w-4 h-4" />
+                              <span
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                                aria-hidden
+                              >
+                                <HiArrowUp className="h-3.5 w-3.5" />
+                              </span>
                               Upgrade Verification
                             </button>
-                          )}
-                          {status === 'pending' && !isSelfDeclaredEducation && (
-                            <button
-                              type="button"
-                              onClick={() => setVerifyEducationModal({ open: true, index })}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                            >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Verify
-                            </button>
-                          )}
-                          {entry.supportingMediaUrl?.trim() && (
-                            <a
-                              href={
-                                entry.supportingMediaUrl.startsWith('http')
-                                  ? entry.supportingMediaUrl
-                                  : `${api.defaults.baseURL || ''}${entry.supportingMediaUrl}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
-                            >
-                              View supporting media
-                            </a>
-                          )}
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-4 p-5 sm:p-6">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEducationCardExpanded((prev) => ({
+                                    ...prev,
+                                    [eduCardKey]: !(prev[eduCardKey] === true),
+                                  }))
+                                }
+                                className="mt-1 shrink-0 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                                aria-expanded={expanded}
+                                aria-label={expanded ? 'Collapse details' : 'Expand details'}
+                              >
+                                <HiChevronDown
+                                  className={`h-5 w-5 transition-transform ${expanded ? 'rotate-0' : '-rotate-90'}`}
+                                  aria-hidden
+                                />
+                              </button>
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+                                <HiAcademicCap className="h-6 w-6 text-brand-600" aria-hidden />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-lg font-semibold leading-tight text-gray-900">{headerTitle}</p>
+                                <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                              <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                {entry.isDefault ? (
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-800">
+                                    Default
+                                  </span>
+                                ) : null}
+                                {status === 'pending' && !pendingWithProof && !isSelfDeclaredEducation ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                    Pending
+                                  </span>
+                                ) : null}
+                                {pendingWithProof ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                    Pending verification
+                                  </span>
+                                ) : null}
+                                {isSelfDeclaredEducation ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
+                                    Self Declared
+                                  </span>
+                                ) : null}
+                                {status === 'verified' ? (
+                                  <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                                    Verified
+                                  </span>
+                                ) : null}
+                              </div>
+                              {isSelfDeclaredEducation ? (
+                                <p className="text-xs text-gray-400">via Self Declaration</p>
+                              ) : null}
+                              {methodLabel ? (
+                                <p className="text-xs font-medium text-gray-600">
+                                  Verification method: <span className="text-gray-900">{methodLabel}</span>
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {uploadingEducationIndex === index || pendingWithProof ? (
+                            <div className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                              <HiUpload
+                                className={`mt-0.5 h-5 w-5 shrink-0 text-brand-600 ${uploadingEducationIndex === index ? 'animate-pulse' : ''}`}
+                                aria-hidden
+                              />
+                              <div className="min-w-0">
+                                {uploadingEducationIndex === index ? (
+                                  <p className="text-sm font-medium text-gray-900">Uploading document…</p>
+                                ) : (
+                                  <>
+                                    <p className="text-sm font-medium text-gray-900">Supporting document on file</p>
+                                    <p className="mt-0.5 text-xs text-gray-500">
+                                      Submitted for review — you can open your upload below.
+                                    </p>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {expanded ? (
+                            <div className="space-y-6 border-t border-gray-100 pt-4 sm:pt-5">
+                          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Institution
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {entry.institutionName?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                School Type
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {schoolTypeDisplayLabel(entry.schoolType)}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Level</dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {educationLevelLabel(entry.levelOfEducation)}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Qualification
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {educationQualificationDisplay(entry.degreeType)}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Field of Study
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {entry.fieldOfStudy?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Grade</dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {entry.grade?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Duration</dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {formatEducationDurationLine(entry)}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Country</dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {entry.country?.trim() || '—'}
+                              </dd>
+                            </div>
+                            {costLine ? (
+                              <div className="sm:col-span-1">
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Cost</dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">{costLine}</dd>
+                              </div>
+                            ) : null}
+                            {loanLine ? (
+                              <div className="sm:col-span-1">
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Pending Loan
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">{loanLine}</dd>
+                              </div>
+                            ) : null}
+                          </dl>
+
+                          {entry.activitiesSocieties?.trim() ? (
+                            <div className="rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
+                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Activities & Societies
+                              </p>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-900">
+                                {entry.activitiesSocieties.trim()}
+                              </p>
+                            </div>
+                          ) : null}
+
+                          {skillChips.length > 0 ? (
+                            <div>
+                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Skills</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {skillChips.map((chip, ci) => (
+                                  <span
+                                    key={`${eduCardKey}-${chip}-${ci}`}
+                                    className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
+                                  >
+                                    {chip}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => requestRemoveEducationEntry(index)}
-                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Remove education"
-                        >
-                          <HiTrash className="w-5 h-5" />
-                        </button>
+                      ) : null}
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:px-6">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {showVerifyCta ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyEducationModal(index)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                              >
+                                <HiShieldCheck className="h-4 w-4" />
+                                Verify
+                              </button>
+                            ) : null}
+                            {isSelfDeclaredEducation ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyEducationModal(index)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                              >
+                                <HiShieldCheck className="h-4 w-4" />
+                                Upgrade Verification
+                              </button>
+                            ) : null}
+                            {status === 'verified' && mediaHref ? (
+                              <a
+                                href={mediaHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                View supporting media
+                              </a>
+                            ) : null}
+                            {pendingWithProof && mediaHref && uploadingEducationIndex !== index ? (
+                              <a
+                                href={mediaHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                View uploaded document
+                              </a>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => requestRemoveEducationEntry(index)}
+                            className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            aria-label="Remove education"
+                          >
+                            <HiTrash className="h-5 w-5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -4691,17 +5535,23 @@ export default function VerificationCenter() {
               </div>
 
               {showEducationAddForm ? (
-              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <HiAcademicCap className="w-5 h-5 text-brand-600 shrink-0" />
-                    <h3 className="text-base font-semibold text-gray-900">Add new education</h3>
+              <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
+                <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 ring-1 ring-brand-100">
+                      <HiAcademicCap className="h-6 w-6 text-brand-600" aria-hidden />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Add Education</h3>
+                      <p className="mt-0.5 text-sm text-gray-500">Enter your qualification details below.</p>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
                       setEducationAddFormOpen(false);
                       setEducationDraft(emptyEducation());
+                      setEducationSkillInput('');
                       setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
                     }}
                     className="text-sm font-medium text-gray-600 hover:text-gray-900"
@@ -4709,9 +5559,11 @@ export default function VerificationCenter() {
                     Cancel
                   </button>
                 </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
                         Institution / School <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -4721,25 +5573,25 @@ export default function VerificationCenter() {
                           updateEducationDraft({ institutionName: e.target.value });
                           clearFormError('edu_draft_institutionName');
                         }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_institutionName')}`}
-                        placeholder="Enter institution name"
+                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_institutionName')}`}
+                        placeholder="School or institution name"
                       />
                       {fe.edu_draft_institutionName ? (
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_institutionName}</p>
                       ) : null}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">School Type</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">School Type</label>
                       <SearchableList
                         value={educationDraft.schoolType}
                         onChange={(schoolType) => updateEducationDraft({ schoolType })}
-                        options={[{ value: '', label: 'Select type' }, ...SCHOOL_TYPE_OPTIONS]}
-                        placeholder="Select type"
+                        options={[{ value: '', label: 'Select' }, ...SCHOOL_TYPE_OPTIONS]}
+                        placeholder="Select"
                         className="[&_button]:bg-gray-50"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Level</label>
                       <SearchableList
                         value={educationDraft.levelOfEducation}
                         onChange={(levelOfEducation) => {
@@ -4753,7 +5605,7 @@ export default function VerificationCenter() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Qualification</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Qualification</label>
                       <SearchableList
                         value={educationDraft.degreeType}
                         onChange={(degreeType) => {
@@ -4766,24 +5618,28 @@ export default function VerificationCenter() {
                         error={fe.edu_draft_degreeType}
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Field of Study</label>
-                      <input
-                        type="text"
-                        value={educationDraft.fieldOfStudy}
-                        onChange={(e) => {
-                          updateEducationDraft({ fieldOfStudy: e.target.value });
-                          clearFormError('edu_draft_fieldOfStudy');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_fieldOfStudy')}`}
-                        placeholder="e.g. Computer Science, Medicine, Law..."
-                      />
-                      {fe.edu_draft_fieldOfStudy ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_fieldOfStudy}</p>
-                      ) : null}
-                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Field of Study</label>
+                    <input
+                      type="text"
+                      value={educationDraft.fieldOfStudy}
+                      onChange={(e) => {
+                        updateEducationDraft({ fieldOfStudy: e.target.value });
+                        clearFormError('edu_draft_fieldOfStudy');
+                      }}
+                      className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_fieldOfStudy')}`}
+                      placeholder="e.g. Computer Science, Medicine, Law…"
+                    />
+                    {fe.edu_draft_fieldOfStudy ? (
+                      <p className="mt-1 text-sm text-red-600">{fe.edu_draft_fieldOfStudy}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Country</label>
                       <SearchableList
                         value={educationDraft.country}
                         onChange={(country) => {
@@ -4797,7 +5653,7 @@ export default function VerificationCenter() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
                         Grade <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -4807,13 +5663,16 @@ export default function VerificationCenter() {
                           updateEducationDraft({ grade: e.target.value });
                           clearFormError('edu_draft_grade');
                         }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_grade')}`}
+                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_grade')}`}
                         placeholder="e.g. First Class, 3.8 GPA"
                       />
                       {fe.edu_draft_grade ? <p className="mt-1 text-sm text-red-600">{fe.edu_draft_grade}</p> : null}
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Start Date</label>
                       <div className="grid grid-cols-2 gap-2">
                         <SearchableList
                           value={educationDraft.startMonth}
@@ -4841,7 +5700,7 @@ export default function VerificationCenter() {
                       ) : null}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
                         End Date / Expected End Date
                       </label>
                       <div className="grid grid-cols-2 gap-2">
@@ -4869,7 +5728,7 @@ export default function VerificationCenter() {
                       {fe.edu_draft_endDate ? (
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_endDate}</p>
                       ) : null}
-                      <label className="mt-2 flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                      <label className="mt-3 flex cursor-pointer select-none items-center gap-2 text-sm text-gray-700">
                         <input
                           type="checkbox"
                           checked={educationDraft.expectedEndOngoing}
@@ -4879,16 +5738,21 @@ export default function VerificationCenter() {
                         This is an expected end date (ongoing)
                       </label>
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Cost of Education</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-2">
-                        <SearchableList
-                          value={educationDraft.currency}
-                          onChange={(currency) => updateEducationDraft({ currency })}
-                          options={EDUCATION_CURRENCY_OPTIONS}
-                          placeholder="Currency"
-                          className="[&_button]:bg-gray-50"
-                        />
+                  </div>
+
+                  <div className="space-y-5">
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Cost of Education</label>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                        <div className="w-full shrink-0 sm:w-36">
+                          <SearchableList
+                            value={educationDraft.currency}
+                            onChange={(currency) => updateEducationDraft({ currency })}
+                            options={EDUCATION_CURRENCY_OPTIONS}
+                            placeholder="Currency"
+                            className="[&_button]:bg-gray-50"
+                          />
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -4897,7 +5761,7 @@ export default function VerificationCenter() {
                             updateEducationDraft({ costOfEducation: e.target.value });
                             clearFormError('edu_draft_costOfEducation');
                           }}
-                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_costOfEducation')}`}
+                          className={`min-w-0 flex-1 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_costOfEducation')}`}
                           placeholder="0.00"
                         />
                       </div>
@@ -4905,16 +5769,18 @@ export default function VerificationCenter() {
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_costOfEducation}</p>
                       ) : null}
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Pending Loan</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-2">
-                        <SearchableList
-                          value={educationDraft.loanCurrency}
-                          onChange={(loanCurrency) => updateEducationDraft({ loanCurrency })}
-                          options={EDUCATION_CURRENCY_OPTIONS}
-                          placeholder="Currency"
-                          className="[&_button]:bg-gray-50"
-                        />
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Pending Loan</label>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                        <div className="w-full shrink-0 sm:w-36">
+                          <SearchableList
+                            value={educationDraft.loanCurrency}
+                            onChange={(loanCurrency) => updateEducationDraft({ loanCurrency })}
+                            options={EDUCATION_CURRENCY_OPTIONS}
+                            placeholder="Currency"
+                            className="[&_button]:bg-gray-50"
+                          />
+                        </div>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -4923,7 +5789,7 @@ export default function VerificationCenter() {
                             updateEducationDraft({ pendingLoanAmount: e.target.value });
                             clearFormError('edu_draft_pendingLoanAmount');
                           }}
-                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_pendingLoanAmount')}`}
+                          className={`min-w-0 flex-1 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_pendingLoanAmount')}`}
                           placeholder="0.00"
                         />
                       </div>
@@ -4931,59 +5797,93 @@ export default function VerificationCenter() {
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_pendingLoanAmount}</p>
                       ) : null}
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Activities & Societies</label>
-                      <textarea
-                        value={educationDraft.activitiesSocieties}
-                        onChange={(e) => updateEducationDraft({ activitiesSocieties: e.target.value })}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y min-h-[100px]"
-                        placeholder="Clubs, sports, volunteer work, etc."
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Associated Skills</label>
-                      <input
-                        type="text"
-                        value={educationDraft.associatedSkills}
-                        onChange={(e) => updateEducationDraft({ associatedSkills: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="Type to search skills or add custom..."
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting Media</label>
-                      <input
-                        type="url"
-                        value={educationDraft.supportingMediaUrl}
-                        onChange={(e) => {
-                          updateEducationDraft({ supportingMediaUrl: e.target.value });
-                          clearFormError('edu_draft_supportingMediaUrl');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('edu_draft_supportingMediaUrl')}`}
-                        placeholder="URL to certificate, transcript, or media file"
-                      />
-                      {fe.edu_draft_supportingMediaUrl ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_supportingMediaUrl}</p>
-                      ) : null}
-                    </div>
                   </div>
-                  {Object.entries(fe)
-                    .filter(([k]) => k.startsWith('edu_draft_milestone'))
-                    .map(([k, msg]) => (
-                      <p key={k} className="text-sm text-red-600">
-                        {msg}
-                      </p>
-                    ))}
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Activities & Societies</label>
+                    <textarea
+                      value={educationDraft.activitiesSocieties}
+                      onChange={(e) => updateEducationDraft({ activitiesSocieties: e.target.value })}
+                      rows={4}
+                      className="min-h-[104px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="Clubs, sports, volunteer work, etc."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Associated Skills</label>
+                    {educationDraftSkillChips.length > 0 ? (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {educationDraftSkillChips.map((chip, chipIdx) => (
+                          <span
+                            key={`${chip}-${chipIdx}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
+                          >
+                            {chip}
+                            <button
+                              type="button"
+                              onClick={() => removeEducationDraftSkill(chip)}
+                              className="rounded-full p-0.5 text-brand-700 hover:bg-brand-100"
+                              aria-label={`Remove ${chip}`}
+                            >
+                              <HiX className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <input
+                      type="text"
+                      value={educationSkillInput}
+                      onChange={(e) => setEducationSkillInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEducationDraftSkill();
+                        }
+                      }}
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="Type to search skills or add custom…"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add a skill.</p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Supporting Media</label>
+                    <input
+                      type="url"
+                      value={educationDraft.supportingMediaUrl}
+                      onChange={(e) => {
+                        updateEducationDraft({ supportingMediaUrl: e.target.value });
+                        clearFormError('edu_draft_supportingMediaUrl');
+                      }}
+                      className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_supportingMediaUrl')}`}
+                      placeholder="URL to certificate, transcript, or media file"
+                    />
+                    {fe.edu_draft_supportingMediaUrl ? (
+                      <p className="mt-1 text-sm text-red-600">{fe.edu_draft_supportingMediaUrl}</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                {Object.entries(fe)
+                  .filter(([k]) => k.startsWith('edu_draft_milestone'))
+                  .map(([k, msg]) => (
+                    <p key={k} className="mt-4 text-sm text-red-600">
+                      {msg}
+                    </p>
+                  ))}
+                <div className="mt-8 border-t border-gray-100 pt-6">
                   <button
                     type="button"
                     onClick={commitEducationDraft}
                     disabled={educationSaving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
                   >
-                    <HiPlus className="w-4 h-4" />
-                    {educationSaving ? 'Saving...' : 'Add Education'}
+                    <HiPlus className="h-4 w-4" />
+                    {educationSaving ? 'Saving...' : 'Add Data'}
                   </button>
+                </div>
               </div>
               ) : educationEntriesList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
@@ -5045,10 +5945,22 @@ export default function VerificationCenter() {
                   const headerTitle = role || org || 'Work experience';
                   const headerSubtitle = formatWorkExperienceHeaderSubtitle(entry);
                   const tenureYears = workTenureYearsAtOrganisation(entry);
-                  const dateRange = formatWorkCardDateRange(entry);
+                  const roleTimelineRows = entry.workRoles.filter((r) => r.title?.trim());
                   const skillTags = workAssociatedSkillTags(entry);
                   const workRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`work_${index}_`));
-                  const showSelfDeclarationBanner = entry.selfDeclared && status === 'pending';
+                  const workCardKey = entry.id ? String(entry.id) : `tmp-${index}`;
+                  const expanded = workCardExpanded[workCardKey] === true;
+                  const workMethodLabel = workVerificationMethodLabel(entry);
+                  /** Cream strip only while self-declared and still pending (hidden once verified). */
+                  const showSelfDeclStrip = entry.selfDeclared && status === 'pending';
+                  const workSupportingUrl = entry.supportingMediaUrl?.trim() || '';
+                  const workSupportingHref = workSupportingUrl
+                    ? workSupportingUrl.startsWith('http')
+                      ? workSupportingUrl
+                      : `${api.defaults.baseURL || ''}${workSupportingUrl}`
+                    : null;
+                  const showWorkViewFileButton =
+                    !!workSupportingHref && (status === 'pending' || status === 'verified');
 
                   return (
                     <div key={entry.id ?? `work-${index}`} className="space-y-3">
@@ -5060,135 +5972,210 @@ export default function VerificationCenter() {
                         </ul>
                       )}
 
-                      {showSelfDeclarationBanner ? (
-                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/90 bg-[#fffbeb] px-4 py-3.5">
-                          <div className="flex min-w-0 items-start gap-3">
-                            <HiExclamationCircle
-                              className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
-                              aria-hidden
-                            />
-                            <p className="text-sm font-medium leading-snug text-amber-950">
-                              Self Declaration — limited network access. Upgrade to full verification.
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => openVerifyWorkModal(index)}
-                            className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
-                          >
-                            <span
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
-                              aria-hidden
-                            >
-                              <HiArrowUp className="h-3.5 w-3.5" />
-                            </span>
-                            Upgrade Verification
-                          </button>
-                        </div>
-                      ) : null}
-
                       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                        {showSelfDeclStrip ? (
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 bg-[#fffbeb] px-4 py-3.5 sm:px-6">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <HiExclamationCircle
+                                className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+                                aria-hidden
+                              />
+                              <p className="text-sm font-medium leading-snug text-amber-950">
+                                Self Declaration — limited network access. Upgrade to full verification.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openVerifyWorkModal(index)}
+                              className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                            >
+                              <span
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                                aria-hidden
+                              >
+                                <HiArrowUp className="h-3.5 w-3.5" />
+                              </span>
+                              Upgrade Verification
+                            </button>
+                          </div>
+                        ) : null}
+
                         <div className="space-y-4 p-5 sm:p-6">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="flex min-w-0 gap-4">
+                            <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setWorkCardExpanded((prev) => ({
+                                    ...prev,
+                                    [workCardKey]: !(prev[workCardKey] === true),
+                                  }))
+                                }
+                                className="mt-1 shrink-0 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                                aria-expanded={expanded}
+                                aria-label={expanded ? 'Collapse details' : 'Expand details'}
+                              >
+                                <HiChevronDown
+                                  className={`h-5 w-5 transition-transform ${expanded ? 'rotate-0' : '-rotate-90'}`}
+                                  aria-hidden
+                                />
+                              </button>
                               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
                                 <HiBriefcase className="h-6 w-6 text-brand-600" aria-hidden />
                               </div>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <p className="text-lg font-semibold leading-tight text-gray-900">{headerTitle}</p>
                                 <p className="mt-1 text-sm text-gray-500">{headerSubtitle}</p>
-                                {tenureYears != null ? (
-                                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
-                                    <HiClock className="h-4 w-4 shrink-0" aria-hidden />
-                                    {tenureYears.toFixed(1)} years at this organisation
-                                  </p>
-                                ) : null}
                               </div>
                             </div>
-                            <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
-                              {status === 'verified' ? (
-                                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
-                                  Verified
-                                </span>
-                              ) : (
-                                <>
-                                  {entry.selfDeclared ? (
-                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
-                                      Self Declared
+                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                              <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                {status === 'pending' && !entry.selfDeclared ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                    Pending verification
+                                  </span>
+                                ) : null}
+                                {entry.selfDeclared && status === 'pending' ? (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
+                                    Self Declared
+                                  </span>
+                                ) : null}
+                                {status === 'verified' ? (
+                                  <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                                    Verified
+                                  </span>
+                                ) : null}
+                              </div>
+                              {entry.selfDeclared && status === 'pending' ? (
+                                <p className="text-xs text-gray-400">via Self Declaration</p>
+                              ) : null}
+                              {workMethodLabel && !entry.selfDeclared ? (
+                                <p className="text-xs font-medium text-gray-600">
+                                  Verification method:{' '}
+                                  <span className="text-gray-900">{workMethodLabel}</span>
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {expanded ? (
+                            <div className="space-y-5 border-t border-gray-100 pt-4 sm:pt-5">
+                              {tenureYears != null ? (
+                                <p className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
+                                  <HiClock className="h-4 w-4 shrink-0" aria-hidden />
+                                  {tenureYears.toFixed(1)} years at this organisation
+                                </p>
+                              ) : null}
+                              {roleTimelineRows.length > 0 ? (
+                                <div className="space-y-3">
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Roles
+                                  </p>
+                                  <ul className="flow-root">
+                                    {roleTimelineRows.map((roleRow, ri) => (
+                                      <li
+                                        key={`${entry.id ?? index}-role-${ri}`}
+                                        className="relative pb-6 last:pb-0"
+                                      >
+                                        {ri < roleTimelineRows.length - 1 ? (
+                                          <div
+                                            className="absolute left-[11px] top-5 bottom-0 w-px bg-gray-200"
+                                            aria-hidden
+                                          />
+                                        ) : null}
+                                        <div className="relative flex gap-3">
+                                          <div className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-brand-200 bg-white">
+                                            <span className="h-2 w-2 rounded-full bg-brand-600" aria-hidden />
+                                          </div>
+                                          <div className="min-w-0 flex-1 pt-0.5">
+                                            <p className="text-sm font-semibold text-gray-900">
+                                              {roleRow.title}
+                                              {ri === 0 ? (
+                                                <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
+                                                  Primary
+                                                </span>
+                                              ) : null}
+                                            </p>
+                                            <p className="mt-0.5 text-sm text-gray-500">
+                                              {formatWorkRoleDateRange(roleRow)}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+                              <div className="grid gap-4 sm:grid-cols-2">
+                                <div>
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Remuneration
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                                    {formatWorkRemunerationLine(entry)}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Compensation
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                                    {formatWorkCompensationSummary(entry)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                                <p className="text-xs font-medium text-gray-500">Job description</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                                  {entry.jobDescription?.trim() ? entry.jobDescription.trim() : '—'}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                                <p className="text-xs font-medium text-gray-500">Responsibilities</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                                  {entry.responsibilitiesText?.trim()
+                                    ? entry.responsibilitiesText.trim()
+                                    : '—'}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                                <p className="text-xs font-medium text-gray-500">Achievements</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                                  {entry.achievementsText?.trim()
+                                    ? entry.achievementsText.trim()
+                                    : '—'}
+                                </p>
+                              </div>
+                              {skillTags.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {skillTags.map((t) => (
+                                    <span
+                                      key={`${entry.id ?? index}-${t}`}
+                                      className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
+                                    >
+                                      {t}
                                     </span>
-                                  ) : null}
-                                  {!entry.selfDeclared ? (
-                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
-                                      Pending
-                                    </span>
-                                  ) : null}
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-2 text-sm text-gray-800">
-                            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                            <span>
-                              <span className="font-medium text-gray-900">{org || '—'}</span>
-                              <span className="text-gray-500"> · {dateRange}</span>
-                            </span>
-                          </div>
-
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Remuneration
-                              </p>
-                              <p className="mt-1 text-sm font-semibold text-gray-900">
-                                {formatWorkRemunerationLine(entry)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Compensation
-                              </p>
-                              <p className="mt-1 text-sm font-semibold text-gray-900">
-                                {formatWorkCompensationSummary(entry)}
-                              </p>
-                            </div>
-                          </div>
-
-                          {(
-                            [
-                              { label: 'Job description', text: entry.jobDescription },
-                              { label: 'Responsibilities', text: entry.responsibilitiesText },
-                              { label: 'Achievements', text: entry.achievementsText },
-                            ] as const
-                          ).map((block) => (
-                            <div
-                              key={block.label}
-                              className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3"
-                            >
-                              <p className="text-xs font-medium text-gray-500">{block.label}</p>
-                              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                                {block.text?.trim() ? block.text.trim() : '—'}
-                              </p>
-                            </div>
-                          ))}
-
-                          {skillTags.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {skillTags.map((t) => (
-                                <span
-                                  key={`${entry.id ?? index}-${t}`}
-                                  className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-100"
-                                >
-                                  {t}
-                                </span>
-                              ))}
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
 
                         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:px-6">
                           <div className="flex flex-wrap items-center gap-2">
-                            {status === 'pending' && !entry.selfDeclared ? (
+                            {showWorkViewFileButton && workSupportingHref ? (
+                              <a
+                                href={workSupportingHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                              >
+                                <HiDocumentText className="h-4 w-4" aria-hidden />
+                                View file
+                              </a>
+                            ) : null}
+                            {status === 'pending' && !showWorkViewFileButton ? (
                               <button
                                 type="button"
                                 onClick={() => openVerifyWorkModal(index)}
@@ -5198,19 +6185,15 @@ export default function VerificationCenter() {
                                 Verify
                               </button>
                             ) : null}
-                            {!entry.selfDeclared && entry.verifyWebsite?.trim() ? (
-                              <a
-                                href={
-                                  entry.verifyWebsite.startsWith('http')
-                                    ? entry.verifyWebsite
-                                    : `https://${entry.verifyWebsite}`
-                                }
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            {showSelfDeclStrip ? (
+                              <button
+                                type="button"
+                                onClick={() => openVerifyWorkModal(index)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
                               >
-                                Verification website
-                              </a>
+                                <HiShieldCheck className="h-4 w-4" />
+                                Upgrade Verification
+                              </button>
                             ) : null}
                           </div>
                           <button
@@ -5229,354 +6212,355 @@ export default function VerificationCenter() {
               </div>
 
               {showWorkAddForm ? (
-              <div className={workEntriesList.length > 0 ? 'mt-6 border-t border-gray-200 pt-6' : ''}>
-              <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <HiBriefcase className="w-5 h-5 text-brand-600 shrink-0" />
-                    <h3 className="text-base font-semibold text-gray-900">Add new work experience</h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWorkAddFormOpen(false);
-                      setWorkDraft(emptyWork());
-                      setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
-                    }}
-                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                  >
-                    Cancel
-                  </button>
-                </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Organisation</label>
-                      <input
-                        type="text"
-                        value={workDraft.organisationName}
-                        onChange={(e) => {
-                          updateWorkDraft({ organisationName: e.target.value });
-                          clearFormError('work_draft_organisationName');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_organisationName')}`}
-                        placeholder="Company name"
-                      />
-                      {fe.work_draft_organisationName ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_organisationName}</p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Industry</label>
-                      <input
-                        type="text"
-                        value={workDraft.industry}
-                        onChange={(e) => {
-                          updateWorkDraft({ industry: e.target.value });
-                          clearFormError('work_draft_industry');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_industry')}`}
-                        placeholder="Industry or sector"
-                      />
-                      {fe.work_draft_industry ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_industry}</p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Employment Type</label>
-                      <SearchableList
-                        value={workDraft.employmentType}
-                        onChange={(employmentType) => {
-                          updateWorkDraft({ employmentType });
-                          clearFormError('work_draft_employmentType');
-                        }}
-                        options={[
-                          { value: '', label: 'Select' },
-                          { value: 'full_time', label: 'Full-time' },
-                          { value: 'part_time', label: 'Part-time' },
-                          { value: 'contract', label: 'Contract' },
-                          { value: 'internship', label: 'Internship' },
-                        ]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.work_draft_employmentType}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode</label>
-                      <SearchableList
-                        value={workDraft.workMode}
-                        onChange={(workMode) => {
-                          updateWorkDraft({ workMode });
-                          clearFormError('work_draft_workMode');
-                        }}
-                        options={[
-                          { value: '', label: 'Select' },
-                          { value: 'on_site', label: 'On-site' },
-                          { value: 'remote', label: 'Remote' },
-                          { value: 'hybrid', label: 'Hybrid' },
-                          { value: 'global_remote', label: 'Global Remote' },
-                        ]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.work_draft_workMode}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Remuneration</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-[8rem_1fr_9rem] gap-2">
-                        <SearchableList
-                          value={workDraft.currency}
-                          onChange={(currency) => updateWorkDraft({ currency })}
-                          options={EDUCATION_CURRENCY_OPTIONS}
-                          placeholder="Currency"
-                          className="[&_button]:bg-gray-50"
-                        />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={workDraft.salary}
-                          onChange={(e) => {
-                            updateWorkDraft({ salary: e.target.value });
-                            clearFormError('work_draft_salary');
-                          }}
-                          className={`min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_salary')}`}
-                          placeholder="0.00"
-                        />
-                        <SearchableList
-                          value={workDraft.salaryFrequency}
-                          onChange={(salaryFrequency) => updateWorkDraft({ salaryFrequency })}
-                          options={WORK_SALARY_FREQUENCY_OPTIONS}
-                          placeholder="Frequency"
-                          className="[&_button]:bg-gray-50"
-                        />
+                <div className={workEntriesList.length > 0 ? 'mt-6 border-t border-gray-200 pt-6' : ''}>
+                  <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
+                    <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 ring-1 ring-brand-100">
+                          <HiBriefcase className="h-6 w-6 text-brand-600" aria-hidden />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">Add Work Experience</h3>
+                          <p className="mt-0.5 text-sm text-gray-500">
+                            Enter your role and employer details below.
+                          </p>
+                        </div>
                       </div>
-                      {fe.work_draft_salary ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.work_draft_salary}</p>
-                      ) : null}
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Other Compensation</label>
-                      <input
-                        type="text"
-                        value={workDraft.otherCompensationNotes}
-                        onChange={(e) => updateWorkDraft({ otherCompensationNotes: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="Stock options, HMO, etc."
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-gray-900">Roles / Role Progression</span>
                       <button
                         type="button"
-                        onClick={addWorkDraftRole}
-                        className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                        onClick={() => {
+                          setWorkAddFormOpen(false);
+                          setWorkDraft(emptyWork());
+                          setWorkSkillInput('');
+                          setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
+                        }}
+                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
                       >
-                        <HiPlus className="h-4 w-4" />
-                        Add Role
+                        Cancel
                       </button>
                     </div>
-                    {workDraft.workRoles.map((roleRow, ri) => {
-                      const titleKey = ri === 0 ? 'work_draft_role0_title' : '';
-                      const startKey = `work_draft_role${ri}_startDate`;
-                      const endKey = `work_draft_role${ri}_endDate`;
-                      return (
-                      <div
-                        key={ri}
-                        className="rounded-lg border border-gray-200 bg-white p-4 space-y-3 shadow-sm"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium text-gray-800">Role {ri + 1}</span>
-                          {workDraft.workRoles.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeWorkDraftRole(ri)}
-                              className="text-sm text-red-600 hover:text-red-700 inline-flex items-center gap-1"
-                            >
-                              <HiX className="h-4 w-4" />
-                              Remove
-                            </button>
-                          )}
-                        </div>
+
+                    <div className="space-y-8">
+                      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Organisation</label>
                           <input
                             type="text"
-                            value={roleRow.title}
+                            value={workDraft.organisationName}
                             onChange={(e) => {
-                              updateWorkDraftRole(ri, { title: e.target.value });
-                              if (titleKey) clearFormError(titleKey);
+                              updateWorkDraft({ organisationName: e.target.value });
+                              clearFormError('work_draft_organisationName');
                             }}
-                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${
-                              titleKey && fe[titleKey] ? 'border-red-500 ring-1 ring-red-500' : 'border-gray-200'
-                            }`}
-                            placeholder="Job title"
+                            className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_organisationName')}`}
+                            placeholder="Company or organisation name"
                           />
-                          {titleKey && fe[titleKey] ? (
-                            <p className="mt-1 text-sm text-red-600">{fe[titleKey]}</p>
+                          {fe.work_draft_organisationName ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_organisationName}</p>
                           ) : null}
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                            <input
-                              type="date"
-                              value={roleRow.startDate}
-                              onChange={(e) => {
-                                updateWorkDraftRole(ri, { startDate: e.target.value });
-                                clearFormError(startKey);
-                              }}
-                              className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(startKey)}`}
-                            />
-                            {fe[startKey] ? <p className="mt-1 text-sm text-red-600">{fe[startKey]}</p> : null}
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                            <input
-                              type="date"
-                              value={roleRow.endDate}
-                              disabled={roleRow.currentlyWorking}
-                              onChange={(e) => {
-                                updateWorkDraftRole(ri, { endDate: e.target.value });
-                                clearFormError(endKey);
-                              }}
-                              className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:opacity-60 ${errB2(endKey)}`}
-                            />
-                            {fe[endKey] ? <p className="mt-1 text-sm text-red-600">{fe[endKey]}</p> : null}
-                          </div>
-                        </div>
-                        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Industry</label>
                           <input
-                            type="checkbox"
-                            checked={roleRow.currentlyWorking}
-                            onChange={(e) =>
-                              updateWorkDraftRole(ri, {
-                                currentlyWorking: e.target.checked,
-                                endDate: e.target.checked ? '' : roleRow.endDate,
-                              })
+                            type="text"
+                            value={workDraft.industry}
+                            onChange={(e) => {
+                              updateWorkDraft({ industry: e.target.value });
+                              clearFormError('work_draft_industry');
+                            }}
+                            className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_industry')}`}
+                            placeholder="Industry or sector"
+                          />
+                          {fe.work_draft_industry ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_industry}</p>
+                          ) : null}
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Employment Type</label>
+                          <SearchableList
+                            value={workDraft.employmentType}
+                            onChange={(employmentType) => {
+                              updateWorkDraft({ employmentType });
+                              clearFormError('work_draft_employmentType');
+                            }}
+                            options={[
+                              { value: '', label: 'Select' },
+                              { value: 'full_time', label: 'Full-time' },
+                              { value: 'part_time', label: 'Part-time' },
+                              { value: 'contract', label: 'Contract' },
+                              { value: 'internship', label: 'Internship' },
+                            ]}
+                            placeholder="Select"
+                            className="[&_button]:bg-gray-50"
+                            error={fe.work_draft_employmentType}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Work Mode</label>
+                          <SearchableList
+                            value={workDraft.workMode}
+                            onChange={(workMode) => {
+                              updateWorkDraft({ workMode });
+                              clearFormError('work_draft_workMode');
+                            }}
+                            options={[
+                              { value: '', label: 'Select' },
+                              { value: 'on_site', label: 'On-site' },
+                              { value: 'remote', label: 'Remote' },
+                              { value: 'hybrid', label: 'Hybrid' },
+                              { value: 'global_remote', label: 'Global Remote' },
+                            ]}
+                            placeholder="Select"
+                            className="[&_button]:bg-gray-50"
+                            error={fe.work_draft_workMode}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-gray-700">Remuneration</label>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,7rem)_1fr_minmax(0,9rem)]">
+                          <SearchableList
+                            value={workDraft.currency}
+                            onChange={(currency) => updateWorkDraft({ currency })}
+                            options={EDUCATION_CURRENCY_OPTIONS}
+                            placeholder="Currency"
+                            className="[&_button]:bg-gray-50"
+                          />
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={workDraft.salary}
+                            onChange={(e) => {
+                              updateWorkDraft({ salary: e.target.value });
+                              clearFormError('work_draft_salary');
+                            }}
+                            className={`min-w-0 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_salary')}`}
+                            placeholder="0.00"
+                          />
+                          <SearchableList
+                            value={workDraft.salaryFrequency}
+                            onChange={(salaryFrequency) => updateWorkDraft({ salaryFrequency })}
+                            options={WORK_SALARY_FREQUENCY_OPTIONS}
+                            placeholder="Frequency"
+                            className="[&_button]:bg-gray-50"
+                          />
+                        </div>
+                        {fe.work_draft_salary ? (
+                          <p className="mt-1 text-sm text-red-600">{fe.work_draft_salary}</p>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-gray-700">Other Compensation</label>
+                        <input
+                          type="text"
+                          value={workDraft.otherCompensationNotes}
+                          onChange={(e) => updateWorkDraft({ otherCompensationNotes: e.target.value })}
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          placeholder="Stock options, bonus, HMO, etc."
+                        />
+                      </div>
+
+                      <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-5 sm:p-6">
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                          <h4 className="text-sm font-semibold text-gray-900">Roles / Role Progression</h4>
+                          <button
+                            type="button"
+                            onClick={addWorkDraftRole}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
+                          >
+                            <HiPlus className="h-4 w-4" aria-hidden />
+                            Add Role
+                          </button>
+                        </div>
+                        <div className="space-y-4">
+                          {workDraft.workRoles.map((roleRow, ri) => {
+                            const titleKey = ri === 0 ? 'work_draft_role0_title' : '';
+                            const startKey = `work_draft_role${ri}_startDate`;
+                            const endKey = `work_draft_role${ri}_endDate`;
+                            return (
+                              <div
+                                key={ri}
+                                className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm"
+                              >
+                                <div className="mb-3 flex items-center justify-between gap-2">
+                                  <span className="text-sm font-medium text-gray-800">Role {ri + 1}</span>
+                                  {workDraft.workRoles.length > 1 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeWorkDraftRole(ri)}
+                                      className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700"
+                                    >
+                                      <HiX className="h-4 w-4" aria-hidden />
+                                      Remove
+                                    </button>
+                                  ) : null}
+                                </div>
+                                <div className="space-y-4">
+                                  <div>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Title</label>
+                                    <input
+                                      type="text"
+                                      value={roleRow.title}
+                                      onChange={(e) => {
+                                        updateWorkDraftRole(ri, { title: e.target.value });
+                                        if (titleKey) clearFormError(titleKey);
+                                      }}
+                                      className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${
+                                        titleKey ? errB2(titleKey) : 'border-gray-200'
+                                      }`}
+                                      placeholder="Job title"
+                                    />
+                                    {titleKey && fe[titleKey] ? (
+                                      <p className="mt-1 text-sm text-red-600">{fe[titleKey]}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                    <div>
+                                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                                        Start Date
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={roleRow.startDate}
+                                        onChange={(e) => {
+                                          updateWorkDraftRole(ri, { startDate: e.target.value });
+                                          clearFormError(startKey);
+                                        }}
+                                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2(startKey)}`}
+                                      />
+                                      {fe[startKey] ? (
+                                        <p className="mt-1 text-sm text-red-600">{fe[startKey]}</p>
+                                      ) : null}
+                                    </div>
+                                    <div>
+                                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                                        End Date
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={roleRow.endDate}
+                                        disabled={roleRow.currentlyWorking}
+                                        onChange={(e) => {
+                                          updateWorkDraftRole(ri, { endDate: e.target.value });
+                                          clearFormError(endKey);
+                                        }}
+                                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 disabled:opacity-60 ${errB2(endKey)}`}
+                                      />
+                                      {fe[endKey] ? (
+                                        <p className="mt-1 text-sm text-red-600">{fe[endKey]}</p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={roleRow.currentlyWorking}
+                                      onChange={(e) =>
+                                        updateWorkDraftRole(ri, {
+                                          currentlyWorking: e.target.checked,
+                                          endDate: e.target.checked ? '' : roleRow.endDate,
+                                        })
+                                      }
+                                      className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                    />
+                                    Currently working here
+                                  </label>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {fe.work_draft_workRoles ? (
+                          <p className="mt-3 text-sm text-red-600">{fe.work_draft_workRoles}</p>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-5">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Job Description</label>
+                          <textarea
+                            value={workDraft.jobDescription}
+                            onChange={(e) => updateWorkDraft({ jobDescription: e.target.value })}
+                            rows={5}
+                            className="min-h-[120px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                            placeholder="Summarise the role and scope…"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Responsibilities</label>
+                          <textarea
+                            value={workDraft.responsibilitiesText}
+                            onChange={(e) => updateWorkDraft({ responsibilitiesText: e.target.value })}
+                            rows={5}
+                            className="min-h-[120px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                            placeholder="Key duties and outcomes…"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Achievements</label>
+                          <textarea
+                            value={workDraft.achievementsText}
+                            onChange={(e) => updateWorkDraft({ achievementsText: e.target.value })}
+                            rows={5}
+                            className="min-h-[120px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                            placeholder="Impact, metrics, recognition…"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-gray-700">Associated Skills</label>
+                        {workDraftSkillChips.length > 0 ? (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {workDraftSkillChips.map((chip, chipIdx) => (
+                              <span
+                                key={`work-skill-${chip}-${chipIdx}`}
+                                className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
+                              >
+                                {chip}
+                                <button
+                                  type="button"
+                                  onClick={() => removeWorkDraftSkill(chip)}
+                                  className="rounded-full p-0.5 text-brand-700 hover:bg-brand-100"
+                                  aria-label={`Remove ${chip}`}
+                                >
+                                  <HiX className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <input
+                          type="text"
+                          value={workSkillInput}
+                          onChange={(e) => setWorkSkillInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addWorkDraftSkill();
                             }
-                            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                          />
-                          Currently working here
-                        </label>
+                          }}
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          placeholder="Type to search skills or add custom…"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Press Enter to add a skill.</p>
                       </div>
-                      );
-                    })}
-                  </div>
-                  {fe.work_draft_workRoles ? (
-                    <p className="text-sm text-red-600">{fe.work_draft_workRoles}</p>
-                  ) : null}
+                    </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
-                      <textarea
-                        value={workDraft.jobDescription}
-                        onChange={(e) => updateWorkDraft({ jobDescription: e.target.value })}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y min-h-[100px]"
-                        placeholder="Enter job description..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Responsibilities</label>
-                      <textarea
-                        value={workDraft.responsibilitiesText}
-                        onChange={(e) => updateWorkDraft({ responsibilitiesText: e.target.value })}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y min-h-[100px]"
-                        placeholder="Enter responsibilities..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Achievements</label>
-                      <textarea
-                        value={workDraft.achievementsText}
-                        onChange={(e) => updateWorkDraft({ achievementsText: e.target.value })}
-                        rows={4}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y min-h-[100px]"
-                        placeholder="Enter achievements..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Associated Skills</label>
-                      <input
-                        type="text"
-                        value={workDraft.associatedSkills}
-                        onChange={(e) => updateWorkDraft({ associatedSkills: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                        placeholder="Type to search skills or add custom..."
-                      />
+                    <div className="mt-8 border-t border-gray-100 pt-6">
+                      <button
+                        type="button"
+                        onClick={commitWorkDraft}
+                        disabled={workSaving}
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                      >
+                        <HiPlus className="h-4 w-4" aria-hidden />
+                        {workSaving ? 'Saving…' : 'Add Data'}
+                      </button>
                     </div>
                   </div>
-
-                  <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-4 space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={workDraft.selfDeclared}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelfDeclarationFlow({ open: true, kind: 'work' });
-                          } else {
-                            updateWorkDraft({ selfDeclared: false });
-                          }
-                        }}
-                        className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Self declared (skip employer verification)</span>
-                    </label>
-                    {!workDraft.selfDeclared && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Verification website</label>
-                          <input
-                            type="url"
-                            value={workDraft.verifyWebsite}
-                            onChange={(e) => {
-                              updateWorkDraft({ verifyWebsite: e.target.value });
-                              clearFormError('work_draft_verifyWebsite');
-                            }}
-                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_verifyWebsite')}`}
-                            placeholder="https://company.com"
-                          />
-                          {fe.work_draft_verifyWebsite ? (
-                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_verifyWebsite}</p>
-                          ) : null}
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">HR email</label>
-                          <input
-                            type="email"
-                            value={workDraft.verifyHrEmail}
-                            onChange={(e) => {
-                              updateWorkDraft({ verifyHrEmail: e.target.value });
-                              clearFormError('work_draft_verifyHrEmail');
-                            }}
-                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('work_draft_verifyHrEmail')}`}
-                            placeholder="hr@company.com"
-                          />
-                          {fe.work_draft_verifyHrEmail ? (
-                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_verifyHrEmail}</p>
-                          ) : null}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={commitWorkDraft}
-                    disabled={workSaving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-                  >
-                    <HiPlus className="w-4 h-4" />
-                    {workSaving ? 'Saving...' : 'Add Work Experience'}
-                  </button>
-              </div>
-              </div>
+                </div>
               ) : workEntriesList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -5634,13 +6618,19 @@ export default function VerificationCenter() {
               <div className="space-y-3">
                 {projectsList.map((entry, index) => {
                   const status = entry.projectVerificationStatus ?? 'pending';
+                  const statusVerified = status === 'verified';
                   const isSelfDeclaredProject = projectEntryIsSelfDeclared(entry);
+                  const methodSubtext = projectVerificationSubtext(entry);
                   const projRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`proj_${index}_`));
+                  const teamRows = entry.teamMembers.filter((m) => m.name.trim() || m.role.trim());
+                  const linkTrim = entry.projectLink?.trim() ?? '';
+                  const linkHref = linkTrim
+                    ? linkTrim.startsWith('http')
+                      ? linkTrim
+                      : `https://${linkTrim}`
+                    : '';
                   return (
-                    <div
-                      key={entry.id ?? `proj-${index}`}
-                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
-                    >
+                    <div key={entry.id ?? `proj-${index}`} className="space-y-3">
                       {projRowErrs.length > 0 && (
                         <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
                           {projRowErrs.map(([k, msg]) => (
@@ -5648,101 +6638,232 @@ export default function VerificationCenter() {
                           ))}
                         </ul>
                       )}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                          <HiFolder className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-900 truncate">{entry.title}</p>
-                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">
-                              {formatProjectCardSubtitle(entry)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-                          <div className="flex flex-wrap gap-1.5 justify-end">
-                            {isSelfDeclaredProject && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
-                                Self Declared
-                              </span>
-                            )}
-                            {status === 'pending' && !isSelfDeclaredProject && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                                Pending
-                              </span>
-                            )}
-                            {status === 'verified' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                      {statusVerified ? (
+                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+                                <HiFolder className="h-5 w-5 text-brand-600" aria-hidden />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-base font-semibold text-gray-900">{entry.title}</p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                              <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
                                 Verified
                               </span>
-                            )}
+                              {methodSubtext ? (
+                                <p className="text-xs text-brand-600/85">{methodSubtext}</p>
+                              ) : null}
+                            </div>
                           </div>
-                          {isSelfDeclaredProject && (
-                            <p className="text-xs text-gray-400">via Self Declaration</p>
-                          )}
+                          {entry.description?.trim() ? (
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{entry.description.trim()}</p>
+                          ) : null}
+                          {linkTrim ? (
+                            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                              <span className="text-sm text-gray-500 shrink-0">Link:</span>
+                              <a
+                                href={linkHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm font-semibold text-gray-900 break-all sm:text-right hover:text-brand-600"
+                              >
+                                {linkTrim}
+                              </a>
+                            </div>
+                          ) : null}
+                          {teamRows.length > 0 ? (
+                            <div>
+                              <p className="text-xs font-medium text-gray-500">Team</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {teamRows.map((m, mi) => (
+                                  <span
+                                    key={`${entry.id ?? index}-tm-${mi}`}
+                                    className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800"
+                                  >
+                                    {m.name.trim()}
+                                    {m.role.trim() ? ` (${m.role.trim()})` : ''}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {isProjectMethodSelfDeclaration(entry.verificationMethod) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openVerifyProjectModal(index)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                                >
+                                  <HiArrowUp className="h-4 w-4" aria-hidden />
+                                  Upgrade verification
+                                </button>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => requestRemoveProjectEntry(index)}
+                              className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              aria-label="Remove project"
+                            >
+                              <HiTrash className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                          {isSelfDeclaredProject ? (
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/80 bg-[#fffbeb] px-3 py-2.5 sm:px-4">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <HiExclamationCircle
+                                  className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+                                  aria-hidden
+                                />
+                                <p className="text-xs font-medium leading-snug text-amber-950 sm:text-[13px]">
+                                  Self Declaration — limited network access. Upgrade to full verification.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openVerifyProjectModal(index)}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-800/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                              >
+                                <HiArrowUp className="h-3.5 w-3.5" aria-hidden />
+                                Upgrade Verification
+                              </button>
+                            </div>
+                          ) : null}
 
-                      {isSelfDeclaredProject && (
-                        <div className="flex gap-3 rounded-lg border border-amber-200 bg-[#fffbeb] px-3 py-3 text-sm text-gray-900 shadow-sm">
-                          <span
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white"
-                            aria-hidden
+                          <div
+                            className={
+                              isSelfDeclaredProject
+                                ? 'px-3 py-3 sm:px-4 sm:py-3'
+                                : 'space-y-4 p-5 sm:p-6'
+                            }
                           >
-                            <HiExclamationCircle className="h-5 w-5" />
-                          </span>
-                          <span className="min-w-0 pt-0.5 leading-snug">
-                            Self Declaration — limited network access. Upgrade by adding employer verification
-                            details.
-                          </span>
+                            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                              <div
+                                className={`flex min-w-0 items-start ${isSelfDeclaredProject ? 'gap-2' : 'gap-4'}`}
+                              >
+                                {isSelfDeclaredProject ? (
+                                  <HiChevronRight
+                                    className="mt-2 h-4 w-4 shrink-0 text-gray-400"
+                                    aria-hidden
+                                  />
+                                ) : null}
+                                <div
+                                  className={
+                                    isSelfDeclaredProject
+                                      ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 ring-1 ring-sky-100/80'
+                                      : 'flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100'
+                                  }
+                                >
+                                  {isSelfDeclaredProject ? (
+                                    <HiBriefcase className="h-5 w-5 text-sky-700" aria-hidden />
+                                  ) : (
+                                    <HiFolder className="h-6 w-6 text-brand-600" aria-hidden />
+                                  )}
+                                </div>
+                                <div className="min-w-0 pt-0.5">
+                                  <p
+                                    className={`font-semibold leading-tight text-gray-900 truncate ${
+                                      isSelfDeclaredProject ? 'text-base' : 'text-lg'
+                                    }`}
+                                  >
+                                    {entry.title}
+                                  </p>
+                                  <p
+                                    className={`text-gray-500 line-clamp-2 ${
+                                      isSelfDeclaredProject ? 'mt-0.5 text-xs' : 'mt-1 text-sm'
+                                    }`}
+                                  >
+                                    {formatProjectCardSubtitle(entry)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
+                                <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                                  {isSelfDeclaredProject ? (
+                                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold leading-tight text-amber-950">
+                                      Self Declared
+                                    </span>
+                                  ) : null}
+                                  {status === 'pending' && !isSelfDeclaredProject ? (
+                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                                      Pending
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {isSelfDeclaredProject ? (
+                                  <p className="text-[11px] text-gray-400">via Self Declaration</p>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div
+                            className={`flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 ${
+                              isSelfDeclaredProject
+                                ? 'bg-white px-3 py-2.5 sm:px-4'
+                                : 'gap-3 bg-gray-50/50 px-5 py-4 sm:px-6'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              {status === 'pending' && !isSelfDeclaredProject ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openVerifyProjectModal(index)}
+                                  className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                                >
+                                  <HiShieldCheck className="w-4 h-4" />
+                                  Verify
+                                </button>
+                              ) : null}
+                              {isSelfDeclaredProject ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openVerifyProjectModal(index)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 sm:text-sm sm:px-3.5 sm:py-2"
+                                >
+                                  <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                  Verify
+                                </button>
+                              ) : null}
+                              {linkTrim ? (
+                                <a
+                                  href={linkHref}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                                >
+                                  Project link
+                                </a>
+                              ) : null}
+                              {isSelfDeclaredProject ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openVerifyProjectModal(index)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 sm:text-sm sm:py-2"
+                                >
+                                  <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                  Upgrade Verification
+                                </button>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => requestRemoveProjectEntry(index)}
+                              className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              aria-label="Remove project"
+                            >
+                              <HiTrash className="w-5 h-5" />
+                            </button>
+                          </div>
                         </div>
                       )}
-
-                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {status === 'pending' && isSelfDeclaredProject && (
-                            <button
-                              type="button"
-                              onClick={() => openVerifyProjectModal(index)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
-                            >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Upgrade Verification
-                            </button>
-                          )}
-                          {status === 'pending' && !isSelfDeclaredProject && (
-                            <button
-                              type="button"
-                              onClick={() => openVerifyProjectModal(index)}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-                            >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Verify
-                            </button>
-                          )}
-                          {entry.projectLink?.trim() && (
-                            <a
-                              href={
-                                entry.projectLink.startsWith('http')
-                                  ? entry.projectLink
-                                  : `https://${entry.projectLink}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
-                            >
-                              Project link
-                            </a>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => requestRemoveProjectEntry(index)}
-                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Remove project"
-                        >
-                          <HiTrash className="w-5 h-5" />
-                        </button>
-                      </div>
                     </div>
                   );
                 })}
@@ -5959,116 +7080,199 @@ export default function VerificationCenter() {
                   return (
                     <div
                       key={`cert-${index}-${cert.name}`}
-                      className="rounded-xl border border-gray-200 bg-white p-5 space-y-4"
+                      className={`overflow-hidden rounded-xl border border-gray-200 bg-white ${
+                        isSelfDeclaredCert ? '' : 'space-y-4 p-5'
+                      }`}
                     >
                       {certRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                        <ul
+                          className={`list-disc space-y-0.5 text-sm text-red-600 ${
+                            isSelfDeclaredCert ? 'mx-4 mt-3 mb-2 pl-5' : 'pl-5'
+                          }`}
+                        >
                           {certRowErrs.map(([k, msg]) => (
                             <li key={k}>{msg}</li>
                           ))}
                         </ul>
                       )}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                          <HiBadgeCheck className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-900 truncate">{cert.name}</p>
-                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">
-                              {formatCertificateCardSubtitle(cert)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
-                          <div className="flex flex-wrap gap-1.5 justify-end">
-                            {isSelfDeclaredCert && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-900">
-                                Self Declared
-                              </span>
-                            )}
-                            {status === 'pending' && !isSelfDeclaredCert && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900">
-                                Pending
-                              </span>
-                            )}
-                            {status === 'verified' && (
-                              <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                                Verified
-                              </span>
-                            )}
-                          </div>
-                          {isSelfDeclaredCert && (
-                            <p className="text-xs text-gray-400">via Self Declaration</p>
-                          )}
-                        </div>
-                      </div>
 
-                      {isSelfDeclaredCert && (
-                        <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
-                          <HiExclamationCircle className="w-5 h-5 shrink-0 text-amber-700" />
-                          <span>
-                            Self Declaration — limited network access. Upgrade by adding a credential reporting URL
-                            or supporting media.
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-2 justify-between gap-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {status === 'pending' && isSelfDeclaredCert && (
+                      {isSelfDeclaredCert ? (
+                        <>
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/80 bg-[#fffbeb] px-3 py-2.5 sm:px-4">
+                            <div className="flex min-w-0 items-start gap-2">
+                              <HiExclamationCircle
+                                className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+                                aria-hidden
+                              />
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium leading-snug text-amber-950 sm:text-[13px]">
+                                  Self Declaration — limited network access. Upgrade to full verification.
+                                </p>
+                                <p className="mt-0.5 text-[11px] leading-snug text-amber-900/80">
+                                  Add a credential reporting URL or supporting media to upgrade.
+                                </p>
+                              </div>
+                            </div>
                             <button
                               type="button"
                               onClick={() => openVerifyCertModal(index)}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-800/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
                             >
-                              <HiShieldCheck className="w-4 h-4" />
+                              <HiArrowUp className="h-3.5 w-3.5" aria-hidden />
                               Upgrade Verification
                             </button>
-                          )}
-                          {status === 'pending' && !isSelfDeclaredCert && (
+                          </div>
+
+                          <div className="px-3 py-3 sm:px-4 sm:py-3">
+                            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                              <div className="flex min-w-0 items-start gap-2">
+                                <HiChevronRight
+                                  className="mt-2 h-4 w-4 shrink-0 text-gray-400"
+                                  aria-hidden
+                                />
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 ring-1 ring-sky-100/80">
+                                  <HiBadgeCheck className="h-5 w-5 text-sky-700" aria-hidden />
+                                </div>
+                                <div className="min-w-0 pt-0.5">
+                                  <p className="truncate text-base font-semibold leading-tight text-gray-900">
+                                    {cert.name}
+                                  </p>
+                                  <p className="mt-0.5 line-clamp-2 text-xs text-gray-500">
+                                    {formatCertificateCardSubtitle(cert)}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
+                                <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold leading-tight text-amber-950">
+                                  Self Declared
+                                </span>
+                                <p className="text-[11px] text-gray-400">via Self Declaration</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/50 px-3 py-2.5 sm:px-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openVerifyCertModal(index)}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 sm:px-3.5 sm:py-2 sm:text-sm"
+                              >
+                                <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                Verify
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openVerifyCertModal(index)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 sm:py-2 sm:text-sm"
+                              >
+                                <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                Upgrade Verification
+                              </button>
+                              {cert.supportingMediaUrl?.trim() ? (
+                                <a
+                                  href={
+                                    cert.supportingMediaUrl.startsWith('http')
+                                      ? cert.supportingMediaUrl
+                                      : `${api.defaults.baseURL || ''}${cert.supportingMediaUrl}`
+                                  }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-brand-600 hover:bg-gray-50 sm:px-3 sm:py-2 sm:text-sm"
+                                >
+                                  View media
+                                </a>
+                              ) : null}
+                            </div>
                             <button
                               type="button"
-                              onClick={() => openVerifyCertModal(index)}
-                              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                              onClick={() => requestRemoveCertificate(index)}
+                              className="inline-flex items-center justify-center rounded-lg p-1.5 text-red-600 hover:bg-red-50 hover:text-red-700 sm:p-2"
+                              aria-label="Remove certification"
                             >
-                              <HiShieldCheck className="w-4 h-4" />
-                              Verify
+                              <HiTrash className="h-4 w-4 sm:h-5 sm:w-5" />
                             </button>
-                          )}
-                          {cert.supportingMediaUrl?.trim() && (
-                            <a
-                              href={
-                                cert.supportingMediaUrl.startsWith('http')
-                                  ? cert.supportingMediaUrl
-                                  : `${api.defaults.baseURL || ''}${cert.supportingMediaUrl}`
-                              }
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 gap-3">
+                              <HiBadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold text-gray-900">{cert.name}</p>
+                                <p className="mt-0.5 line-clamp-2 text-sm text-gray-500">
+                                  {formatCertificateCardSubtitle(cert)}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                {status === 'pending' && (
+                                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+                                    Pending
+                                  </span>
+                                )}
+                                {status === 'verified' && (
+                                  <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                                    Verified
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-y-2 gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {status === 'pending' && (
+                                <button
+                                  type="button"
+                                  onClick={() => openVerifyCertModal(index)}
+                                  className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                                >
+                                  <HiShieldCheck className="h-4 w-4" />
+                                  Verify
+                                </button>
+                              )}
+                              {cert.supportingMediaUrl?.trim() && (
+                                <a
+                                  href={
+                                    cert.supportingMediaUrl.startsWith('http')
+                                      ? cert.supportingMediaUrl
+                                      : `${api.defaults.baseURL || ''}${cert.supportingMediaUrl}`
+                                  }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                                >
+                                  View media
+                                </a>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => requestRemoveCertificate(index)}
+                              className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              aria-label="Remove certification"
                             >
-                              View media
-                            </a>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => requestRemoveCertificate(index)}
-                          className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                          aria-label="Remove certification"
-                        >
-                          <HiTrash className="w-5 h-5" />
-                        </button>
-                      </div>
+                              <HiTrash className="h-5 w-5" />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}
               </div>
 
               {showCertificationAddForm ? (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <HiBadgeCheck className="w-5 h-5 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add new certification</h3>
+                <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
+                  <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 ring-1 ring-emerald-100">
+                        <HiBadgeCheck className="h-6 w-6 text-emerald-700" aria-hidden />
+                      </div>
+                      <h3 className="text-lg font-semibold text-gray-900">Add Certification</h3>
                     </div>
                     <button
                       type="button"
@@ -6082,33 +7286,43 @@ export default function VerificationCenter() {
                       Cancel
                     </button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Name of certificate</label>
+                      <label className="mb-1.5 block text-sm font-semibold text-gray-900" htmlFor="cert_draft_name">
+                        Name
+                      </label>
                       <input
+                        id="cert_draft_name"
                         type="text"
                         value={certDraft.name}
                         onChange={(e) => {
                           updateCertDraft({ name: e.target.value });
                           clearFormError('cert_draft_name');
                         }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_name')}`}
-                        placeholder="e.g. Advanced Product Management"
+                        className={`min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 ${errB2('cert_draft_name')}`}
+                        placeholder="Certificate name"
                       />
                       {fe.cert_draft_name ? (
                         <p className="mt-1 text-sm text-red-600">{fe.cert_draft_name}</p>
                       ) : null}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Issued by</label>
+                      <label
+                        className="mb-1.5 block text-sm font-semibold text-gray-900"
+                        htmlFor="cert_draft_issuedBy"
+                      >
+                        Issuing Organisation
+                      </label>
                       <input
+                        id="cert_draft_issuedBy"
                         type="text"
                         value={certDraft.issuedBy}
                         onChange={(e) => {
                           updateCertDraft({ issuedBy: e.target.value });
                           clearFormError('cert_draft_issuedBy');
                         }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_issuedBy')}`}
+                        className={`min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 ${errB2('cert_draft_issuedBy')}`}
                         placeholder="e.g. Coursera"
                       />
                       {fe.cert_draft_issuedBy ? (
@@ -6116,49 +7330,111 @@ export default function VerificationCenter() {
                       ) : null}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Issued date</label>
-                      <input
-                        type="date"
-                        value={certDraft.issuedDate}
-                        onChange={(e) => updateCertDraft({ issuedDate: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                      />
+                      <label
+                        className="mb-1.5 block text-sm font-semibold text-gray-900"
+                        htmlFor="cert_draft_issuedDate"
+                      >
+                        Issue Date
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="cert_draft_issuedDate"
+                          type="date"
+                          value={certDraft.issuedDate}
+                          onChange={(e) => updateCertDraft({ issuedDate: e.target.value })}
+                          className="min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-3 pr-10 text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                        <HiCalendar
+                          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                          aria-hidden
+                        />
+                      </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Expiration date</label>
-                      <input
-                        type="date"
-                        value={certDraft.expirationDate}
-                        onChange={(e) => {
-                          updateCertDraft({ expirationDate: e.target.value });
-                          clearFormError('cert_draft_expirationDate');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_expirationDate')}`}
-                      />
-                      {fe.cert_draft_expirationDate ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_expirationDate}</p>
-                      ) : null}
+                      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <label
+                          className="block text-sm font-semibold text-gray-900"
+                          htmlFor="cert_draft_expirationDate"
+                        >
+                          Expiration Date
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-gray-600">
+                          <input
+                            type="checkbox"
+                            checked={certDraft.noExpiration === true}
+                            onChange={(e) => {
+                              const noExp = e.target.checked;
+                              updateCertDraft({
+                                noExpiration: noExp,
+                                expirationDate: noExp ? '' : certDraft.expirationDate,
+                              });
+                              clearFormError('cert_draft_expirationDate');
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          No expiration date
+                        </label>
+                      </div>
+                      {certDraft.noExpiration ? (
+                        <p className="min-h-[2.75rem] rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2.5 text-sm text-gray-500">
+                          This credential does not expire.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <input
+                              id="cert_draft_expirationDate"
+                              type="date"
+                              value={certDraft.expirationDate}
+                              onChange={(ev) => {
+                                updateCertDraft({ expirationDate: ev.target.value });
+                                clearFormError('cert_draft_expirationDate');
+                              }}
+                              className={`min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-3 pr-10 text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 ${errB2('cert_draft_expirationDate')}`}
+                            />
+                            <HiCalendar
+                              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                              aria-hidden
+                            />
+                          </div>
+                          {fe.cert_draft_expirationDate ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.cert_draft_expirationDate}</p>
+                          ) : null}
+                        </>
+                      )}
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Credential ID</label>
+                    <div>
+                      <label
+                        className="mb-1.5 block text-sm font-semibold text-gray-900"
+                        htmlFor="cert_draft_credentialId"
+                      >
+                        Credential ID
+                      </label>
                       <input
+                        id="cert_draft_credentialId"
                         type="text"
                         value={certDraft.credentialId}
                         onChange={(e) => updateCertDraft({ credentialId: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                        className="min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
                         placeholder="e.g. DORYY53743"
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Reporting URL</label>
+                    <div>
+                      <label
+                        className="mb-1.5 block text-sm font-semibold text-gray-900"
+                        htmlFor="cert_draft_reportingUrl"
+                      >
+                        Supporting URL
+                      </label>
                       <input
+                        id="cert_draft_reportingUrl"
                         type="url"
                         value={certDraft.reportingUrl}
                         onChange={(e) => {
                           updateCertDraft({ reportingUrl: e.target.value });
                           clearFormError('cert_draft_reportingUrl');
                         }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_reportingUrl')}`}
+                        className={`min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 ${errB2('cert_draft_reportingUrl')}`}
                         placeholder="https://..."
                       />
                       {fe.cert_draft_reportingUrl ? (
@@ -6166,32 +7442,53 @@ export default function VerificationCenter() {
                       ) : null}
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting media URL</label>
+                      <label
+                        className="mb-1.5 block text-sm font-semibold text-gray-900"
+                        htmlFor="cert_draft_associatedSkills"
+                      >
+                        Associated Skills
+                      </label>
                       <input
-                        type="url"
-                        value={certDraft.supportingMediaUrl}
-                        onChange={(e) => {
-                          updateCertDraft({ supportingMediaUrl: e.target.value });
-                          clearFormError('cert_draft_supportingMediaUrl');
-                        }}
-                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('cert_draft_supportingMediaUrl')}`}
-                        placeholder="Or paste URL after upload"
+                        id="cert_draft_associatedSkills"
+                        type="text"
+                        value={certDraft.associatedSkills ?? ''}
+                        onChange={(e) => updateCertDraft({ associatedSkills: e.target.value })}
+                        className="min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        placeholder="Comma-separated"
                       />
-                      {fe.cert_draft_supportingMediaUrl ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.cert_draft_supportingMediaUrl}</p>
-                      ) : null}
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Supporting media file</label>
-                      <input
-                        type="file"
-                        accept=".pdf,image/jpeg,image/png,image/webp"
-                        onChange={(e) => void handleCertDraftFileUpload(e)}
-                        disabled={certDraftUploading}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 disabled:opacity-60"
-                      />
-                      {certDraft.supportingMediaUrl && (
-                        <p className="mt-1 text-sm text-gray-600">
+                      <label className="mb-1.5 block text-sm font-semibold text-gray-900">
+                        Supporting media <span className="font-normal text-gray-500">(optional)</span>
+                      </label>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                        <div className="min-w-0 flex-1">
+                          <input
+                            type="url"
+                            value={certDraft.supportingMediaUrl}
+                            onChange={(e) => {
+                              updateCertDraft({ supportingMediaUrl: e.target.value });
+                              clearFormError('cert_draft_supportingMediaUrl');
+                            }}
+                            className={`min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500 ${errB2('cert_draft_supportingMediaUrl')}`}
+                            placeholder="Paste media URL"
+                          />
+                          {fe.cert_draft_supportingMediaUrl ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.cert_draft_supportingMediaUrl}</p>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0">
+                          <input
+                            type="file"
+                            accept=".pdf,image/jpeg,image/png,image/webp"
+                            onChange={(e) => void handleCertDraftFileUpload(e)}
+                            disabled={certDraftUploading}
+                            className="block w-full min-w-0 text-sm text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100 disabled:opacity-60"
+                          />
+                        </div>
+                      </div>
+                      {certDraft.supportingMediaUrl ? (
+                        <p className="mt-2 text-sm text-gray-600">
                           Uploaded:{' '}
                           <a
                             href={
@@ -6201,24 +7498,29 @@ export default function VerificationCenter() {
                             }
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-brand-600 hover:underline"
+                            className="font-medium text-brand-600 hover:underline"
                           >
                             View file
                           </a>
                         </p>
-                      )}
-                      {certDraftUploading && <p className="mt-1 text-sm text-gray-500">Uploading...</p>}
+                      ) : null}
+                      {certDraftUploading ? (
+                        <p className="mt-1 text-sm text-gray-500">Uploading…</p>
+                      ) : null}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={commitCertDraft}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-                  >
-                    <HiPlus className="w-4 h-4" />
-                    {saving ? 'Saving...' : 'Add Certification'}
-                  </button>
+
+                  <div className="mt-8 border-t border-gray-100 pt-6">
+                    <button
+                      type="button"
+                      onClick={commitCertDraft}
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                    >
+                      <HiPlus className="h-4 w-4" aria-hidden />
+                      {saving ? 'Saving…' : 'Add Certification'}
+                    </button>
+                  </div>
                 </div>
               ) : certList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
@@ -6887,76 +8189,225 @@ export default function VerificationCenter() {
         onChange={handleEducationVerifyFileInputChange}
       />
 
+      <input
+        ref={workVerifyFileInputRef}
+        type="file"
+        accept=".pdf,image/jpeg,image/png,image/webp"
+        className="hidden"
+        aria-hidden
+        onChange={handleWorkVerifyFileInputChange}
+      />
+
       {verifyEducationModal.open && verifyEducationModal.index != null && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
           onClick={closeVerifyEducationModal}
         >
           <div
-            className="bg-white rounded-2xl border border-gray-100 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            className="bg-white rounded-2xl border border-gray-200 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900 tracking-tight">Verify Education</h3>
-                <p className="text-sm text-gray-500 mt-1.5">Choose a verification method.</p>
-              </div>
-              <button
-                type="button"
-                onClick={closeVerifyEducationModal}
-                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Close"
-              >
-                <HiX className="w-5 h-5" />
-              </button>
-            </div>
+            {verifyEducationModal.screen === 'pick' ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 tracking-tight">Verify Education</h3>
+                    <p className="text-sm text-gray-500 mt-1.5">Choose a verification method.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeVerifyEducationModal}
+                    className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    aria-label="Close"
+                  >
+                    <HiX className="w-5 h-5" />
+                  </button>
+                </div>
 
-            <div className="space-y-3 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  const idx = verifyEducationModal.index;
-                  if (idx == null) return;
-                  setSelfDeclarationFlow({ open: true, kind: 'education', educationIndex: idx });
-                }}
-                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors"
-              >
-                <HiDocumentText className="w-6 h-6 text-teal-600 shrink-0" />
+                <div className="space-y-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idx = verifyEducationModal.index;
+                      if (idx == null) return;
+                      closeVerifyEducationModal();
+                      setSelfDeclarationFlow({ open: true, kind: 'education', educationIndex: idx });
+                    }}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors"
+                  >
+                    <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Self Declaration</p>
+                      <p className="text-sm text-gray-500 mt-0.5">
+                        Temporary verification — limited network access
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerEducationVerifyDocumentUpload()}
+                    disabled={uploadingEducationIndex !== null}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors disabled:opacity-50"
+                  >
+                    <HiUpload className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Upload Document</p>
+                      <p className="text-sm text-gray-500 mt-0.5">Degree certificate, transcript, etc.</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idx = verifyEducationModal.index;
+                      if (idx == null) return;
+                      const ent = educationEntriesList[idx];
+                      setVerifyEducationModal((p) => ({
+                        ...p,
+                        screen: 'student_email',
+                        studentEmail: (ent?.studentVerificationEmail || '').trim(),
+                        otp: '',
+                        otpSent: false,
+                        studentFlowBusy: false,
+                      }));
+                    }}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors"
+                  >
+                    <HiMail className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Student Email</p>
+                      <p className="text-sm text-gray-500 mt-0.5">Verify with your institution email</p>
+                    </div>
+                  </button>
+                </div>
+              </>
+            ) : verifyEducationModal.screen === 'student_email' ? (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setVerifyEducationModal((p) => ({
+                        ...p,
+                        screen: 'pick',
+                        otpSent: false,
+                        otp: '',
+                        studentFlowBusy: false,
+                      }))
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-brand-600 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <HiArrowLeft className="h-4 w-4" aria-hidden />
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeVerifyEducationModal}
+                    className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    aria-label="Close"
+                  >
+                    <HiX className="w-5 h-5" />
+                  </button>
+                </div>
                 <div>
-                  <p className="font-semibold text-gray-900">Self Declaration</p>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    Temporary verification — limited network access
+                  <h3 className="text-xl font-bold text-gray-900 tracking-tight">Student email</h3>
+                  <p className="text-sm text-gray-500 mt-1.5">
+                    We will email a one-time code to your institution address.
                   </p>
                 </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => triggerEducationVerifyDocumentUpload()}
-                disabled={uploadingEducationIndex !== null}
-                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors disabled:opacity-50"
-              >
-                <HiUpload className="w-6 h-6 text-teal-600 shrink-0" />
-                <div>
-                  <p className="font-semibold text-gray-900">Upload Document</p>
-                  <p className="text-sm text-gray-500 mt-0.5">Degree certificate, transcript, etc.</p>
+                <div className="space-y-4 pt-1">
+                  <div>
+                    <label htmlFor="edu-student-email" className="block text-sm font-medium text-gray-700 mb-1">
+                      Institution email
+                    </label>
+                    <input
+                      id="edu-student-email"
+                      type="email"
+                      autoComplete="email"
+                      value={verifyEducationModal.studentEmail}
+                      onChange={(e) =>
+                        setVerifyEducationModal((p) => ({ ...p, studentEmail: e.target.value }))
+                      }
+                      disabled={verifyEducationModal.otpSent}
+                      className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
+                      placeholder="you@university.edu"
+                    />
+                  </div>
+                  {!verifyEducationModal.otpSent ? (
+                    <button
+                      type="button"
+                      onClick={() => void sendEducationStudentEmailOtp()}
+                      disabled={verifyEducationModal.studentFlowBusy}
+                      className="w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                    >
+                      {verifyEducationModal.studentFlowBusy ? 'Sending…' : 'Verify'}
+                    </button>
+                  ) : (
+                    <>
+                      <div>
+                        <label htmlFor="edu-student-otp" className="block text-sm font-medium text-gray-700 mb-1">
+                          Enter code
+                        </label>
+                        <input
+                          id="edu-student-otp"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          maxLength={6}
+                          value={verifyEducationModal.otp}
+                          onChange={(e) =>
+                            setVerifyEducationModal((p) => ({
+                              ...p,
+                              otp: e.target.value.replace(/\D/g, '').slice(0, 6),
+                            }))
+                          }
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-center text-lg font-mono tracking-widest text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                          placeholder="000000"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void submitEducationStudentEmailOtp()}
+                        disabled={
+                          verifyEducationModal.studentFlowBusy || verifyEducationModal.otp.length !== 6
+                        }
+                        className="w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                      >
+                        {verifyEducationModal.studentFlowBusy ? 'Verifying…' : 'Verify'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVerifyEducationModal((p) => ({
+                            ...p,
+                            otpSent: false,
+                            otp: '',
+                            studentFlowBusy: false,
+                          }))
+                        }
+                        className="w-full text-sm font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Use a different email
+                      </button>
+                    </>
+                  )}
                 </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const idx = verifyEducationModal.index;
-                  if (idx == null) return;
-                  applyEducationVerificationMethod(idx, 'student_email');
-                }}
-                className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-teal-300 hover:bg-teal-50/40 transition-colors"
-              >
-                <HiMail className="w-6 h-6 text-teal-600 shrink-0" />
-                <div>
-                  <p className="font-semibold text-gray-900">Student Email</p>
-                  <p className="text-sm text-gray-500 mt-0.5">Verify with your institution email</p>
-                </div>
-              </button>
-            </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center py-6 text-center space-y-3">
+                <HiCheckCircle className="h-14 w-14 text-emerald-500" aria-hidden />
+                <h3 className="text-xl font-bold text-gray-900">Verified successfully</h3>
+                <p className="text-sm text-gray-600 max-w-sm">
+                  Your education is now verified using your institution email.
+                </p>
+                <button
+                  type="button"
+                  onClick={closeVerifyEducationModal}
+                  className="mt-4 w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
+                >
+                  Done
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -7166,7 +8617,7 @@ export default function VerificationCenter() {
                 onClick={() => {
                   const idx = verifyProjectModal.index;
                   const entry = idx != null ? projectsList[idx] : undefined;
-                  if (entry?.projectSelfDeclared) {
+                  if (entry && projectEntryIsSelfDeclared(entry)) {
                     closeVerifyProjectModal();
                   } else {
                     setVerifyProjectModal((m) => ({ ...m, step: 'method' }));
@@ -7384,118 +8835,207 @@ export default function VerificationCenter() {
           onClick={closeVerifyWorkModal}
         >
           <div
-            className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
+            className="bg-white rounded-2xl border border-gray-200 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Verify Work Experience</h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  {verifyWorkModal.step === 'method'
-                    ? 'Choose how you would like to verify this role.'
-                    : 'Add employer or company verification details.'}
+            {verifyWorkModal.screen === 'pick' ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 tracking-tight">Verify Work Experience</h3>
+                    <p className="text-sm text-gray-500 mt-1.5">Choose a verification method.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeVerifyWorkModal}
+                    className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    aria-label="Close"
+                  >
+                    <HiX className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idx = verifyWorkModal.index;
+                      if (idx == null) return;
+                      closeVerifyWorkModal();
+                      setSelfDeclarationFlow({ open: true, kind: 'work_card', workIndex: idx });
+                    }}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors"
+                  >
+                    <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Self Declaration</p>
+                      <p className="text-sm text-gray-500 mt-0.5">
+                        Temporary verification — limited network access
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerWorkVerifyDocumentUpload()}
+                    disabled={uploadingWorkIndex !== null}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors disabled:opacity-50"
+                  >
+                    <HiUpload className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Upload Document</p>
+                      <p className="text-sm text-gray-500 mt-0.5">Employment letter, pay slip, etc.</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idx = verifyWorkModal.index;
+                      if (idx == null) return;
+                      const ent = workEntriesList[idx];
+                      setVerifyWorkModal((p) => ({
+                        ...p,
+                        screen: 'work_email',
+                        workEmail: (ent?.workVerificationEmail || '').trim(),
+                        otp: '',
+                        otpSent: false,
+                        workEmailFlowBusy: false,
+                      }));
+                    }}
+                    className="w-full flex gap-3 text-left rounded-xl border border-gray-200 bg-white p-4 hover:border-brand-300 hover:bg-brand-50/50 transition-colors"
+                  >
+                    <HiMail className="w-6 h-6 text-brand-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Work Email</p>
+                      <p className="text-sm text-gray-500 mt-0.5">Verify with your company email</p>
+                    </div>
+                  </button>
+                </div>
+              </>
+            ) : verifyWorkModal.screen === 'work_email' ? (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setVerifyWorkModal((p) => ({
+                        ...p,
+                        screen: 'pick',
+                        otpSent: false,
+                        otp: '',
+                        workEmailFlowBusy: false,
+                      }))
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-brand-600 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <HiArrowLeft className="h-4 w-4" aria-hidden />
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeVerifyWorkModal}
+                    className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    aria-label="Close"
+                  >
+                    <HiX className="w-5 h-5" />
+                  </button>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900 tracking-tight">Work email</h3>
+                  <p className="text-sm text-gray-500 mt-1.5">
+                    We will email a one-time code to your company address.
+                  </p>
+                </div>
+                <div className="space-y-4 pt-1">
+                  <div>
+                    <label htmlFor="work-verify-email" className="block text-sm font-medium text-gray-700 mb-1">
+                      Company email
+                    </label>
+                    <input
+                      id="work-verify-email"
+                      type="email"
+                      autoComplete="email"
+                      value={verifyWorkModal.workEmail}
+                      onChange={(e) =>
+                        setVerifyWorkModal((p) => ({ ...p, workEmail: e.target.value }))
+                      }
+                      disabled={verifyWorkModal.otpSent}
+                      className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60"
+                      placeholder="you@company.com"
+                    />
+                  </div>
+                  {!verifyWorkModal.otpSent ? (
+                    <button
+                      type="button"
+                      onClick={() => void sendWorkEmailOtp()}
+                      disabled={verifyWorkModal.workEmailFlowBusy}
+                      className="w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                    >
+                      {verifyWorkModal.workEmailFlowBusy ? 'Sending…' : 'Verify'}
+                    </button>
+                  ) : (
+                    <>
+                      <div>
+                        <label htmlFor="work-verify-otp" className="block text-sm font-medium text-gray-700 mb-1">
+                          Enter code
+                        </label>
+                        <input
+                          id="work-verify-otp"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          maxLength={6}
+                          value={verifyWorkModal.otp}
+                          onChange={(e) =>
+                            setVerifyWorkModal((p) => ({
+                              ...p,
+                              otp: e.target.value.replace(/\D/g, '').slice(0, 6),
+                            }))
+                          }
+                          className="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-center text-lg font-mono tracking-widest text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                          placeholder="000000"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void submitWorkEmailOtp()}
+                        disabled={
+                          verifyWorkModal.workEmailFlowBusy || verifyWorkModal.otp.length !== 6
+                        }
+                        className="w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:opacity-50"
+                      >
+                        {verifyWorkModal.workEmailFlowBusy ? 'Verifying…' : 'Verify'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVerifyWorkModal((p) => ({
+                            ...p,
+                            otpSent: false,
+                            otp: '',
+                            workEmailFlowBusy: false,
+                          }))
+                        }
+                        className="w-full text-sm font-medium text-brand-600 hover:text-brand-700"
+                      >
+                        Use a different email
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center py-6 text-center space-y-3">
+                <HiCheckCircle className="h-14 w-14 text-emerald-500" aria-hidden />
+                <h3 className="text-xl font-bold text-gray-900">Verified successfully</h3>
+                <p className="text-sm text-gray-600 max-w-sm">
+                  Your work experience is now verified using your company email.
                 </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeVerifyWorkModal}
-                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                aria-label="Close"
-              >
-                <HiX className="w-5 h-5" />
-              </button>
-            </div>
-
-            {verifyWorkModal.step === 'employer' && (
-              <button
-                type="button"
-                onClick={() => {
-                  const idx = verifyWorkModal.index;
-                  const entry = idx != null ? workEntriesList[idx] : undefined;
-                  if (entry?.selfDeclared) {
-                    closeVerifyWorkModal();
-                  } else {
-                    setVerifyWorkModal((m) => ({ ...m, step: 'method' }));
-                  }
-                }}
-                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
-              >
-                <HiArrowLeft className="w-4 h-4" />
-                Back
-              </button>
-            )}
-
-            {verifyWorkModal.step === 'method' && (
-              <div className="space-y-3 pt-1">
                 <button
                   type="button"
-                  onClick={() => {
-                    const idx = verifyWorkModal.index;
-                    if (idx == null) return;
-                    closeVerifyWorkModal();
-                    setSelfDeclarationFlow({ open: true, kind: 'work_card', workIndex: idx });
-                  }}
-                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
+                  onClick={closeVerifyWorkModal}
+                  className="mt-4 w-full rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
                 >
-                  <HiDocumentText className="w-6 h-6 text-brand-600 shrink-0" />
-                  <div>
-                    <p className="font-medium text-gray-900">Self Declaration</p>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      Temporary verification — limited network access
-                    </p>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVerifyWorkModal((m) => ({ ...m, step: 'employer' }))}
-                  className="w-full flex gap-3 text-left rounded-xl border border-gray-200 p-4 hover:border-brand-300 hover:bg-brand-50/40 transition-colors"
-                >
-                  <HiMail className="w-6 h-6 text-brand-600 shrink-0" />
-                  <div>
-                    <p className="font-medium text-gray-900">Employer / company verification</p>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      HR email and/or a public careers or verification page
-                    </p>
-                  </div>
-                </button>
-              </div>
-            )}
-
-            {verifyWorkModal.step === 'employer' && (
-              <div className="space-y-4 pt-1">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">HR / verification email</label>
-                  <input
-                    type="email"
-                    value={workVerifyEmployerDraft.email}
-                    onChange={(e) =>
-                      setWorkVerifyEmployerDraft((d) => ({ ...d, email: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    placeholder="hr@company.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Verification website (optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={workVerifyEmployerDraft.website}
-                    onChange={(e) =>
-                      setWorkVerifyEmployerDraft((d) => ({ ...d, website: e.target.value }))
-                    }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    placeholder="careers.example.com"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => submitWorkEmployerVerification()}
-                  disabled={workSaving}
-                  className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-                >
-                  Save and submit for verification
+                  Done
                 </button>
               </div>
             )}
@@ -7575,7 +9115,7 @@ export default function VerificationCenter() {
                     </p>
                   </div>
                 </button>
-                <button
+                {/* <button
                   type="button"
                   onClick={() => {
                     const idx = verifyAddressModal.locationIndex;
@@ -7604,7 +9144,7 @@ export default function VerificationCenter() {
                     <p className="font-medium text-gray-900">Verify Digitally</p>
                     <p className="text-sm text-gray-500 mt-0.5">Use location data</p>
                   </div>
-                </button>
+                </button> */}
               </div>
             )}
 
