@@ -36,6 +36,14 @@ export const api = axios.create({
   },
 });
 
+/** Server: `ProfessionalController` @ `v1/professional` — create portfolio project */
+export const apiProfessionalProjectCreateUrl = (professionalId: string) =>
+  `/v1/professional/${encodeURIComponent(professionalId)}/project`;
+
+/** Server: update or delete a single `ProfessionalProject` by id */
+export const apiProfessionalProjectByIdUrl = (projectId: string) =>
+  `/v1/professional/project/${encodeURIComponent(projectId)}`;
+
 // Helper function to get token from localStorage
 const getToken = () => {
   try {

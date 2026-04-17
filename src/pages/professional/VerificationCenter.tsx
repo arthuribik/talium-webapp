@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { LivenessSelfieModal } from '@/components/professional/LivenessSelfieModal';
 import { SelfDeclarationModal } from '@/components/professional/SelfDeclarationModal';
-import { api } from '@/services/api';
+import { api, apiProfessionalProjectByIdUrl, apiProfessionalProjectCreateUrl } from '@/services/api';
 import toast from 'react-hot-toast';
 import {
   HiAcademicCap,
@@ -769,6 +769,8 @@ const emptyProject = (): ProjectEntry => ({
   mediaUrl: '',
   teamMembers: [emptyProjectTeamMember()],
   projectVerificationStatus: 'pending',
+  projectSelfDeclared: false,
+  verificationMethod: null,
 });
 
 function cloneProjectEntry(p: ProjectEntry): ProjectEntry {
@@ -804,6 +806,8 @@ function isProjectMethodSelfDeclaration(v: string | null | undefined): boolean {
 }
 
 function projectVerificationSubtext(entry: ProjectEntry): string | null {
+  const status = entry.projectVerificationStatus ?? 'pending';
+  if (status === 'verified') return null;
   if (isProjectMethodSelfDeclaration(entry.verificationMethod)) return 'Self Declaration';
   return null;
 }
@@ -813,6 +817,17 @@ function projectEntryIsSelfDeclared(entry: ProjectEntry): boolean {
   const viaMethod = isProjectMethodSelfDeclaration(entry.verificationMethod);
   const viaFlag = !!entry.projectSelfDeclared;
   return (viaMethod || viaFlag) && status !== 'verified';
+}
+
+/** Only send `self_declaration` when the user opted in; new rows stay pending without it. */
+function projectVerificationMethodForApi(entry: ProjectEntry): string | null {
+  const t = entry.verificationMethod?.trim() ?? '';
+  if (entry.projectSelfDeclared === true) {
+    return t || 'self_declaration';
+  }
+  if (!t) return null;
+  if (isProjectMethodSelfDeclaration(t)) return null;
+  return t;
 }
 
 const EDUCATION_LEVELS = [
@@ -2003,11 +2018,14 @@ export default function VerificationCenter() {
               const vmRaw =
                 typeof (p as any).verificationMethod === 'string' ? (p as any).verificationMethod : null;
               const apiVs = String((p as any).verificationStatus ?? 'pending').toLowerCase();
-              const isVerifiedRow = apiVs === 'verified' || (p as any).verified === true;
+              const apiSaysVerified = apiVs === 'verified' || (p as any).verified === true;
+              const isSelfDeclMethod = isProjectMethodSelfDeclaration(vmRaw);
+              /** Self-declaration is never "full verified" in the UI; legacy rows may have status verified + self_decl method */
+              const isVerifiedRow = apiSaysVerified && !isSelfDeclMethod;
               const selfDeclFromApi =
                 (p as any).selfDeclared === true ||
                 (p as any).projectSelfDeclared === true ||
-                isProjectMethodSelfDeclaration(vmRaw);
+                isSelfDeclMethod;
               return {
                 id: p.id,
                 title: p.title || '',
@@ -3506,7 +3524,7 @@ export default function VerificationCenter() {
     if (entry.id) {
       setProjectSaving(true);
       try {
-        await api.delete(`/v1/professional/project/${entry.id}`);
+        await api.delete(apiProfessionalProjectByIdUrl(entry.id));
         const next = projectsList.filter((_, i) => i !== index);
         setProjectsList(next);
         toast.success('Project removed');
@@ -3599,21 +3617,20 @@ export default function VerificationCenter() {
         const teamMembers = entry.teamMembers
           .filter((m) => m.name.trim() || m.role.trim())
           .map((m) => ({ name: m.name.trim(), role: m.role.trim() }));
-        const verificationMethod =
-          entry.verificationMethod?.trim() ||
-          (entry.projectSelfDeclared ? 'self_declaration' : null);
+        const verificationMethod = projectVerificationMethodForApi(entry);
         const payload = {
           title: entry.title.trim(),
           description: entry.description?.trim() || undefined,
           projectLink: entry.projectLink?.trim() || undefined,
           mediaUrl: entry.mediaUrl?.trim() || undefined,
           teamMembers: teamMembers.length ? teamMembers : undefined,
-          verificationMethod,
+          /** Empty string clears a stale method on PUT; omitted coerced to null on create */
+          verificationMethod: verificationMethod ?? '',
         };
         if (entry.id) {
-          await api.put(`/v1/professional/project/${entry.id}`, payload);
+          await api.put(apiProfessionalProjectByIdUrl(entry.id), payload);
         } else {
-          await api.post(`/v1/professional/${profId}/project`, payload);
+          await api.post(apiProfessionalProjectCreateUrl(profId), payload);
         }
       }
       setFormFieldErrors((p) => omitKeysMatching(p, /^proj_/));
@@ -6615,7 +6632,7 @@ export default function VerificationCenter() {
 
               {fe.proj_list && <p className="text-sm text-red-600">{fe.proj_list}</p>}
 
-              <div className="space-y-3">
+              <div className="space-y-6">
                 {projectsList.map((entry, index) => {
                   const status = entry.projectVerificationStatus ?? 'pending';
                   const statusVerified = status === 'verified';
@@ -6629,109 +6646,107 @@ export default function VerificationCenter() {
                       ? linkTrim
                       : `https://${linkTrim}`
                     : '';
+                  const showSelfDeclBanner = isSelfDeclaredProject;
+                  const showVerifyCta = status === 'pending' && !isSelfDeclaredProject;
                   return (
                     <div key={entry.id ?? `proj-${index}`} className="space-y-3">
                       {projRowErrs.length > 0 && (
-                        <ul className="list-disc pl-5 text-sm text-red-600 space-y-0.5">
+                        <ul className="list-disc space-y-0.5 pl-5 text-sm text-red-600">
                           {projRowErrs.map(([k, msg]) => (
                             <li key={k}>{msg}</li>
                           ))}
                         </ul>
                       )}
+
                       {statusVerified ? (
-                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="flex min-w-0 items-start gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
-                                <HiFolder className="h-5 w-5 text-brand-600" aria-hidden />
+                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                          <div className="space-y-4 p-5 sm:p-6">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="flex min-w-0 gap-4">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+                                  <HiFolder className="h-6 w-6 text-brand-600" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-lg font-semibold leading-tight text-gray-900">{entry.title}</p>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <p className="text-base font-semibold text-gray-900">{entry.title}</p>
-                              </div>
-                            </div>
-                            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-                              <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
-                                Verified
-                              </span>
-                              {methodSubtext ? (
-                                <p className="text-xs text-brand-600/85">{methodSubtext}</p>
-                              ) : null}
-                            </div>
-                          </div>
-                          {entry.description?.trim() ? (
-                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{entry.description.trim()}</p>
-                          ) : null}
-                          {linkTrim ? (
-                            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-                              <span className="text-sm text-gray-500 shrink-0">Link:</span>
-                              <a
-                                href={linkHref}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm font-semibold text-gray-900 break-all sm:text-right hover:text-brand-600"
-                              >
-                                {linkTrim}
-                              </a>
-                            </div>
-                          ) : null}
-                          {teamRows.length > 0 ? (
-                            <div>
-                              <p className="text-xs font-medium text-gray-500">Team</p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {teamRows.map((m, mi) => (
-                                  <span
-                                    key={`${entry.id ?? index}-tm-${mi}`}
-                                    className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800"
-                                  >
-                                    {m.name.trim()}
-                                    {m.role.trim() ? ` (${m.role.trim()})` : ''}
-                                  </span>
-                                ))}
+                              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                                  Verified
+                                </span>
+                                {methodSubtext ? (
+                                  <p className="text-xs text-brand-600/85">{methodSubtext}</p>
+                                ) : null}
                               </div>
                             </div>
-                          ) : null}
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {isProjectMethodSelfDeclaration(entry.verificationMethod) ? (
-                                <button
-                                  type="button"
-                                  onClick={() => openVerifyProjectModal(index)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-gray-50"
+                            {entry.description?.trim() ? (
+                              <p className="text-sm text-gray-700 whitespace-pre-wrap">{entry.description.trim()}</p>
+                            ) : null}
+                            {linkTrim ? (
+                              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                                <span className="shrink-0 text-sm text-gray-500">Link:</span>
+                                <a
+                                  href={linkHref}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="break-all text-sm font-semibold text-gray-900 hover:text-brand-600 sm:text-right"
                                 >
-                                  <HiArrowUp className="h-4 w-4" aria-hidden />
-                                  Upgrade verification
-                                </button>
-                              ) : null}
-                            </div>
+                                  {linkTrim}
+                                </a>
+                              </div>
+                            ) : null}
+                            {teamRows.length > 0 ? (
+                              <div>
+                                <p className="text-xs font-medium text-gray-500">Team</p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {teamRows.map((m, mi) => (
+                                    <span
+                                      key={`${entry.id ?? index}-tm-${mi}`}
+                                      className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800"
+                                    >
+                                      {m.name.trim()}
+                                      {m.role.trim() ? ` (${m.role.trim()})` : ''}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-gray-100 bg-gray-50/50 px-5 py-4 sm:px-6">
                             <button
                               type="button"
                               onClick={() => requestRemoveProjectEntry(index)}
                               className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
                               aria-label="Remove project"
                             >
-                              <HiTrash className="w-5 h-5" />
+                              <HiTrash className="h-5 w-5" />
                             </button>
                           </div>
                         </div>
                       ) : (
                         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-                          {isSelfDeclaredProject ? (
-                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/80 bg-[#fffbeb] px-3 py-2.5 sm:px-4">
-                              <div className="flex min-w-0 items-start gap-2">
+                          {showSelfDeclBanner ? (
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 bg-[#fffbeb] px-4 py-3.5 sm:px-6">
+                              <div className="flex min-w-0 items-start gap-3">
                                 <HiExclamationCircle
-                                  className="mt-0.5 h-4 w-4 shrink-0 text-amber-700"
+                                  className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
                                   aria-hidden
                                 />
-                                <p className="text-xs font-medium leading-snug text-amber-950 sm:text-[13px]">
+                                <p className="text-sm font-medium leading-snug text-amber-950">
                                   Self Declaration — limited network access. Upgrade to full verification.
                                 </p>
                               </div>
                               <button
                                 type="button"
                                 onClick={() => openVerifyProjectModal(index)}
-                                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-800/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
+                                className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-amber-800/25 bg-white px-3 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-50"
                               >
-                                <HiArrowUp className="h-3.5 w-3.5" aria-hidden />
+                                <span
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-amber-800/30"
+                                  aria-hidden
+                                >
+                                  <HiArrowUp className="h-3.5 w-3.5" />
+                                </span>
                                 Upgrade Verification
                               </button>
                             </div>
@@ -6740,54 +6755,32 @@ export default function VerificationCenter() {
                           <div
                             className={
                               isSelfDeclaredProject
-                                ? 'px-3 py-3 sm:px-4 sm:py-3'
+                                ? 'border-b border-gray-100 p-5 sm:p-6'
                                 : 'space-y-4 p-5 sm:p-6'
                             }
                           >
-                            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                              <div
-                                className={`flex min-w-0 items-start ${isSelfDeclaredProject ? 'gap-2' : 'gap-4'}`}
-                              >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="flex min-w-0 gap-4">
                                 {isSelfDeclaredProject ? (
-                                  <HiChevronRight
-                                    className="mt-2 h-4 w-4 shrink-0 text-gray-400"
-                                    aria-hidden
-                                  />
-                                ) : null}
-                                <div
-                                  className={
-                                    isSelfDeclaredProject
-                                      ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 ring-1 ring-sky-100/80'
-                                      : 'flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100'
-                                  }
-                                >
-                                  {isSelfDeclaredProject ? (
-                                    <HiBriefcase className="h-5 w-5 text-sky-700" aria-hidden />
-                                  ) : (
+                                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-sky-50 ring-1 ring-sky-100/90">
+                                    <HiLocationMarker className="h-6 w-6 text-sky-700" aria-hidden />
+                                  </div>
+                                ) : (
+                                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
                                     <HiFolder className="h-6 w-6 text-brand-600" aria-hidden />
-                                  )}
-                                </div>
-                                <div className="min-w-0 pt-0.5">
-                                  <p
-                                    className={`font-semibold leading-tight text-gray-900 truncate ${
-                                      isSelfDeclaredProject ? 'text-base' : 'text-lg'
-                                    }`}
-                                  >
-                                    {entry.title}
-                                  </p>
-                                  <p
-                                    className={`text-gray-500 line-clamp-2 ${
-                                      isSelfDeclaredProject ? 'mt-0.5 text-xs' : 'mt-1 text-sm'
-                                    }`}
-                                  >
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-lg font-semibold leading-tight text-gray-900">{entry.title}</p>
+                                  <p className="mt-1 line-clamp-2 text-sm text-gray-500">
                                     {formatProjectCardSubtitle(entry)}
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
+                              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
                                 <div className="flex flex-wrap gap-1.5 sm:justify-end">
                                   {isSelfDeclaredProject ? (
-                                    <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold leading-tight text-amber-950">
+                                    <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
                                       Self Declared
                                     </span>
                                   ) : null}
@@ -6798,38 +6791,36 @@ export default function VerificationCenter() {
                                   ) : null}
                                 </div>
                                 {isSelfDeclaredProject ? (
-                                  <p className="text-[11px] text-gray-400">via Self Declaration</p>
+                                  <p className="text-xs text-gray-400">via Self Declaration</p>
                                 ) : null}
                               </div>
                             </div>
                           </div>
 
                           <div
-                            className={`flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 ${
-                              isSelfDeclaredProject
-                                ? 'bg-white px-3 py-2.5 sm:px-4'
-                                : 'gap-3 bg-gray-50/50 px-5 py-4 sm:px-6'
+                            className={`flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-5 py-4 sm:px-6 ${
+                              isSelfDeclaredProject ? 'bg-white' : 'bg-gray-50/50'
                             }`}
                           >
                             <div className="flex flex-wrap items-center gap-2">
-                              {status === 'pending' && !isSelfDeclaredProject ? (
+                              {showVerifyCta ? (
                                 <button
                                   type="button"
                                   onClick={() => openVerifyProjectModal(index)}
                                   className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
                                 >
-                                  <HiShieldCheck className="w-4 h-4" />
+                                  <HiShieldCheck className="h-4 w-4" />
                                   Verify
                                 </button>
                               ) : null}
-                              {isSelfDeclaredProject ? (
+                              {showSelfDeclBanner ? (
                                 <button
                                   type="button"
                                   onClick={() => openVerifyProjectModal(index)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 sm:text-sm sm:px-3.5 sm:py-2"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-2 text-sm font-medium text-brand-600 hover:bg-brand-50"
                                 >
-                                  <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  Verify
+                                  <HiShieldCheck className="h-4 w-4" />
+                                  Upgrade Verification
                                 </button>
                               ) : null}
                               {linkTrim ? (
@@ -6842,16 +6833,6 @@ export default function VerificationCenter() {
                                   Project link
                                 </a>
                               ) : null}
-                              {isSelfDeclaredProject ? (
-                                <button
-                                  type="button"
-                                  onClick={() => openVerifyProjectModal(index)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand-500 bg-white px-3 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 sm:text-sm sm:py-2"
-                                >
-                                  <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                  Upgrade Verification
-                                </button>
-                              ) : null}
                             </div>
                             <button
                               type="button"
@@ -6859,7 +6840,7 @@ export default function VerificationCenter() {
                               className="inline-flex items-center justify-center rounded-lg p-2 text-red-600 hover:bg-red-50 hover:text-red-700"
                               aria-label="Remove project"
                             >
-                              <HiTrash className="w-5 h-5" />
+                              <HiTrash className="h-5 w-5" />
                             </button>
                           </div>
                         </div>
