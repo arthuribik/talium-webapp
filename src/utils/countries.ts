@@ -1,5 +1,5 @@
-// Comprehensive list of countries
-export const COUNTRIES = [
+/** Alphabetically sorted source list (used to build `COUNTRIES`). */
+const COUNTRIES_ALPHABETICAL = [
   'Afghanistan',
   'Albania',
   'Algeria',
@@ -195,5 +195,22 @@ export const COUNTRIES = [
   'Yemen',
   'Zambia',
   'Zimbabwe',
+] as const;
+
+/** Shown first in every country dropdown (order preserved). */
+export const COUNTRY_DROPDOWN_PRIORITY = [
+  'Nigeria',
+  'Ghana',
+  'Kenya',
+  'Rwanda',
+  'Uganda',
+] as const;
+
+const _priorityCountrySet = new Set<string>(COUNTRY_DROPDOWN_PRIORITY);
+
+/** Full country list for selects: priority countries first, then A–Z. */
+export const COUNTRIES: string[] = [
+  ...COUNTRY_DROPDOWN_PRIORITY,
+  ...COUNTRIES_ALPHABETICAL.filter((c) => !_priorityCountrySet.has(c)),
 ];
 

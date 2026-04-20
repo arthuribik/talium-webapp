@@ -1478,10 +1478,20 @@ export default function ViewProfessionals() {
                         <option value="Ghana">Ghana</option>
                         <option value="Kenya">Kenya</option>
                         <option value="Rwanda">Rwanda</option>
+                        <option value="Uganda">Uganda</option>
                         <option value="United Kingdom">United Kingdom</option>
                         <option value="United States">United States</option>
                         {COUNTRIES.filter(
-                          (c) => !['Nigeria', 'Ghana', 'Kenya', 'Rwanda', 'United Kingdom', 'United States'].includes(c),
+                          (c) =>
+                            ![
+                              'Nigeria',
+                              'Ghana',
+                              'Kenya',
+                              'Rwanda',
+                              'Uganda',
+                              'United Kingdom',
+                              'United States',
+                            ].includes(c),
                         ).map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}

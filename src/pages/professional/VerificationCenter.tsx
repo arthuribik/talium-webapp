@@ -66,7 +66,6 @@ import {
   parsePhoneDialValue,
   splitPlusPrefixedPhone,
 } from '@/utils/phoneDialCodes';
-import { SearchableList } from '@/components/common/SearchableList';
 import { PhoneDialCodeSelect } from '@/components/common/PhoneDialCodeSelect';
 import {
   verificationPersonalBasicSchema,
@@ -453,6 +452,8 @@ type EducationEntry = {
   costOfEducation: string;
   currency: string;
   costFrequency: string;
+  /** UI only: when false, loan fields are hidden and loan values are not sent to the API. */
+  hasLoan?: boolean;
   pendingLoanAmount: string;
   loanCurrency: string;
   loanRepaymentFrequency: string;
@@ -491,6 +492,7 @@ const emptyEducation = (): EducationEntry => ({
   costOfEducation: '',
   currency: 'USD',
   costFrequency: '',
+  hasLoan: false,
   pendingLoanAmount: '',
   loanCurrency: 'USD',
   loanRepaymentFrequency: '',
@@ -498,7 +500,7 @@ const emptyEducation = (): EducationEntry => ({
   programDescription: '',
   academicResponsibilities: '',
   academicAchievements: '',
-  programMilestones: [emptyEducationMilestone()],
+  programMilestones: [],
   activitiesSocieties: '',
   associatedSkills: '',
   supportingMediaUrl: '',
@@ -638,6 +640,7 @@ function workModeLabel(value: string): string {
   const map: Record<string, string> = {
     on_site: 'On-site',
     remote: 'Remote',
+    location: 'Location Remote',
     hybrid: 'Hybrid',
     global_remote: 'Global Remote',
   };
@@ -864,11 +867,16 @@ const EDUCATION_YEAR_OPTIONS = (() => {
 
 const SCHOOL_TYPE_OPTIONS = [
   { value: 'university', label: 'University' },
+  { value: 'polytechnic', label: 'Polytechnic' },
   { value: 'college', label: 'College' },
-  { value: 'secondary', label: 'Secondary school' },
-  { value: 'primary', label: 'Primary school' },
-  { value: 'technical', label: 'Technical / vocational' },
-  { value: 'other', label: 'Other' },
+  { value: 'institute', label: 'Institute' },
+  { value: 'academy', label: 'Academy' },
+  { value: 'high_school', label: 'High School' },
+  { value: 'secondary_school', label: 'Secondary School' },
+  { value: 'primary_school', label: 'Primary School' },
+  { value: 'kindergarten', label: 'Kindergarten' },
+  { value: 'nursery_school', label: 'Nursery School' },
+  { value: 'accelerator', label: 'Accelerator' },
 ];
 
 const QUALIFICATION_OPTIONS = [
@@ -902,6 +910,21 @@ const EDUCATION_CURRENCY_OPTIONS = [
   { value: 'GHS', label: 'GHS' },
 ];
 
+/** Matches `costFrequency` / `loanRepaymentFrequency` on education records (API). */
+const EDUCATION_PAYMENT_FREQUENCY_OPTIONS = [
+  { value: 'one_time', label: 'One-time' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'annually', label: 'Annually' },
+  { value: 'semester', label: 'Per semester' },
+  { value: 'weekly', label: 'Weekly' },
+];
+
+function educationPaymentFrequencyLabel(value: string | undefined): string {
+  const v = (value || '').trim().toLowerCase();
+  const row = EDUCATION_PAYMENT_FREQUENCY_OPTIONS.find((o) => o.value === v);
+  return row?.label || (value?.trim() ? value.trim() : '—');
+}
+
 function monthShortCode(monthValue: string): string {
   const opt = MONTH_OPTIONS.find((o) => o.value === monthValue);
   return opt ? opt.label.slice(0, 3) : '';
@@ -909,7 +932,15 @@ function monthShortCode(monthValue: string): string {
 
 function schoolTypeDisplayLabel(value: string): string {
   if (!value?.trim()) return '—';
-  return SCHOOL_TYPE_OPTIONS.find((o) => o.value === value)?.label || value;
+  const fromList = SCHOOL_TYPE_OPTIONS.find((o) => o.value === value)?.label;
+  if (fromList) return fromList;
+  const legacy: Record<string, string> = {
+    secondary: 'Secondary school',
+    primary: 'Primary school',
+    technical: 'Technical / vocational',
+    other: 'Other',
+  };
+  return legacy[value] || value;
 }
 
 function formatEducationCardSubtitle(entry: EducationEntry): string {
@@ -961,6 +992,13 @@ function educationQualificationDisplay(value: string): string {
 
 function educationSkillChipsFromEntry(entry: EducationEntry): string[] {
   return (entry.associatedSkills || '')
+    .split(/[,;|\n]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function educationCourseworkChipsFromEntry(entry: EducationEntry): string[] {
+  return (entry.academicResponsibilities || '')
     .split(/[,;|\n]+/)
     .map((t) => t.trim())
     .filter(Boolean);
@@ -1155,10 +1193,16 @@ function educationEntryFieldErrors(entry: EducationEntry, slug: string): Record<
   }
   const costErr = validateAmountField('Cost of education', entry.costOfEducation);
   if (costErr) o[k('costOfEducation')] = costErr.replace(/^Cost of education /, '');
-  const loanErr = validateAmountField('Pending loan', entry.pendingLoanAmount);
-  if (loanErr) o[k('pendingLoanAmount')] = loanErr.replace(/^Pending loan /, '');
+  if (entry.hasLoan) {
+    const loanErr = validateAmountField('Pending loan', entry.pendingLoanAmount);
+    if (loanErr) o[k('pendingLoanAmount')] = loanErr.replace(/^Pending loan /, '');
+  }
   const mediaErr = validateOptionalHttpUrl('Supporting media URL', entry.supportingMediaUrl);
   if (mediaErr) o[k('supportingMediaUrl')] = mediaErr;
+  const stuEmail = entry.studentVerificationEmail?.trim();
+  if (stuEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(stuEmail)) {
+    o[k('studentVerificationEmail')] = 'Enter a valid email or leave blank';
+  }
   for (let mi = 0; mi < entry.programMilestones.length; mi++) {
     const m = entry.programMilestones[mi];
     const hasT = !!m.title?.trim();
@@ -1453,6 +1497,7 @@ export default function VerificationCenter() {
   const [educationSaving, setEducationSaving] = useState(false);
   const [educationAddFormOpen, setEducationAddFormOpen] = useState(false);
   const [educationSkillInput, setEducationSkillInput] = useState('');
+  const [educationCourseworkInput, setEducationCourseworkInput] = useState('');
   const educationDraftSkillChips = useMemo(
     () =>
       educationDraft.associatedSkills
@@ -1460,6 +1505,14 @@ export default function VerificationCenter() {
         .map((s) => s.trim())
         .filter(Boolean),
     [educationDraft.associatedSkills],
+  );
+  const educationDraftCourseworkChips = useMemo(
+    () =>
+      educationDraft.academicResponsibilities
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [educationDraft.academicResponsibilities],
   );
   const [verifyEducationModal, setVerifyEducationModal] = useState<{
     open: boolean;
@@ -1884,7 +1937,7 @@ export default function VerificationCenter() {
               const sm = parseYearMonthFromIso(e.startDate);
               const em = parseYearMonthFromIso(e.endDate);
               const rawProg = e.programProgression;
-              let programMilestones: EducationProgramMilestoneEntry[] = [emptyEducationMilestone()];
+              let programMilestones: EducationProgramMilestoneEntry[] = [];
               if (Array.isArray(rawProg) && rawProg.length > 0) {
                 programMilestones = rawProg.map((m: any) => ({
                   title: typeof m?.title === 'string' ? m.title : '',
@@ -1897,6 +1950,9 @@ export default function VerificationCenter() {
                   currentlyActive: !!m?.currentlyActive,
                 }));
               }
+              const hasLoan =
+                (e.pendingLoanAmount != null && String(e.pendingLoanAmount).trim() !== '') ||
+                !!(typeof e.loanRepaymentFrequency === 'string' && e.loanRepaymentFrequency.trim());
               return {
                 id: e.id,
                 schoolType: e.schoolType || '',
@@ -1918,6 +1974,7 @@ export default function VerificationCenter() {
                 pendingLoanAmount: e.pendingLoanAmount != null ? String(e.pendingLoanAmount) : '',
                 loanCurrency: e.loanCurrency || 'USD',
                 loanRepaymentFrequency: e.loanRepaymentFrequency || '',
+                hasLoan,
                 scholarshipsAndAid: e.scholarshipsAndAid || '',
                 programDescription: e.programDescription || '',
                 academicResponsibilities: e.academicResponsibilities || '',
@@ -2539,6 +2596,24 @@ export default function VerificationCenter() {
     });
   };
 
+  const addEducationDraftCoursework = () => {
+    const t = educationCourseworkInput.trim();
+    if (!t) return;
+    const prev = educationDraftCourseworkChips;
+    if (prev.includes(t)) {
+      setEducationCourseworkInput('');
+      return;
+    }
+    updateEducationDraft({ academicResponsibilities: [...prev, t].join(', ') });
+    setEducationCourseworkInput('');
+  };
+
+  const removeEducationDraftCoursework = (token: string) => {
+    updateEducationDraft({
+      academicResponsibilities: educationDraftCourseworkChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
   const commitEducationDraft = () => {
     let draft = educationDraft;
     const pendingSkill = educationSkillInput.trim();
@@ -2551,7 +2626,18 @@ export default function VerificationCenter() {
         draft = { ...draft, associatedSkills: [...prev, pendingSkill].join(', ') };
       }
     }
+    const pendingCw = educationCourseworkInput.trim();
+    if (pendingCw) {
+      const prev = draft.academicResponsibilities
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!prev.includes(pendingCw)) {
+        draft = { ...draft, academicResponsibilities: [...prev, pendingCw].join(', ') };
+      }
+    }
     setEducationSkillInput('');
+    setEducationCourseworkInput('');
     const eduFe = educationEntryFieldErrors(draft, 'draft');
     if (Object.keys(eduFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^edu_draft_/), ...eduFe }));
@@ -3305,9 +3391,15 @@ export default function VerificationCenter() {
           costOfEducation: entry.costOfEducation ? parseFloat(entry.costOfEducation) : undefined,
           currency: entry.currency || undefined,
           costFrequency: entry.costFrequency || undefined,
-          pendingLoanAmount: entry.pendingLoanAmount ? parseFloat(entry.pendingLoanAmount) : undefined,
-          loanCurrency: entry.loanCurrency || undefined,
-          loanRepaymentFrequency: entry.loanRepaymentFrequency || undefined,
+          pendingLoanAmount:
+            entry.hasLoan && entry.pendingLoanAmount?.trim()
+              ? parseFloat(entry.pendingLoanAmount)
+              : undefined,
+          loanCurrency: entry.hasLoan ? entry.loanCurrency || undefined : undefined,
+          loanRepaymentFrequency:
+            entry.hasLoan && entry.loanRepaymentFrequency?.trim()
+              ? entry.loanRepaymentFrequency
+              : undefined,
           scholarshipsAndAid: entry.scholarshipsAndAid?.trim() || undefined,
           programDescription: entry.programDescription?.trim() || undefined,
           academicResponsibilities: entry.academicResponsibilities?.trim() || undefined,
@@ -4029,18 +4121,22 @@ export default function VerificationCenter() {
                       >
                         Nationality <span className="text-red-500">*</span>
                       </label>
-                      <SearchableList
+                      <select
                         id="verification-personal-nationality"
                         value={personal.nationality}
-                        onChange={(nationality) => {
-                          setPersonal((p) => ({ ...p, nationality }));
+                        onChange={(e) => {
+                          setPersonal((p) => ({ ...p, nationality: e.target.value }));
                           clearFormError('per_nationality');
                         }}
-                        options={NATIONALITY_SEARCHABLE_OPTIONS}
-                        placeholder="Select nationality"
-                        className="w-full"
-                        error={fe.per_nationality}
-                      />
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_nationality')}`}
+                      >
+                        {NATIONALITY_SEARCHABLE_OPTIONS.map((o) => (
+                          <option key={o.value || '__nationality_empty'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fe.per_nationality ? <p className="mt-1 text-sm text-red-600">{fe.per_nationality}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -4062,17 +4158,21 @@ export default function VerificationCenter() {
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Gender <span className="text-red-500">*</span>
                       </label>
-                      <SearchableList
+                      <select
                         value={personal.gender}
-                        onChange={(gender) => {
-                          setPersonal((p) => ({ ...p, gender }));
+                        onChange={(e) => {
+                          setPersonal((p) => ({ ...p, gender: e.target.value }));
                           clearFormError('per_gender');
                         }}
-                        options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
-                        placeholder="Select"
-                        className="bg-gray-50"
-                        error={fe.per_gender}
-                      />
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_gender')}`}
+                      >
+                        {[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))].map((o) => (
+                          <option key={o.value || '__gender_empty'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fe.per_gender ? <p className="mt-1 text-sm text-red-600">{fe.per_gender}</p> : null}
                     </div>
                   </div>
                   <button
@@ -4188,6 +4288,69 @@ export default function VerificationCenter() {
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
                         <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-x-10 gap-y-6 border-b border-gray-200 pb-6 text-sm md:grid-cols-2">
+                    <div className="space-y-5">
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Country (signup)
+                        </p>
+                        <p className="font-semibold text-gray-900">{personal.country?.trim() || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Residential address
+                        </p>
+                        <p className="whitespace-pre-wrap font-semibold text-gray-900">
+                          {[personal.address, personal.city, personal.state]
+                            .map((x) => String(x || '').trim())
+                            .filter(Boolean)
+                            .join(', ') || '—'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-5">
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Government ID type
+                        </p>
+                        <p className="font-semibold text-gray-900">
+                          {ID_TYPE_OPTIONS.find((o) => o.value === personal.idType)?.label || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+                          ID number (reference)
+                        </p>
+                        <p className="font-semibold text-gray-900">
+                          {personal.idNumber?.trim()
+                            ? `••••${personal.idNumber.trim().slice(-4)}`
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">ID document</p>
+                        {personal.idDocumentUrl?.trim() ? (
+                          <p className="font-semibold text-gray-900">
+                            <a
+                              href={
+                                personal.idDocumentUrl.trim().startsWith('http')
+                                  ? personal.idDocumentUrl.trim()
+                                  : `${String(api.defaults.baseURL || '').replace(/\/$/, '')}${personal.idDocumentUrl.trim().startsWith('/') ? '' : '/'}${personal.idDocumentUrl.trim()}`
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-semibold text-brand-600 hover:underline"
+                            >
+                              View document
+                            </a>
+                          </p>
+                        ) : (
+                          <p className="font-semibold text-gray-900">—</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -4327,18 +4490,22 @@ export default function VerificationCenter() {
                         >
                           Nationality <span className="text-red-500">*</span>
                         </label>
-                        <SearchableList
+                        <select
                           id="verification-personal-nationality-new"
                           value={personal.nationality}
-                          onChange={(nationality) => {
-                            setPersonal((p) => ({ ...p, nationality }));
+                          onChange={(e) => {
+                            setPersonal((p) => ({ ...p, nationality: e.target.value }));
                             clearFormError('per_nationality');
                           }}
-                          options={NATIONALITY_SEARCHABLE_OPTIONS}
-                          placeholder="Select nationality"
-                          className="w-full"
-                          error={fe.per_nationality}
-                        />
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_nationality')}`}
+                        >
+                          {NATIONALITY_SEARCHABLE_OPTIONS.map((o) => (
+                            <option key={o.value || '__nationality_empty'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        {fe.per_nationality ? <p className="mt-1 text-sm text-red-600">{fe.per_nationality}</p> : null}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -4360,17 +4527,21 @@ export default function VerificationCenter() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Gender <span className="text-red-500">*</span>
                         </label>
-                        <SearchableList
+                        <select
                           value={personal.gender}
-                          onChange={(gender) => {
-                            setPersonal((p) => ({ ...p, gender }));
+                          onChange={(e) => {
+                            setPersonal((p) => ({ ...p, gender: e.target.value }));
                             clearFormError('per_gender');
                           }}
-                          options={[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))]}
-                          placeholder="Select"
-                          className="bg-gray-50"
-                          error={fe.per_gender}
-                        />
+                          className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('per_gender')}`}
+                        >
+                          {[{ value: '', label: 'Select' }, ...GENDERS.map((g) => ({ value: g, label: g }))].map((o) => (
+                            <option key={o.value || '__gender_empty'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        {fe.per_gender ? <p className="mt-1 text-sm text-red-600">{fe.per_gender}</p> : null}
                       </div>
                     </div>
                     <button
@@ -5119,17 +5290,23 @@ export default function VerificationCenter() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
-                      <SearchableList
+                      <select
                         value={locationDraft.country}
-                        onChange={(country) => {
-                          setLocationDraft((d) => ({ ...d, country }));
+                        onChange={(e) => {
+                          setLocationDraft((d) => ({ ...d, country: e.target.value }));
                           clearFormError('loc_draft_country');
                         }}
-                        options={[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                        placeholder="Select country"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.loc_draft_country}
-                      />
+                        className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2('loc_draft_country')}`}
+                      >
+                        {[{ value: '', label: 'Select country' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))].map(
+                          (o) => (
+                            <option key={o.value || '__country_empty'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      {fe.loc_draft_country ? <p className="mt-1 text-sm text-red-600">{fe.loc_draft_country}</p> : null}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">State / Province / District</label>
@@ -5241,8 +5418,7 @@ export default function VerificationCenter() {
                   const hasMedia = !!entry.supportingMediaUrl?.trim();
                   const pendingWithProof = status === 'pending' && hasMedia && !isSelfDeclaredEducation;
                   const methodLabel = educationVerificationMethodLabel(entry);
-                  const showVerifyCta =
-                    status === 'pending' && !isSelfDeclaredEducation && !hasMedia;
+                  const showVerifyCta = status === 'pending' && !isSelfDeclaredEducation;
                   const subtitle = formatEducationCardSubtitle(entry);
                   const eduRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`edu_${index}_`));
                   const eduCardKey = entry.id ? String(entry.id) : `tmp-${index}`;
@@ -5254,6 +5430,7 @@ export default function VerificationCenter() {
                       ? `${qualShort} — ${instName}`
                       : instName || qualShort || 'Education';
                   const skillChips = educationSkillChipsFromEntry(entry);
+                  const courseworkChips = educationCourseworkChipsFromEntry(entry);
                   const costLine = formatEducationMoneyLine(entry.currency, entry.costOfEducation);
                   const loanLine = formatEducationMoneyLine(entry.loanCurrency, entry.pendingLoanAmount);
                   const mediaHref = entry.supportingMediaUrl?.trim()
@@ -5453,15 +5630,115 @@ export default function VerificationCenter() {
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900">{costLine}</dd>
                               </div>
                             ) : null}
-                            {loanLine ? (
-                              <div className="sm:col-span-1">
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Pending Loan
-                                </dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">{loanLine}</dd>
-                              </div>
+                            <div className="sm:col-span-1">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Cost frequency
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                {educationPaymentFrequencyLabel(entry.costFrequency)}
+                              </dd>
+                            </div>
+                            {entry.hasLoan ? (
+                              <>
+                                <div className="sm:col-span-1">
+                                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Pending loan
+                                  </dt>
+                                  <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                    {loanLine || '—'}
+                                  </dd>
+                                </div>
+                                <div className="sm:col-span-1">
+                                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Loan repayment frequency
+                                  </dt>
+                                  <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                    {educationPaymentFrequencyLabel(entry.loanRepaymentFrequency)}
+                                  </dd>
+                                </div>
+                              </>
                             ) : null}
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Student verification email
+                              </dt>
+                              <dd className="mt-0.5 text-sm font-semibold text-gray-900 break-all">
+                                {entry.studentVerificationEmail?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Scholarships &amp; aid
+                              </dt>
+                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
+                                {entry.scholarshipsAndAid?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Program description
+                              </dt>
+                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
+                                {entry.programDescription?.trim() || '—'}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Coursework / responsibilities
+                              </dt>
+                              <dd className="mt-0.5">
+                                {courseworkChips.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {courseworkChips.map((chip, cci) => (
+                                      <span
+                                        key={`${eduCardKey}-cw-${chip}-${cci}`}
+                                        className="inline-flex rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 ring-1 ring-slate-200"
+                                      >
+                                        {chip}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-semibold text-gray-900">—</span>
+                                )}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Honors / achievements
+                              </dt>
+                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
+                                {entry.academicAchievements?.trim() || '—'}
+                              </dd>
+                            </div>
                           </dl>
+
+                          <div className="rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                              Program milestones
+                            </p>
+                            {Array.isArray(entry.programMilestones) &&
+                            entry.programMilestones.some((m: EducationProgramMilestoneEntry) => m.title?.trim()) ? (
+                              <ul className="mt-2 space-y-2">
+                                {entry.programMilestones
+                                  .filter((m: EducationProgramMilestoneEntry) => m.title?.trim())
+                                  .map((m: EducationProgramMilestoneEntry, mi: number) => (
+                                    <li
+                                      key={`${eduCardKey}-m-${mi}`}
+                                      className="border-b border-gray-200/80 pb-2 text-sm last:border-0 last:pb-0"
+                                    >
+                                      <p className="font-semibold text-gray-900">{m.title.trim()}</p>
+                                      <p className="mt-0.5 text-xs text-gray-600">
+                                        {m.startDate?.trim() ? m.startDate.slice(0, 10) : '—'} —{' '}
+                                        {m.currentlyActive ? 'Active' : m.endDate?.trim() ? m.endDate.slice(0, 10) : '—'}
+                                      </p>
+                                    </li>
+                                  ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-2 text-sm font-semibold text-gray-900">—</p>
+                            )}
+                          </div>
 
                           {entry.activitiesSocieties?.trim() ? (
                             <div className="rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
@@ -5569,6 +5846,7 @@ export default function VerificationCenter() {
                       setEducationAddFormOpen(false);
                       setEducationDraft(emptyEducation());
                       setEducationSkillInput('');
+                      setEducationCourseworkInput('');
                       setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
                     }}
                     className="text-sm font-medium text-gray-600 hover:text-gray-900"
@@ -5599,41 +5877,57 @@ export default function VerificationCenter() {
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">School Type</label>
-                      <SearchableList
+                      <select
                         value={educationDraft.schoolType}
-                        onChange={(schoolType) => updateEducationDraft({ schoolType })}
-                        options={[{ value: '', label: 'Select' }, ...SCHOOL_TYPE_OPTIONS]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                      />
+                        onChange={(e) => updateEducationDraft({ schoolType: e.target.value })}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      >
+                        {[{ value: '', label: 'Select' }, ...SCHOOL_TYPE_OPTIONS].map((o) => (
+                          <option key={o.value || '__school'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">Level</label>
-                      <SearchableList
+                      <select
                         value={educationDraft.levelOfEducation}
-                        onChange={(levelOfEducation) => {
-                          updateEducationDraft({ levelOfEducation });
+                        onChange={(e) => {
+                          updateEducationDraft({ levelOfEducation: e.target.value });
                           clearFormError('edu_draft_levelOfEducation');
                         }}
-                        options={[{ value: '', label: 'Select' }, ...EDUCATION_LEVELS]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.edu_draft_levelOfEducation}
-                      />
+                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_levelOfEducation')}`}
+                      >
+                        {[{ value: '', label: 'Select' }, ...EDUCATION_LEVELS].map((o) => (
+                          <option key={o.value || '__level'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fe.edu_draft_levelOfEducation ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_levelOfEducation}</p>
+                      ) : null}
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">Qualification</label>
-                      <SearchableList
+                      <select
                         value={educationDraft.degreeType}
-                        onChange={(degreeType) => {
-                          updateEducationDraft({ degreeType });
+                        onChange={(e) => {
+                          updateEducationDraft({ degreeType: e.target.value });
                           clearFormError('edu_draft_degreeType');
                         }}
-                        options={[{ value: '', label: 'Select' }, ...QUALIFICATION_OPTIONS]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.edu_draft_degreeType}
-                      />
+                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_degreeType')}`}
+                      >
+                        {[{ value: '', label: 'Select' }, ...QUALIFICATION_OPTIONS].map((o) => (
+                          <option key={o.value || '__deg'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fe.edu_draft_degreeType ? (
+                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_degreeType}</p>
+                      ) : null}
                     </div>
                   </div>
 
@@ -5657,17 +5951,21 @@ export default function VerificationCenter() {
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6">
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">Country</label>
-                      <SearchableList
+                      <select
                         value={educationDraft.country}
-                        onChange={(country) => {
-                          updateEducationDraft({ country });
+                        onChange={(e) => {
+                          updateEducationDraft({ country: e.target.value });
                           clearFormError('edu_draft_country');
                         }}
-                        options={[{ value: '', label: 'Select' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))]}
-                        placeholder="Select"
-                        className="[&_button]:bg-gray-50"
-                        error={fe.edu_draft_country}
-                      />
+                        className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_country')}`}
+                      >
+                        {[{ value: '', label: 'Select' }, ...COUNTRIES.map((c) => ({ value: c, label: c }))].map((o) => (
+                          <option key={o.value || '__edu_country'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fe.edu_draft_country ? <p className="mt-1 text-sm text-red-600">{fe.edu_draft_country}</p> : null}
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">
@@ -5691,26 +5989,34 @@ export default function VerificationCenter() {
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">Start Date</label>
                       <div className="grid grid-cols-2 gap-2">
-                        <SearchableList
+                        <select
                           value={educationDraft.startMonth}
-                          onChange={(startMonth) => {
-                            updateEducationDraft({ startMonth });
+                          onChange={(e) => {
+                            updateEducationDraft({ startMonth: e.target.value });
                             clearFormError('edu_draft_startDate');
                           }}
-                          options={[{ value: '', label: 'Month' }, ...MONTH_OPTIONS]}
-                          placeholder="Month"
-                          className="[&_button]:bg-gray-50"
-                        />
-                        <SearchableList
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                        >
+                          {[{ value: '', label: 'Month' }, ...MONTH_OPTIONS].map((o) => (
+                            <option key={o.value || '__sm'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
                           value={educationDraft.startYear}
-                          onChange={(startYear) => {
-                            updateEducationDraft({ startYear });
+                          onChange={(e) => {
+                            updateEducationDraft({ startYear: e.target.value });
                             clearFormError('edu_draft_startDate');
                           }}
-                          options={[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS]}
-                          placeholder="Year"
-                          className="[&_button]:bg-gray-50"
-                        />
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                        >
+                          {[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS].map((o) => (
+                            <option key={o.value || '__sy'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       {fe.edu_draft_startDate ? (
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_startDate}</p>
@@ -5721,26 +6027,34 @@ export default function VerificationCenter() {
                         End Date / Expected End Date
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                        <SearchableList
+                        <select
                           value={educationDraft.endMonth}
-                          onChange={(endMonth) => {
-                            updateEducationDraft({ endMonth });
+                          onChange={(e) => {
+                            updateEducationDraft({ endMonth: e.target.value });
                             clearFormError('edu_draft_endDate');
                           }}
-                          options={[{ value: '', label: 'Month' }, ...MONTH_OPTIONS]}
-                          placeholder="Month"
-                          className="[&_button]:bg-gray-50"
-                        />
-                        <SearchableList
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                        >
+                          {[{ value: '', label: 'Month' }, ...MONTH_OPTIONS].map((o) => (
+                            <option key={o.value || '__em'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
                           value={educationDraft.endYear}
-                          onChange={(endYear) => {
-                            updateEducationDraft({ endYear });
+                          onChange={(e) => {
+                            updateEducationDraft({ endYear: e.target.value });
                             clearFormError('edu_draft_endDate');
                           }}
-                          options={[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS]}
-                          placeholder="Year"
-                          className="[&_button]:bg-gray-50"
-                        />
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                        >
+                          {[{ value: '', label: 'Year' }, ...EDUCATION_YEAR_OPTIONS].map((o) => (
+                            <option key={o.value || '__ey'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       {fe.edu_draft_endDate ? (
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_endDate}</p>
@@ -5757,18 +6071,22 @@ export default function VerificationCenter() {
                     </div>
                   </div>
 
-                  <div className="space-y-5">
+                  <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6">
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-gray-700">Cost of Education</label>
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
                         <div className="w-full shrink-0 sm:w-36">
-                          <SearchableList
+                          <select
                             value={educationDraft.currency}
-                            onChange={(currency) => updateEducationDraft({ currency })}
-                            options={EDUCATION_CURRENCY_OPTIONS}
-                            placeholder="Currency"
-                            className="[&_button]:bg-gray-50"
-                          />
+                            onChange={(e) => updateEducationDraft({ currency: e.target.value })}
+                            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          >
+                            {EDUCATION_CURRENCY_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <input
                           type="text"
@@ -5787,33 +6105,332 @@ export default function VerificationCenter() {
                       ) : null}
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Pending Loan</label>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-                        <div className="w-full shrink-0 sm:w-36">
-                          <SearchableList
-                            value={educationDraft.loanCurrency}
-                            onChange={(loanCurrency) => updateEducationDraft({ loanCurrency })}
-                            options={EDUCATION_CURRENCY_OPTIONS}
-                            placeholder="Currency"
-                            className="[&_button]:bg-gray-50"
-                          />
-                        </div>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Cost frequency</label>
+                      <select
+                        value={educationDraft.costFrequency}
+                        onChange={(e) => updateEducationDraft({ costFrequency: e.target.value })}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      >
+                        {[{ value: '', label: 'Select' }, ...EDUCATION_PAYMENT_FREQUENCY_OPTIONS].map((o) => (
+                          <option key={o.value || '__cf'} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">How the cost amount recurs, if applicable.</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-3 sm:px-4">
                         <input
-                          type="text"
-                          inputMode="decimal"
-                          value={educationDraft.pendingLoanAmount}
+                          type="checkbox"
+                          checked={!!educationDraft.hasLoan}
                           onChange={(e) => {
-                            updateEducationDraft({ pendingLoanAmount: e.target.value });
+                            const on = e.target.checked;
+                            updateEducationDraft(
+                              on
+                                ? { hasLoan: true }
+                                : {
+                                    hasLoan: false,
+                                    pendingLoanAmount: '',
+                                    loanRepaymentFrequency: '',
+                                  },
+                            );
                             clearFormError('edu_draft_pendingLoanAmount');
                           }}
-                          className={`min-w-0 flex-1 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_pendingLoanAmount')}`}
-                          placeholder="0.00"
+                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                         />
-                      </div>
-                      {fe.edu_draft_pendingLoanAmount ? (
-                        <p className="mt-1 text-sm text-red-600">{fe.edu_draft_pendingLoanAmount}</p>
-                      ) : null}
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-gray-900">I have a pending study loan</span>
+                          <span className="mt-0.5 block text-xs text-gray-500">
+                            Turn on to enter loan amount and repayment frequency.
+                          </span>
+                        </span>
+                      </label>
                     </div>
+                    {educationDraft.hasLoan ? (
+                      <>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Pending Loan</label>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                            <div className="w-full shrink-0 sm:w-36">
+                              <select
+                                value={educationDraft.loanCurrency}
+                                onChange={(e) => updateEducationDraft({ loanCurrency: e.target.value })}
+                                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                              >
+                                {EDUCATION_CURRENCY_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={educationDraft.pendingLoanAmount}
+                              onChange={(e) => {
+                                updateEducationDraft({ pendingLoanAmount: e.target.value });
+                                clearFormError('edu_draft_pendingLoanAmount');
+                              }}
+                              className={`min-w-0 flex-1 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_pendingLoanAmount')}`}
+                              placeholder="0.00"
+                            />
+                          </div>
+                          {fe.edu_draft_pendingLoanAmount ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.edu_draft_pendingLoanAmount}</p>
+                          ) : null}
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                            Loan repayment frequency
+                          </label>
+                          <select
+                            value={educationDraft.loanRepaymentFrequency}
+                            onChange={(e) => updateEducationDraft({ loanRepaymentFrequency: e.target.value })}
+                            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          >
+                            {[{ value: '', label: 'Select' }, ...EDUCATION_PAYMENT_FREQUENCY_OPTIONS].map((o) => (
+                              <option key={o.value || '__lrf'} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-1 text-xs text-gray-500">How often you repay this loan.</p>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Student verification email <span className="font-normal text-gray-500">(optional)</span>
+                    </label>
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      value={educationDraft.studentVerificationEmail ?? ''}
+                      onChange={(e) => {
+                        updateEducationDraft({ studentVerificationEmail: e.target.value });
+                        clearFormError('edu_draft_studentVerificationEmail');
+                      }}
+                      className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('edu_draft_studentVerificationEmail')}`}
+                      placeholder="Institution email for student verification"
+                    />
+                    {fe.edu_draft_studentVerificationEmail ? (
+                      <p className="mt-1 text-sm text-red-600">{fe.edu_draft_studentVerificationEmail}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Saved on your record. You can also enter it when you choose “Student email” verification.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Scholarships &amp; aid</label>
+                    <textarea
+                      value={educationDraft.scholarshipsAndAid}
+                      onChange={(e) => updateEducationDraft({ scholarshipsAndAid: e.target.value })}
+                      rows={3}
+                      className="min-h-[88px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="Scholarships, grants, bursaries, employer sponsorship…"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Program description</label>
+                    <textarea
+                      value={educationDraft.programDescription}
+                      onChange={(e) => updateEducationDraft({ programDescription: e.target.value })}
+                      rows={4}
+                      className="min-h-[104px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="Overview of the program, credits, structure…"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Coursework / responsibilities
+                    </label>
+                    {educationDraftCourseworkChips.length > 0 ? (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {educationDraftCourseworkChips.map((chip, chipIdx) => (
+                          <span
+                            key={`cw-${chip}-${chipIdx}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 ring-1 ring-slate-200"
+                          >
+                            {chip}
+                            <button
+                              type="button"
+                              onClick={() => removeEducationDraftCoursework(chip)}
+                              className="rounded-full p-0.5 text-slate-600 hover:bg-slate-200"
+                              aria-label={`Remove ${chip}`}
+                            >
+                              <HiX className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <input
+                      type="text"
+                      value={educationCourseworkInput}
+                      onChange={(e) => setEducationCourseworkInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEducationDraftCoursework();
+                        }
+                      }}
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="e.g. Data Structures lab, Thesis supervision…"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item (same as skills).</p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Honors / achievements</label>
+                    <textarea
+                      value={educationDraft.academicAchievements}
+                      onChange={(e) => updateEducationDraft({ academicAchievements: e.target.value })}
+                      rows={4}
+                      className="min-h-[104px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      placeholder="Dean’s list, awards, competitions, publications…"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 sm:p-5">
+                    <div className="flex flex-wrap items-end justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-900">Program milestones</h4>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          Optional program phases. Fields stay hidden until you add a milestone.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEducationDraft((d) => ({
+                            ...d,
+                            programMilestones: [...d.programMilestones, emptyEducationMilestone()],
+                          }))
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50"
+                      >
+                        <HiPlus className="h-3.5 w-3.5" />
+                        Add milestone
+                      </button>
+                    </div>
+                    {educationDraft.programMilestones.length === 0 ? (
+                      <p className="mt-3 text-xs text-gray-500">
+                        Click <span className="font-medium text-gray-700">Add milestone</span> to enter titles and
+                        dates.
+                      </p>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                      {educationDraft.programMilestones.map((m, mi) => (
+                        <div
+                          key={`draft-milestone-${mi}`}
+                          className="space-y-3 rounded-lg border border-gray-200 bg-white p-3 sm:p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Milestone {mi + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEducationDraft((d) => ({
+                                  ...d,
+                                  programMilestones: d.programMilestones.filter((_, i) => i !== mi),
+                                }))
+                              }
+                              className="text-xs font-medium text-red-600 hover:text-red-700"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Title</label>
+                            <input
+                              type="text"
+                              value={m.title}
+                              onChange={(e) =>
+                                setEducationDraft((d) => ({
+                                  ...d,
+                                  programMilestones: d.programMilestones.map((row, i) =>
+                                    i === mi ? { ...row, title: e.target.value } : row,
+                                  ),
+                                }))
+                              }
+                              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                              placeholder="e.g. Pre-clinical years"
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-gray-600">Start date</label>
+                              <input
+                                type="date"
+                                value={m.startDate?.slice(0, 10) ?? ''}
+                                onChange={(e) =>
+                                  setEducationDraft((d) => ({
+                                    ...d,
+                                    programMilestones: d.programMilestones.map((row, i) =>
+                                      i === mi ? { ...row, startDate: e.target.value } : row,
+                                    ),
+                                  }))
+                                }
+                                className={`w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2(`edu_draft_milestone_${mi}_startDate`)}`}
+                              />
+                              {fe[`edu_draft_milestone_${mi}_startDate`] ? (
+                                <p className="mt-1 text-xs text-red-600">
+                                  {fe[`edu_draft_milestone_${mi}_startDate`]}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-gray-600">End date</label>
+                              <input
+                                type="date"
+                                value={m.endDate?.slice(0, 10) ?? ''}
+                                onChange={(e) =>
+                                  setEducationDraft((d) => ({
+                                    ...d,
+                                    programMilestones: d.programMilestones.map((row, i) =>
+                                      i === mi ? { ...row, endDate: e.target.value } : row,
+                                    ),
+                                  }))
+                                }
+                                className={`w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2(`edu_draft_milestone_${mi}_endDate`)}`}
+                              />
+                              {fe[`edu_draft_milestone_${mi}_endDate`] ? (
+                                <p className="mt-1 text-xs text-red-600">
+                                  {fe[`edu_draft_milestone_${mi}_endDate`]}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                          <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={m.currentlyActive}
+                              onChange={(e) =>
+                                setEducationDraft((d) => ({
+                                  ...d,
+                                  programMilestones: d.programMilestones.map((row, i) =>
+                                    i === mi ? { ...row, currentlyActive: e.target.checked } : row,
+                                  ),
+                                }))
+                              }
+                              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                            />
+                            Currently active
+                          </label>
+                        </div>
+                      ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -6293,56 +6910,73 @@ export default function VerificationCenter() {
                         </div>
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-gray-700">Employment Type</label>
-                          <SearchableList
+                          <select
                             value={workDraft.employmentType}
-                            onChange={(employmentType) => {
-                              updateWorkDraft({ employmentType });
+                            onChange={(e) => {
+                              updateWorkDraft({ employmentType: e.target.value });
                               clearFormError('work_draft_employmentType');
                             }}
-                            options={[
+                            className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_employmentType')}`}
+                          >
+                            {[
                               { value: '', label: 'Select' },
                               { value: 'full_time', label: 'Full-time' },
                               { value: 'part_time', label: 'Part-time' },
                               { value: 'contract', label: 'Contract' },
                               { value: 'internship', label: 'Internship' },
-                            ]}
-                            placeholder="Select"
-                            className="[&_button]:bg-gray-50"
-                            error={fe.work_draft_employmentType}
-                          />
+                            ].map((o) => (
+                              <option key={o.value || '__emp'} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          {fe.work_draft_employmentType ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_employmentType}</p>
+                          ) : null}
                         </div>
                         <div>
                           <label className="mb-1.5 block text-sm font-medium text-gray-700">Work Mode</label>
-                          <SearchableList
+                          <select
                             value={workDraft.workMode}
-                            onChange={(workMode) => {
-                              updateWorkDraft({ workMode });
+                            onChange={(e) => {
+                              updateWorkDraft({ workMode: e.target.value });
                               clearFormError('work_draft_workMode');
                             }}
-                            options={[
+                            className={`w-full rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_workMode')}`}
+                          >
+                            {[
                               { value: '', label: 'Select' },
                               { value: 'on_site', label: 'On-site' },
                               { value: 'remote', label: 'Remote' },
+                              { value: 'location', label: 'Location Remote' },
                               { value: 'hybrid', label: 'Hybrid' },
                               { value: 'global_remote', label: 'Global Remote' },
-                            ]}
-                            placeholder="Select"
-                            className="[&_button]:bg-gray-50"
-                            error={fe.work_draft_workMode}
-                          />
+                            ].map((o) => (
+                              <option key={o.value || '__wm'} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          {fe.work_draft_workMode ? (
+                            <p className="mt-1 text-sm text-red-600">{fe.work_draft_workMode}</p>
+                          ) : null}
                         </div>
                       </div>
 
                       <div>
                         <label className="mb-1.5 block text-sm font-medium text-gray-700">Remuneration</label>
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,7rem)_1fr_minmax(0,9rem)]">
-                          <SearchableList
+                          <select
                             value={workDraft.currency}
-                            onChange={(currency) => updateWorkDraft({ currency })}
-                            options={EDUCATION_CURRENCY_OPTIONS}
-                            placeholder="Currency"
-                            className="[&_button]:bg-gray-50"
-                          />
+                            onChange={(e) => updateWorkDraft({ currency: e.target.value })}
+                            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          >
+                            {EDUCATION_CURRENCY_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -6354,13 +6988,17 @@ export default function VerificationCenter() {
                             className={`min-w-0 rounded-lg border bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2('work_draft_salary')}`}
                             placeholder="0.00"
                           />
-                          <SearchableList
+                          <select
                             value={workDraft.salaryFrequency}
-                            onChange={(salaryFrequency) => updateWorkDraft({ salaryFrequency })}
-                            options={WORK_SALARY_FREQUENCY_OPTIONS}
-                            placeholder="Frequency"
-                            className="[&_button]:bg-gray-50"
-                          />
+                            onChange={(e) => updateWorkDraft({ salaryFrequency: e.target.value })}
+                            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          >
+                            {WORK_SALARY_FREQUENCY_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         {fe.work_draft_salary ? (
                           <p className="mt-1 text-sm text-red-600">{fe.work_draft_salary}</p>
@@ -8099,31 +8737,40 @@ export default function VerificationCenter() {
                 >
                   Country of Nationality
                 </label>
-                <SearchableList
+                <select
                   id="verification-gov-nationality"
                   value={personal.nationality}
-                  onChange={(nationality) => {
-                    setPersonal((p) => ({ ...p, nationality }));
+                  onChange={(e) => {
+                    setPersonal((p) => ({ ...p, nationality: e.target.value }));
                     clearFormError('gov_nationality');
                   }}
-                  options={NATIONALITY_SEARCHABLE_OPTIONS}
-                  placeholder="Select nationality"
-                  className="w-full"
-                  error={fe.gov_nationality}
-                />
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('gov_nationality')}`}
+                >
+                  {NATIONALITY_SEARCHABLE_OPTIONS.map((o) => (
+                    <option key={o.value || '__gov_nat'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {fe.gov_nationality ? <p className="mt-1 text-sm text-red-600">{fe.gov_nationality}</p> : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ID Type</label>
-                <SearchableList
+                <select
                   value={personal.idType}
-                  onChange={(idType) => {
-                    setPersonal((p) => ({ ...p, idType }));
+                  onChange={(e) => {
+                    setPersonal((p) => ({ ...p, idType: e.target.value }));
                     clearFormError('gov_idType');
                   }}
-                  options={[{ value: '', label: 'Select ID type' }, ...ID_TYPE_OPTIONS]}
-                  placeholder="Select ID type"
-                  error={fe.gov_idType}
-                />
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB3('gov_idType')}`}
+                >
+                  {[{ value: '', label: 'Select ID type' }, ...ID_TYPE_OPTIONS].map((o) => (
+                    <option key={o.value || '__idt'} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {fe.gov_idType ? <p className="mt-1 text-sm text-red-600">{fe.gov_idType}</p> : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ID Number</label>

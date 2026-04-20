@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
@@ -32,6 +32,7 @@ import {
   ProfileLocationsSection,
   ProfileCertificationsSection,
   ProfileProjectsSection,
+  ProfileIdentitySection,
 } from '@/pages/professional/profileVerificationDisplay';
 import {
   VERIFICATION_TABS,
@@ -41,7 +42,27 @@ import {
   type VerificationSectionStatus,
 } from '@/utils/verificationProgress';
 
-type ProfileTab = 'experience' | 'education' | 'locations' | 'certifications' | 'projects';
+type ProfileTab =
+  | 'identity'
+  | 'experience'
+  | 'education'
+  | 'locations'
+  | 'certifications'
+  | 'projects';
+
+const PROFILE_TAB_IDS = new Set<ProfileTab>([
+  'identity',
+  'experience',
+  'education',
+  'locations',
+  'certifications',
+  'projects',
+]);
+
+function profileTabFromSearchString(tab: string | null): ProfileTab {
+  if (tab && PROFILE_TAB_IDS.has(tab as ProfileTab)) return tab as ProfileTab;
+  return 'experience';
+}
 
 const EMPTY_VERIFICATION_ICONS: Record<
   string,
@@ -90,6 +111,7 @@ function browserDefaultIana(): string {
 }
 
 export default function Profile() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [savingAbout, setSavingAbout] = useState(false);
   const [profile, setProfile] = useState<any>(null);
@@ -100,7 +122,11 @@ export default function Profile() {
   > | null>(null);
   const [editingAbout, setEditingAbout] = useState(false);
   const [editingProfession, setEditingProfession] = useState(false);
-  const [activeTab, setActiveTab] = useState<ProfileTab>('experience');
+  const [activeTab, setActiveTab] = useState<ProfileTab>(() =>
+    typeof window !== 'undefined'
+      ? profileTabFromSearchString(new URLSearchParams(window.location.search).get('tab'))
+      : 'experience',
+  );
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -138,6 +164,36 @@ export default function Profile() {
   useEffect(() => {
     fetchAll();
   }, []);
+
+  /** Keep `?tab=` in sync with the selected section (and with browser back/forward). */
+  useEffect(() => {
+    const raw = searchParams.get('tab');
+    if (!raw || !PROFILE_TAB_IDS.has(raw as ProfileTab)) {
+      setActiveTab('experience');
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('tab', 'experience');
+          return next;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    setActiveTab(raw as ProfileTab);
+  }, [searchParams, setSearchParams]);
+
+  const setProfileTab = (tab: ProfileTab) => {
+    setActiveTab(tab);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', tab);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   useEffect(() => {
     setPhotoError(false);
@@ -355,16 +411,25 @@ export default function Profile() {
     ? new Date(profile.updatedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
     : new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
-  const VerificationLink = ({ tab, children }: { tab?: string; children: React.ReactNode }) => (
+  const VerificationLink = ({
+    tab,
+    children,
+    className,
+  }: {
+    tab?: string;
+    children: React.ReactNode;
+    className?: string;
+  }) => (
     <Link
       to={tab ? `/professional/verification?tab=${tab}` : '/professional/verification'}
-      className="font-medium text-brand-600 hover:text-brand-700"
+      className={className ?? 'font-medium text-brand-600 hover:text-brand-700'}
     >
       {children}
     </Link>
   );
 
   const tabs: { id: ProfileTab; label: string }[] = [
+    { id: 'identity', label: 'Identity & contact' },
     { id: 'experience', label: 'Experience' },
     { id: 'education', label: 'Education' },
     { id: 'locations', label: 'Locations' },
@@ -426,15 +491,7 @@ export default function Profile() {
           <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
             {/* Banner + avatar: avatar is layered on top (z-index) at banner bottom */}
             <div className="relative isolate">
-              <div className="relative z-0 h-44 overflow-hidden rounded-t-2xl border-b border-brand-100/60 bg-brand-50">
-                <div className="pointer-events-none absolute inset-0 z-0">
-                  <div className="absolute -right-12 -top-20 h-64 w-64 rounded-full bg-brand-200/35" />
-                  <div className="absolute left-10 top-8 h-24 w-24 rounded-full bg-brand-300/25" />
-                  <div className="absolute bottom-0 right-1/4 h-40 w-40 translate-y-1/4 rounded-full bg-white/80" />
-                  <div className="absolute -left-10 bottom-4 h-32 w-32 rounded-full bg-brand-400/20" />
-                  <div className="absolute right-20 top-16 h-3 w-24 rotate-[-20deg] rounded-full bg-brand-500/10" />
-                </div>
-              </div>
+              <div className="relative z-0 h-44 shrink-0 overflow-hidden rounded-t-2xl border-b border-gray-200/70 bg-[#d9e3ff]" />
               <div className="absolute bottom-0 left-5 z-20 translate-y-1/2 sm:left-8">
                 <input
                   ref={photoInputRef}
@@ -801,7 +858,7 @@ export default function Profile() {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setActiveTab(t.id)}
+                  onClick={() => setProfileTab(t.id)}
                   className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                     activeTab === t.id
                       ? 'border border-gray-200 bg-white text-gray-900 shadow-sm'
@@ -814,11 +871,23 @@ export default function Profile() {
             </div>
 
             <div className="mt-3 min-h-[160px] rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
-              <div className="space-y-4">
+              <div className="space-y-3">
+                {activeTab === 'identity' && (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                      <ProfileSectionVerificationBadge status={mergedVerification?.personal} />
+                      <VerificationLink tab="personal" className="text-xs font-medium text-brand-600 hover:text-brand-700">
+                        Edit in Verification Center →
+                      </VerificationLink>
+                    </div>
+                    <ProfileIdentitySection profile={profile} />
+                  </>
+                )}
+
                 {activeTab === 'experience' &&
                   (profile.workExperience?.length > 0 ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                         <ProfileSectionVerificationBadge status={mergedVerification?.work} />
                       </div>
                       <ProfileWorkSection items={profile.workExperience} />
@@ -833,7 +902,7 @@ export default function Profile() {
                 {activeTab === 'education' &&
                   (profile.education?.length > 0 ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                         <ProfileSectionVerificationBadge status={mergedVerification?.education} />
                       </div>
                       <ProfileEducationSection items={profile.education} />
@@ -848,7 +917,7 @@ export default function Profile() {
                 {activeTab === 'locations' &&
                   (locationsList.length > 0 ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                         <ProfileSectionVerificationBadge status={mergedVerification?.location} />
                       </div>
                       <ProfileLocationsSection items={locationsList} />
@@ -863,7 +932,7 @@ export default function Profile() {
                 {activeTab === 'certifications' &&
                   (certificationsList.length > 0 ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                         <ProfileSectionVerificationBadge status={mergedVerification?.certification} />
                       </div>
                       <ProfileCertificationsSection items={certificationsList} />
@@ -878,7 +947,7 @@ export default function Profile() {
                 {activeTab === 'projects' &&
                   (projectsList.length > 0 ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
                         <ProfileSectionVerificationBadge status={mergedVerification?.projects} />
                       </div>
                       <ProfileProjectsSection items={projectsList} />
