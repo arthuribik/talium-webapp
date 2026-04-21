@@ -524,10 +524,12 @@ function resolveCertRowVerified(cert: any): boolean {
 function ProfileWorkRecordCard({ exp }: { exp: any }) {
   const [open, setOpen] = useState(false);
   const loc = exp.location && typeof exp.location === 'object' ? exp.location : {};
+  const roleLoc = displayText((loc as any).roleLocation);
   const city = displayText((loc as any).city);
   const state = displayText((loc as any).state);
   const country = displayText((loc as any).country);
-  const locLine = [city, state, country].filter(Boolean).join(', ') || '—';
+  const legacyLine = [city, state, country].filter(Boolean).join(', ');
+  const locLine = roleLoc || legacyLine || '—';
   const sr = exp.salaryRange && typeof exp.salaryRange === 'object' ? exp.salaryRange : null;
   let salaryLine = '—';
   if (sr && (sr.min != null || sr.max != null)) {
@@ -621,7 +623,7 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
                 exp.currentlyWorking || !displayText(exp.endDate) ? 'Present' : formatIsoDate(exp.endDate)
               }
             />
-            <Field label="Work location" value={locLine} />
+            <Field label="Role location" value={locLine} />
             <Field label="Salary" value={salaryLine} />
             <Field label="Pay frequency" value={salaryFrequencyLabel(exp.paymentMode)} />
           </dl>
@@ -821,14 +823,6 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
             <Field label="Duration" value={durationLine} />
             <Field label="Country" value={displayText(edu.country)} />
             <Field label="Cost" value={costStr} />
-            <Field
-              label="Cost frequency"
-              value={
-                COST_FREQUENCY_LABELS[displayText(edu.costFrequency)] ||
-                displayText(edu.costFrequency) ||
-                '—'
-              }
-            />
             {/* <Field label="Industry / sector" value={displayText(edu.institutionIndustry)} /> */}
             <Field label="Currently attending" value={edu.currentlyAttending ? 'Yes' : 'No'} />
             {showEducationLoanFields ? (

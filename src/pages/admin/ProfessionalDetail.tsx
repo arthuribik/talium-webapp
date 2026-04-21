@@ -1213,7 +1213,7 @@ export default function ProfessionalDetail() {
                               label="Cost of education"
                               value={
                                 edu.costOfEducation != null
-                                  ? `${edu.currency || ''} ${Number(edu.costOfEducation).toLocaleString()}${edu.costFrequency ? ` (${String(edu.costFrequency).replace(/_/g, ' ')})` : ''}`
+                                  ? `${edu.currency || ''} ${Number(edu.costOfEducation).toLocaleString()}`
                                   : null
                               }
                             />
@@ -1398,9 +1398,14 @@ export default function ProfessionalDetail() {
                         const achievements = Array.isArray(exp.achievements)
                           ? exp.achievements.filter((x: unknown) => typeof x === 'string' && String(x).trim())
                           : [];
-                        const locationLine = [loc.address, loc.city, loc.state, loc.country, loc.postalCode]
+                        const roleLoc =
+                          typeof (loc as any).roleLocation === 'string'
+                            ? String((loc as any).roleLocation).trim()
+                            : '';
+                        const legacyLoc = [loc.address, loc.city, loc.state, loc.country, loc.postalCode]
                           .filter((x: unknown) => typeof x === 'string' && x.trim())
                           .join(', ');
+                        const locationLine = roleLoc || legacyLoc;
                         return (
                           <div
                             key={exp.id}
@@ -1441,7 +1446,7 @@ export default function ProfessionalDetail() {
                               />
                               {locationLine ? (
                                 <div className="md:col-span-2">
-                                  <FieldRow label="Work location" value={locationLine} />
+                                  <FieldRow label="Role location" value={locationLine} />
                                 </div>
                               ) : null}
                               {exp.verificationMethod || exp.workVerificationEmail || exp.supportingMediaUrl ? (

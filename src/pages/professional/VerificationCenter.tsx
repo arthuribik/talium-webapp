@@ -438,7 +438,6 @@ type EducationEntry = {
   expectedEndOngoing: boolean;
   costOfEducation: string;
   currency: string;
-  costFrequency: string;
   /** UI only: when false, loan fields are hidden and loan values are not sent to the API. */
   hasLoan?: boolean;
   pendingLoanAmount: string;
@@ -482,7 +481,6 @@ const emptyEducation = (): EducationEntry => ({
   expectedEndOngoing: false,
   costOfEducation: '',
   currency: 'USD',
-  costFrequency: '',
   hasLoan: false,
   pendingLoanAmount: '',
   loanCurrency: 'USD',
@@ -583,6 +581,8 @@ type WorkEntry = {
   id?: string;
   organisationName: string;
   industry: string;
+  /** Where the role is based (stored as `location.roleLocation` on the API). */
+  roleLocation: string;
   role: string;
   employmentType: string;
   workMode: string;
@@ -626,6 +626,7 @@ function workVerificationMethodLabel(entry: WorkEntry): string | null {
 const emptyWork = (): WorkEntry => ({
   organisationName: '',
   industry: '',
+  roleLocation: '',
   role: '',
   employmentType: '',
   workMode: '',
@@ -963,7 +964,7 @@ const EDUCATION_CURRENCY_OPTIONS = [
   { value: 'GHS', label: 'GHS' },
 ];
 
-/** Matches `costFrequency` / `loanRepaymentFrequency` on education records (API). */
+/** Matches `loanRepaymentFrequency` on education records (API). */
 const EDUCATION_PAYMENT_FREQUENCY_OPTIONS = [
   { value: 'one_time', label: 'One-time' },
   { value: 'monthly', label: 'Monthly' },
@@ -1242,18 +1243,25 @@ function educationEntryFieldErrors(entry: EducationEntry, slug: string): Record<
   const k = (f: string) => `edu_${slug}_${f}`;
   const o: Record<string, string> = {};
   if (!entry.institutionName?.trim()) o[k('institutionName')] = 'Institution / school is required';
-  if (!entry.grade?.trim()) o[k('grade')] = 'Grade is required';
   if (!entry.fieldOfStudy?.trim()) o[k('fieldOfStudy')] = 'Field of study is required';
   if (!entry.country?.trim()) o[k('country')] = 'Country is required';
   if (!entry.levelOfEducation) o[k('levelOfEducation')] = 'Level is required';
   if (!entry.degreeType) o[k('degreeType')] = 'Qualification is required';
-  if (!entry.startMonth || !entry.startYear) o[k('startDate')] = 'Start month and year are required';
-  if (!entry.expectedEndOngoing && (!entry.endMonth || !entry.endYear)) {
-    o[k('endDate')] = 'End month and year are required, or mark ongoing';
+  const startPartial =
+    Boolean(entry.startMonth?.trim()) !== Boolean(entry.startYear?.trim());
+  if (startPartial) {
+    o[k('startDate')] = 'Select both start month and year, or leave both blank';
+  }
+  let endPartial = false;
+  if (!entry.expectedEndOngoing) {
+    endPartial = Boolean(entry.endMonth?.trim()) !== Boolean(entry.endYear?.trim());
+    if (endPartial) {
+      o[k('endDate')] = 'Select both end month and year, or leave both blank';
+    }
   }
   const startKey = yearMonthSortKey(entry.startYear, entry.startMonth);
   const endKey = yearMonthSortKey(entry.endYear, entry.endMonth);
-  if (startKey != null && endKey != null && endKey < startKey) {
+  if (!startPartial && !endPartial && startKey != null && endKey != null && endKey < startKey) {
     o[k('endDate')] = 'End date cannot be before start date';
   }
   const costErr = validateAmountField('Cost of education', entry.costOfEducation);
@@ -2015,7 +2023,6 @@ export default function VerificationCenter() {
                 expectedEndOngoing: !!e.currentlyAttending,
                 costOfEducation: e.costOfEducation != null ? String(e.costOfEducation) : '',
                 currency: e.currency || 'USD',
-                costFrequency: e.costFrequency || '',
                 pendingLoanAmount: e.pendingLoanAmount != null ? String(e.pendingLoanAmount) : '',
                 loanCurrency: e.loanCurrency || 'USD',
                 loanRepaymentFrequency: e.loanRepaymentFrequency || '',
@@ -2083,10 +2090,19 @@ export default function VerificationCenter() {
                 typeof (w as { jobDescription?: unknown }).jobDescription === 'string'
                   ? String((w as { jobDescription?: string }).jobDescription).trim()
                   : '';
+              const locRaw = w.location && typeof w.location === 'object' ? w.location : {};
+              const loc = locRaw as Record<string, unknown>;
+              const roleLocFromApi =
+                typeof loc.roleLocation === 'string' ? String(loc.roleLocation).trim() : '';
+              const legacyLocLine = [loc.city, loc.state, loc.country]
+                .map((x) => (typeof x === 'string' ? x.trim() : ''))
+                .filter(Boolean)
+                .join(', ');
               return {
                 id: w.id,
                 organisationName: w.organisationName || '',
                 industry: w.industry || '',
+                roleLocation: roleLocFromApi || legacyLocLine,
                 role: w.role || '',
                 employmentType: w.employmentType || '',
                 workMode: w.workMode || '',
@@ -3528,8 +3544,10 @@ export default function VerificationCenter() {
     setEducationSaving(true);
     try {
       for (const entry of toSave) {
-        const startDate = buildMonthYear(entry.startMonth, entry.startYear)!;
-        const endDate = buildMonthYear(entry.endMonth, entry.endYear);
+        const startDate = buildMonthYear(entry.startMonth, entry.startYear);
+        const endDate = entry.expectedEndOngoing
+          ? undefined
+          : buildMonthYear(entry.endMonth, entry.endYear);
         const payload = {
           schoolType: entry.schoolType || undefined,
           levelOfEducation: entry.levelOfEducation,
@@ -3538,14 +3556,13 @@ export default function VerificationCenter() {
           institutionIndustry: entry.institutionIndustry?.trim() || undefined,
           degreeType: entry.degreeType || undefined,
           fieldOfStudy: entry.fieldOfStudy.trim(),
-          startDate,
+          startDate: startDate ?? undefined,
           endDate: endDate ?? undefined,
           currentlyAttending: entry.expectedEndOngoing,
-          grade: entry.grade.trim(),
+          grade: entry.grade?.trim() || undefined,
           country: entry.country.trim(),
           costOfEducation: entry.costOfEducation ? parseFloat(entry.costOfEducation) : undefined,
           currency: entry.currency || undefined,
-          costFrequency: entry.costFrequency || undefined,
           pendingLoanAmount:
             entry.hasLoan && entry.pendingLoanAmount?.trim()
               ? parseFloat(entry.pendingLoanAmount)
@@ -3618,7 +3635,14 @@ export default function VerificationCenter() {
       startDate,
       endDate,
       currentlyWorking: primary.currentlyWorking,
-      location: { city: '', state: '', country: '' },
+      location: {
+        city: '',
+        state: '',
+        country: '',
+        ...(entry.roleLocation?.trim()
+          ? { roleLocation: entry.roleLocation.trim() }
+          : {}),
+      },
       responsibilities: responsibilitiesLines,
       achievements: achievementsLines,
       paymentMode: entry.salaryFrequency || undefined,
@@ -5788,14 +5812,6 @@ export default function VerificationCenter() {
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900">{costLine}</dd>
                               </div>
                             ) : null}
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Cost frequency
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {educationPaymentFrequencyLabel(entry.costFrequency)}
-                              </dd>
-                            </div>
                             {entry.hasLoan ? (
                               <>
                                 <div className="sm:col-span-1">
@@ -6202,9 +6218,7 @@ export default function VerificationCenter() {
                       {fe.edu_draft_country ? <p className="mt-1 text-sm text-red-600">{fe.edu_draft_country}</p> : null}
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                        Grade <span className="text-red-500">*</span>
-                      </label>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Grade</label>
                       <input
                         type="text"
                         value={educationDraft.grade}
@@ -6337,21 +6351,6 @@ export default function VerificationCenter() {
                       {fe.edu_draft_costOfEducation ? (
                         <p className="mt-1 text-sm text-red-600">{fe.edu_draft_costOfEducation}</p>
                       ) : null}
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-gray-700">Cost frequency</label>
-                      <select
-                        value={educationDraft.costFrequency}
-                        onChange={(e) => updateEducationDraft({ costFrequency: e.target.value })}
-                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
-                      >
-                        {[{ value: '', label: 'Select' }, ...EDUCATION_PAYMENT_FREQUENCY_OPTIONS].map((o) => (
-                          <option key={o.value || '__cf'} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="mt-1 text-xs text-gray-500">How the cost amount recurs, if applicable.</p>
                     </div>
                     <div className="md:col-span-2">
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-3 sm:px-4">
@@ -6901,7 +6900,7 @@ export default function VerificationCenter() {
                                   </ul>
                                 </div>
                               ) : null}
-                              <div className="grid gap-4 sm:grid-cols-2">
+                              <div className="grid gap-4 sm:grid-cols-3">
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Remuneration
@@ -6911,6 +6910,14 @@ export default function VerificationCenter() {
                                   </p>
                                 </div>
                                 <div>
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                    Role location
+                                  </p>
+                                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                                    {entry.roleLocation?.trim() ? entry.roleLocation.trim() : '—'}
+                                  </p>
+                                </div>
+                                <div className="sm:col-span-1">
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Other compensation
                                   </p>
@@ -7141,6 +7148,17 @@ export default function VerificationCenter() {
                           {fe.work_draft_workMode ? (
                             <p className="mt-1 text-sm text-red-600">{fe.work_draft_workMode}</p>
                           ) : null}
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="mb-1.5 block text-sm font-medium text-gray-700">Role location</label>
+                          <input
+                            type="text"
+                            value={workDraft.roleLocation}
+                            onChange={(e) => updateWorkDraft({ roleLocation: e.target.value })}
+                            className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                            placeholder="eg, Lagos, Nigeria"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Where this role is based (city, region, or country).</p>
                         </div>
                       </div>
 
