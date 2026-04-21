@@ -11,6 +11,7 @@ import {
   HiInformationCircle,
   HiCheckCircle,
   HiX,
+  HiPlus,
 } from 'react-icons/hi';
 import { api } from '@/services/api';
 import logo from '@/assets/logo.svg';
@@ -33,6 +34,7 @@ export default function Settings() {
   const [professionalPlans, setProfessionalPlans] = useState<any[]>([]);
   const [organisationPlans, setOrganisationPlans] = useState<any[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
+  const [planSaveLoading, setPlanSaveLoading] = useState(false);
   const [settings, setSettings] = useState({
     // General - About App
     appName: APP_NAME,
@@ -806,6 +808,27 @@ export default function Settings() {
                           <HiUsers className="w-5 h-5 text-brand-600 mr-2" />
                           <h2 className="text-lg font-semibold text-gray-900">Subscription Plans (For Professional Entity)</h2>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPlan({
+                              recordId: null,
+                              planSlug: '',
+                              id: '',
+                              name: '',
+                              description: '',
+                              price: 0,
+                              priceAnnualUsd: '',
+                              entityType: 'professional',
+                              featuresText: '',
+                            });
+                            setIsPlanDrawerOpen(true);
+                          }}
+                          className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                        >
+                          <HiPlus className="w-5 h-5" />
+                          Add plan
+                        </button>
                       </div>
                       {plansLoading ? (
                         <div className="text-center text-gray-600 py-8">Loading plans...</div>
@@ -818,12 +841,28 @@ export default function Settings() {
                                   <h3 className="font-medium text-gray-900 mb-1">{plan.name}</h3>
                                   <p className="text-sm text-gray-600">{plan.description}</p>
                                   <p className="text-sm text-gray-500 mt-1">
-                                    {plan.price === 0 ? 'Free' : `$${plan.price}/month`}
+                                    {plan.price === 0
+                                      ? 'Free'
+                                      : `$${plan.price}/mo${
+                                          plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
+                                            ? ` · $${plan.priceAnnualUsd}/yr`
+                                            : ''
+                                        }`}
                                   </p>
                                 </div>
                                 <button
                                   onClick={() => {
-                                    setEditingPlan({ ...plan, entityType: 'professional' });
+                                    setEditingPlan({
+                                      ...plan,
+                                      recordId: plan.recordId,
+                                      planSlug: plan.id,
+                                      entityType: 'professional',
+                                      featuresText: (plan.features || []).join('\n'),
+                                      priceAnnualUsd:
+                                        plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
+                                          ? plan.priceAnnualUsd
+                                          : '',
+                                    });
                                     setIsPlanDrawerOpen(true);
                                   }}
                                   className="text-brand-600 hover:text-brand-700 text-sm font-medium"
@@ -845,6 +884,27 @@ export default function Settings() {
                           <HiCreditCard className="w-5 h-5 text-brand-600 mr-2" />
                           <h2 className="text-lg font-semibold text-gray-900">Subscription Plans (For Organisation Entity)</h2>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPlan({
+                              recordId: null,
+                              planSlug: '',
+                              id: '',
+                              name: '',
+                              description: '',
+                              price: 0,
+                              priceAnnualUsd: '',
+                              entityType: 'organisation',
+                              featuresText: '',
+                            });
+                            setIsPlanDrawerOpen(true);
+                          }}
+                          className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+                        >
+                          <HiPlus className="w-5 h-5" />
+                          Add plan
+                        </button>
                       </div>
                       {plansLoading ? (
                         <div className="text-center text-gray-600 py-8">Loading plans...</div>
@@ -857,12 +917,28 @@ export default function Settings() {
                                   <h3 className="font-medium text-gray-900 mb-1">{plan.name}</h3>
                                   <p className="text-sm text-gray-600">{plan.description}</p>
                                   <p className="text-sm text-gray-500 mt-1">
-                                    {plan.price === 0 ? 'Free' : `$${plan.price}/month`}
+                                    {plan.price === 0
+                                      ? 'Free'
+                                      : `$${plan.price}/mo${
+                                          plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
+                                            ? ` · $${plan.priceAnnualUsd}/yr`
+                                            : ''
+                                        }`}
                                   </p>
                                 </div>
                                 <button
                                   onClick={() => {
-                                    setEditingPlan({ ...plan, entityType: 'organisation' });
+                                    setEditingPlan({
+                                      ...plan,
+                                      recordId: plan.recordId,
+                                      planSlug: plan.id,
+                                      entityType: 'organisation',
+                                      featuresText: (plan.features || []).join('\n'),
+                                      priceAnnualUsd:
+                                        plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
+                                          ? plan.priceAnnualUsd
+                                          : '',
+                                    });
                                     setIsPlanDrawerOpen(true);
                                   }}
                                   className="text-brand-600 hover:text-brand-700 text-sm font-medium"
@@ -1107,7 +1183,7 @@ export default function Settings() {
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                   <h2 className="text-xl font-bold text-gray-900">
-                    {editingPlan ? `Edit ${editingPlan.name}` : 'Add Plan'}
+                    {editingPlan?.recordId ? `Edit ${editingPlan.name || 'plan'}` : 'Add plan'}
                   </h2>
                   <button
                     onClick={() => {
@@ -1124,13 +1200,39 @@ export default function Settings() {
                 <div className="flex-1 overflow-y-auto p-6">
                   {editingPlan && (
                     <div className="space-y-6">
+                      {!editingPlan.recordId ? (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Plan slug</label>
+                          <input
+                            type="text"
+                            value={editingPlan.planSlug ?? ''}
+                            onChange={(e) =>
+                              setEditingPlan({ ...editingPlan, planSlug: e.target.value })
+                            }
+                            placeholder="e.g. growth"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">Lowercase identifier (URL-safe).</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Plan slug</label>
+                          <input
+                            type="text"
+                            value={editingPlan.planSlug || editingPlan.id || ''}
+                            readOnly
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                          />
+                        </div>
+                      )}
+
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Plan Name</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Plan name</label>
                         <input
                           type="text"
                           value={editingPlan.name}
-                          readOnly
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                          onChange={(e) => setEditingPlan({ ...editingPlan, name: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </div>
 
@@ -1138,29 +1240,72 @@ export default function Settings() {
                         <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                         <textarea
                           value={editingPlan.description}
-                          readOnly
+                          onChange={(e) =>
+                            setEditingPlan({ ...editingPlan, description: e.target.value })
+                          }
                           rows={3}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Price (USD/month)</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Price (USD / month)</label>
                         <input
                           type="number"
+                          min={0}
+                          step={0.01}
                           value={editingPlan.price}
+                          onChange={(e) =>
+                            setEditingPlan({ ...editingPlan, price: Number(e.target.value) })
+                          }
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Annual price (USD, optional)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={editingPlan.priceAnnualUsd === '' ? '' : editingPlan.priceAnnualUsd}
+                          onChange={(e) =>
+                            setEditingPlan({
+                              ...editingPlan,
+                              priceAnnualUsd: e.target.value === '' ? '' : Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Entity type</label>
+                        <input
+                          type="text"
+                          value={
+                            editingPlan.entityType === 'professional'
+                              ? 'Professional'
+                              : 'Organisation'
+                          }
                           readOnly
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Entity Type</label>
-                        <input
-                          type="text"
-                          value={editingPlan.entityType === 'professional' ? 'Professional Entity' : 'Organisation Entity'}
-                          readOnly
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Features (one per line)
+                        </label>
+                        <textarea
+                          value={editingPlan.featuresText ?? ''}
+                          onChange={(e) =>
+                            setEditingPlan({ ...editingPlan, featuresText: e.target.value })
+                          }
+                          rows={6}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                         />
                       </div>
 
@@ -1173,7 +1318,65 @@ export default function Settings() {
                           }}
                           className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                         >
-                          Close
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={planSaveLoading}
+                          onClick={async () => {
+                            const features = String(editingPlan.featuresText || '')
+                              .split('\n')
+                              .map((s: string) => s.trim())
+                              .filter(Boolean);
+                            const annualRaw = editingPlan.priceAnnualUsd;
+                            const priceAnnualUsd =
+                              annualRaw === '' || annualRaw === undefined || annualRaw === null
+                                ? undefined
+                                : Number(annualRaw);
+                            setPlanSaveLoading(true);
+                            try {
+                              if (editingPlan.recordId) {
+                                await api.put(`/v1/admin/billing/plans/${editingPlan.recordId}`, {
+                                  name: editingPlan.name,
+                                  description: editingPlan.description,
+                                  priceMonthlyUsd: Number(editingPlan.price),
+                                  priceAnnualUsd,
+                                  features,
+                                });
+                                toast.success('Plan updated');
+                              } else {
+                                const slug = String(editingPlan.planSlug || '')
+                                  .trim()
+                                  .toLowerCase()
+                                  .replace(/\s+/g, '-');
+                                if (!slug) {
+                                  toast.error('Plan slug is required');
+                                  setPlanSaveLoading(false);
+                                  return;
+                                }
+                                await api.post('/v1/admin/billing/plans', {
+                                  planSlug: slug,
+                                  entityType: editingPlan.entityType,
+                                  name: editingPlan.name,
+                                  description: editingPlan.description,
+                                  priceMonthlyUsd: Number(editingPlan.price),
+                                  priceAnnualUsd,
+                                  features,
+                                });
+                                toast.success('Plan created');
+                              }
+                              setIsPlanDrawerOpen(false);
+                              setEditingPlan(null);
+                              await fetchPlans();
+                            } catch (err: any) {
+                              toast.error(err.response?.data?.message || 'Could not save plan');
+                            } finally {
+                              setPlanSaveLoading(false);
+                            }
+                          }}
+                          className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors disabled:opacity-50"
+                        >
+                          {planSaveLoading ? 'Saving…' : 'Save'}
                         </button>
                       </div>
                     </div>

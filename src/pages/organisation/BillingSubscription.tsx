@@ -209,6 +209,13 @@ function TransactionStatusBadge({ status }: { status: string }) {
       </span>
     );
   }
+  if (s === 'pending') {
+    return (
+      <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900">
+        Pending
+      </span>
+    );
+  }
   return (
     <span className="inline-flex rounded-full bg-teal-100 px-2.5 py-1 text-xs font-semibold text-teal-800">
       Completed
@@ -250,6 +257,14 @@ function TransactionTypeCell({ type }: { type: string }) {
           <span className="h-2 w-2 rounded-full bg-amber-500" />
         </span>
         Add-on
+      </span>
+    );
+  }
+  if (t === 'wallet_topup' || t === 'wallet-topup') {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm font-medium text-teal-600">
+        <HiArrowCircleDown className="h-5 w-5 shrink-0" />
+        Wallet top-up
       </span>
     );
   }
@@ -389,9 +404,10 @@ export default function BillingSubscription() {
       setSubscription(response.data.data);
     } catch (err) {
       console.error('Failed to fetch subscription:', err);
+      toast.error('Could not load billing. Try again later.');
       setSubscription({
         plan: 'starter',
-        status: 'active',
+        status: 'inactive',
         dashboard: null,
       });
     } finally {
@@ -467,7 +483,7 @@ export default function BillingSubscription() {
 
       const response = await api.post('/v1/organisation/billing/subscription', {
         plan: planId,
-        billingCycle: 'monthly',
+        billingCycle: billingCyclePricing === 'annual' ? 'annual' : 'monthly',
       });
 
       const paymentData = response.data.data;
@@ -1300,14 +1316,29 @@ export default function BillingSubscription() {
 
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 const n = Number(fundTokenInput);
                 if (!fundTokenInput.trim() || !Number.isFinite(n) || n < 1) {
                   toast.error('Enter a valid number of tokens (1 or more).');
                   return;
                 }
-                toast.success(`Checkout for ${n} TTK will be available soon.`);
-                closeFundWallet();
+                try {
+                  const res = await api.post('/v1/organisation/billing/wallet/initiate', {
+                    ttkAmount: n,
+                  });
+                  const d = res.data?.data;
+                  if (d?.paymentLink) {
+                    window.open(d.paymentLink, '_blank');
+                    toast.success('Payment initiated. Complete checkout in the new tab.');
+                  } else {
+                    toast.success('Top-up initiated.');
+                  }
+                  await fetchSubscription();
+                  await fetchBillingHistory();
+                  closeFundWallet();
+                } catch (e: any) {
+                  toast.error(e.response?.data?.message || 'Could not start wallet top-up.');
+                }
               }}
               className="mt-6 w-full rounded-xl bg-teal-600 px-4 py-3.5 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
             >
