@@ -1238,20 +1238,6 @@ export default function ProfessionalDetail() {
                             <FieldRow label="Honors & achievements" value={edu.academicAchievements} />
                             <FieldRow label="Activities & societies" value={edu.activitiesSocieties} />
                             <FieldRow label="Associated skills" value={edu.associatedSkills} />
-                            {Array.isArray(edu.programProgression) && edu.programProgression.length > 0 && (
-                              <div className="md:col-span-2">
-                                <label className="block text-sm font-medium text-gray-500 mb-0.5">Program milestones</label>
-                                <ul className="list-disc list-inside text-gray-900 text-sm space-y-1">
-                                  {edu.programProgression.map((m: any, idx: number) => (
-                                    <li key={idx}>
-                                      {[m.title, m.startDate, m.endDate || (m.currentlyActive ? 'Current' : '')]
-                                        .filter(Boolean)
-                                        .join(' · ')}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
                             {edu.supportingMediaUrl ? (
                               <div className="md:col-span-2">
                                 <label className="block text-sm font-medium text-gray-500 mb-0.5">Supporting media</label>

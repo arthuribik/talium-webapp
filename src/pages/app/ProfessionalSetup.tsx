@@ -196,10 +196,11 @@ export default function ProfessionalSetup() {
                   onChange={(levelOfEducation) => setEducationData({ ...educationData, levelOfEducation })}
                   options={[
                     { value: '', label: 'Select Level' },
-                    { value: 'high_school', label: 'High School' },
-                    { value: 'bachelor', label: 'Bachelor' },
-                    { value: 'master', label: 'Master' },
-                    { value: 'doctorate', label: 'Doctorate' },
+                    { value: 'degree', label: 'Degree' },
+                    { value: 'college', label: 'College' },
+                    { value: 'primary_school', label: 'Primary School' },
+                    { value: 'secondary_school', label: 'Secondary School' },
+                    { value: 'training_institute', label: 'Training Institute' },
                   ]}
                   placeholder="Select Level"
                   className="mt-1 block w-full focus:ring-2 focus:ring-brand-500"

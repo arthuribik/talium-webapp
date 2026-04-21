@@ -20,11 +20,11 @@ const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
 };
 
 const WORK_MODE_LABELS: Record<string, string> = {
-  on_site: 'On-site',
-  remote: 'Remote',
-  hybrid: 'Hybrid',
   global_remote: 'Global Remote',
-  location: 'Location remote',
+  remote: 'Location Remote',
+  hybrid: 'Hybrid',
+  on_site: 'Onsite',
+  location: 'Location Remote',
 };
 
 const WORK_SALARY_FREQUENCY_LABELS: Record<string, string> = {
@@ -48,6 +48,11 @@ const PROGRAM_LEVEL_LABELS: Record<string, string> = {
 };
 
 const EDUCATION_LEVEL_LABELS: Record<string, string> = {
+  degree: 'Degree',
+  college: 'College',
+  primary_school: 'Primary School',
+  secondary_school: 'Secondary School',
+  training_institute: 'Training Institute',
   high_school: 'High School',
   associate: 'Associate',
   bachelor: 'Bachelor',
@@ -76,22 +81,26 @@ const SCHOOL_TYPE_LABELS: Record<string, string> = {
 };
 
 const QUALIFICATION_LABELS: Record<string, string> = {
-  BSc: 'B.Sc.',
-  BA: 'B.A.',
-  BTech: 'B.Tech.',
-  MSc: 'M.Sc.',
-  MA: 'M.A.',
+  PhD: 'PhD',
+  MSc: 'MSc',
+  MA: 'MA',
   MBA: 'MBA',
-  PhD: 'Ph.D.',
-  MD: 'M.D.',
+  BSc: 'BSc',
+  BA: 'BA',
+  BEng: 'BEng',
+  HND: 'HND',
+  OND: 'OND',
+  Diploma: 'Diploma',
+  Certificate: 'Certificate',
+  SSCE: 'SSCE',
+  FSLC: 'FSLC',
+  Other: 'Other',
+  BTech: 'B.Tech.',
+  ND: 'ND',
+  WAEC_SSCE: 'WAEC / SSCE',
   LLB: 'LL.B.',
   LLM: 'LL.M.',
-  HND: 'HND',
-  ND: 'ND',
-  Certificate: 'Certificate',
-  Diploma: 'Diploma',
-  WAEC_SSCE: 'WAEC / SSCE',
-  Other: 'Other',
+  MD: 'M.D.',
 };
 
 const MONTH_NUM_LABELS: Record<string, string> = {
@@ -129,18 +138,6 @@ function displayText(v: unknown): string {
   if (v === null || v === undefined) return '';
   const s = typeof v === 'string' ? v.trim() : String(v);
   return s;
-}
-
-function formatProfileDateTime(v: unknown): string {
-  if (v == null) return '—';
-  if (v instanceof Date) {
-    return Number.isNaN(v.getTime()) ? '—' : v.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  }
-  const raw = displayText(v as string);
-  if (!raw) return '—';
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return raw;
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 /** Prisma `VerificationStatus` and similar string values from the API. */
@@ -705,7 +702,6 @@ export function ProfileWorkSection({ items }: { items: any[] }) {
 
 function ProfileEducationRecordCard({ edu }: { edu: any }) {
   const [open, setOpen] = useState(false);
-  const milestones = Array.isArray(edu.programProgression) ? edu.programProgression : [];
   const eduStatus = resolveEducationRowStatus(edu);
   const eduSelfDeclared = isEducationSelfDeclaredForProfile(edu);
   const title = displayText(edu.institutionName) || 'Education';
@@ -726,6 +722,12 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
   /** When explicitly false, omit loan amount and repayment rows (matches Verification Center). */
   const hideLoanFields =
     edu.hasLoan === false || displayText(edu.hasLoan).toLowerCase() === 'false';
+  const hasPendingLoanAmount =
+    edu.pendingLoanAmount != null && String(edu.pendingLoanAmount).trim() !== '';
+  const hasLoanRepaymentFrequency = displayText(edu.loanRepaymentFrequency).trim() !== '';
+  /** Hide loan UI when no loan data (not only when `hasLoan` is false — API often omits `hasLoan`). */
+  const showEducationLoanFields =
+    !hideLoanFields && (hasPendingLoanAmount || hasLoanRepaymentFrequency);
   const dA = shortSlashMonthYearFromIso(edu.startDate);
   const dB = edu.currentlyAttending ? 'Ongoing' : shortSlashMonthYearFromIso(edu.endDate);
   let durationLine = '—';
@@ -827,9 +829,9 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
                 '—'
               }
             />
-            <Field label="Industry / sector" value={displayText(edu.institutionIndustry)} />
+            {/* <Field label="Industry / sector" value={displayText(edu.institutionIndustry)} /> */}
             <Field label="Currently attending" value={edu.currentlyAttending ? 'Yes' : 'No'} />
-            {!hideLoanFields ? (
+            {showEducationLoanFields ? (
               <>
                 <Field label="Pending loan" value={loanStr} />
                 <Field label="Program level" value={programLevelDisplay(edu.programLevel)} />
@@ -842,9 +844,7 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
                   }
                 />
               </>
-            ) : (
-              <Field label="Program level" value={programLevelDisplay(edu.programLevel)} />
-            )}
+            ) : null}
           </dl>
 
           <dl className={DETAIL_STACK_FULL}>
@@ -870,27 +870,6 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
           </dl>
 
           <div className={PROFILE_INSET_SECTION_CLASS}>
-            <p className={PROFILE_FIELD_LABEL_CLASS}>Program milestones</p>
-            {milestones.length === 0 ? (
-              <p className="mt-2 text-[15px] font-bold leading-snug text-gray-900">—</p>
-            ) : (
-              <ul className="mt-2 space-y-3">
-                {milestones.map((m: any, mi: number) => (
-                  <li
-                    key={mi}
-                    className="border-b border-gray-200/90 pb-3 text-sm last:border-0 last:pb-0"
-                  >
-                    <p className="font-bold text-gray-900">{displayText(m.title) || '—'}</p>
-                    <p className="mt-1 text-xs font-medium text-gray-600">
-                      {formatIsoDate(m.startDate)} – {m.currentlyActive ? 'Active' : formatIsoDate(m.endDate)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className={PROFILE_INSET_SECTION_CLASS}>
             <p className={PROFILE_FIELD_LABEL_CLASS}>Activities & societies</p>
             <div className="mt-2">
               <MultilineFieldValue text={displayText(edu.activitiesSocieties)} />
@@ -905,39 +884,43 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
             />
           </dl>
 
-          {displayText(edu.supportingMediaUrl) ? (
+          {!eduSelfDeclared ? (
+            <>
+              {displayText(edu.supportingMediaUrl) ? (
+                <div className="col-span-full">
+                  <dt className={PROFILE_FIELD_LABEL_CLASS}>Supporting media</dt>
+                  <dd>
+                    <a
+                      href={resolveUrl(edu.supportingMediaUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={PROFILE_FIELD_LINK_CLASS}
+                    >
+                      View file
+                    </a>
+                  </dd>
+                </div>
+              ) : (
+                <Field label="Supporting media" value="—" span2 />
+              )}
               <div className="col-span-full">
-                <dt className={PROFILE_FIELD_LABEL_CLASS}>Supporting media</dt>
-                <dd>
-                  <a
-                    href={resolveUrl(edu.supportingMediaUrl)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={PROFILE_FIELD_LINK_CLASS}
-                  >
-                    View file
-                  </a>
+                <dt className={PROFILE_FIELD_LABEL_CLASS}>Verification documents</dt>
+                <dd className="min-w-0 text-[15px] font-bold leading-snug text-gray-900">
+                  {educationVerificationDocumentsDd(edu.verificationDocuments)}
                 </dd>
               </div>
-            ) : (
-              <Field label="Supporting media" value="—" span2 />
-            )}
-            <div className="col-span-full">
-              <dt className={PROFILE_FIELD_LABEL_CLASS}>Verification documents</dt>
-              <dd className="min-w-0 text-[15px] font-bold leading-snug text-gray-900">
-                {educationVerificationDocumentsDd(edu.verificationDocuments)}
-              </dd>
-            </div>
+            </>
+          ) : null}
 
-            <div className="col-span-full grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-              <Field label="Verified at" value={formatProfileDateTime(edu.verifiedAt)} />
+            {/* <div className="col-span-full grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
+              <Field label="Verified at" value={displayText(edu.verifiedAt)} />
               <Field label="Reviewed by" value={displayText(edu.reviewedBy)} />
             </div>
 
           <div className="col-span-full grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-            <Field label="Created" value={formatProfileDateTime(edu.createdAt)} />
-            <Field label="Last updated" value={formatProfileDateTime(edu.updatedAt)} />
-          </div>
+            <Field label="Created" value={displayText(edu.createdAt)} />
+            <Field label="Last updated" value={displayText(edu.updatedAt)} />
+          </div> */}
         </div>
       ) : null}
     </li>

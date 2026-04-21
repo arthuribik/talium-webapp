@@ -32,7 +32,6 @@ import {
   ProfileLocationsSection,
   ProfileCertificationsSection,
   ProfileProjectsSection,
-  ProfileIdentitySection,
 } from '@/pages/professional/profileVerificationDisplay';
 import {
   VERIFICATION_TABS,
@@ -42,16 +41,9 @@ import {
   type VerificationSectionStatus,
 } from '@/utils/verificationProgress';
 
-type ProfileTab =
-  | 'identity'
-  | 'experience'
-  | 'education'
-  | 'locations'
-  | 'certifications'
-  | 'projects';
+type ProfileTab = 'experience' | 'education' | 'locations' | 'certifications' | 'projects';
 
 const PROFILE_TAB_IDS = new Set<ProfileTab>([
-  'identity',
   'experience',
   'education',
   'locations',
@@ -429,7 +421,6 @@ export default function Profile() {
   );
 
   const tabs: { id: ProfileTab; label: string }[] = [
-    { id: 'identity', label: 'Identity & contact' },
     { id: 'experience', label: 'Experience' },
     { id: 'education', label: 'Education' },
     { id: 'locations', label: 'Locations' },
@@ -872,18 +863,6 @@ export default function Profile() {
 
             <div className="mt-3 min-h-[160px] rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
               <div className="space-y-3">
-                {activeTab === 'identity' && (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2">
-                      <ProfileSectionVerificationBadge status={mergedVerification?.personal} />
-                      <VerificationLink tab="personal" className="text-xs font-medium text-brand-600 hover:text-brand-700">
-                        Edit in Verification Center →
-                      </VerificationLink>
-                    </div>
-                    <ProfileIdentitySection profile={profile} />
-                  </>
-                )}
-
                 {activeTab === 'experience' &&
                   (profile.workExperience?.length > 0 ? (
                     <>

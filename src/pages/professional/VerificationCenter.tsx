@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { LivenessSelfieModal } from '@/components/professional/LivenessSelfieModal';
@@ -420,20 +421,6 @@ function locationVerificationMethodLabel(loc: LocationEntry): string | null {
   return null;
 }
 
-type EducationProgramMilestoneEntry = {
-  title: string;
-  startDate: string;
-  endDate: string;
-  currentlyActive: boolean;
-};
-
-const emptyEducationMilestone = (): EducationProgramMilestoneEntry => ({
-  title: '',
-  startDate: '',
-  endDate: '',
-  currentlyActive: false,
-});
-
 type EducationEntry = {
   id?: string;
   schoolType: string;
@@ -461,7 +448,6 @@ type EducationEntry = {
   programDescription: string;
   academicResponsibilities: string;
   academicAchievements: string;
-  programMilestones: EducationProgramMilestoneEntry[];
   activitiesSocieties: string;
   associatedSkills: string;
   supportingMediaUrl: string;
@@ -473,6 +459,11 @@ type EducationEntry = {
   studentVerificationEmail?: string;
   /** Local UI: education row verification (not necessarily from API). */
   eduVerificationStatus?: 'pending' | 'verified';
+  verificationDocuments?: unknown;
+  verifiedAt?: string | null;
+  reviewedBy?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 const emptyEducation = (): EducationEntry => ({
@@ -500,7 +491,6 @@ const emptyEducation = (): EducationEntry => ({
   programDescription: '',
   academicResponsibilities: '',
   academicAchievements: '',
-  programMilestones: [],
   activitiesSocieties: '',
   associatedSkills: '',
   supportingMediaUrl: '',
@@ -509,6 +499,55 @@ const emptyEducation = (): EducationEntry => ({
   studentVerificationEmail: '',
   eduVerificationStatus: 'pending',
 });
+
+function formatEducationVerificationDateTime(v: unknown): string {
+  if (v == null || v === '') return '—';
+  if (v instanceof Date) {
+    return Number.isNaN(v.getTime()) ? '—' : v.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  const raw = typeof v === 'string' ? v.trim() : String(v);
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function educationVerificationDocumentsBlock(doc: unknown): ReactNode {
+  if (doc == null) return '—';
+  if (!Array.isArray(doc) || doc.length === 0) return '—';
+  const rows = doc.filter((x) => x && typeof x === 'object') as Array<Record<string, unknown>>;
+  if (rows.length === 0) return '—';
+  const base = api.defaults.baseURL || '';
+  return (
+    <ul className="mt-0.5 list-none space-y-1 p-0">
+      {rows.map((item, i) => {
+        const url = typeof item.fileUrl === 'string' ? item.fileUrl.trim() : '';
+        const name =
+          (typeof item.fileName === 'string' && item.fileName.trim()) || `Document ${i + 1}`;
+        const typeLabel = typeof item.type === 'string' ? item.type.trim() : '';
+        const label = typeLabel ? `${typeLabel}: ${name}` : name;
+        const href =
+          url && !url.startsWith('http') ? `${base}${url.startsWith('/') ? url : `/${url}`}` : url;
+        return (
+          <li key={i} className="text-sm font-semibold text-gray-900">
+            {href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all text-brand-600 hover:underline"
+              >
+                {label}
+              </a>
+            ) : (
+              label
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function educationVerificationMethodLabel(entry: EducationEntry): string | null {
   const st = entry.eduVerificationStatus ?? 'pending';
@@ -638,11 +677,11 @@ function workEmploymentTypeLabel(value: string): string {
 
 function workModeLabel(value: string): string {
   const map: Record<string, string> = {
-    on_site: 'On-site',
-    remote: 'Remote',
-    location: 'Location Remote',
-    hybrid: 'Hybrid',
     global_remote: 'Global Remote',
+    remote: 'Location Remote',
+    hybrid: 'Hybrid',
+    on_site: 'Onsite',
+    location: 'Location Remote',
   };
   return map[value] || value || '—';
 }
@@ -833,15 +872,30 @@ function projectVerificationMethodForApi(entry: ProjectEntry): string | null {
   return t;
 }
 
+/** Level dropdown (Verification Center education); values are persisted as API strings. */
 const EDUCATION_LEVELS = [
-  { value: 'high_school', label: 'High School' },
-  { value: 'associate', label: 'Associate' },
-  { value: 'bachelor', label: 'Bachelor' },
-  { value: 'master', label: 'Master' },
-  { value: 'doctorate', label: 'Doctorate' },
-  { value: 'certificate', label: 'Certificate' },
-  { value: 'diploma', label: 'Diploma' },
+  { value: 'degree', label: 'Degree' },
+  { value: 'college', label: 'College' },
+  { value: 'primary_school', label: 'Primary School' },
+  { value: 'secondary_school', label: 'Secondary School' },
+  { value: 'training_institute', label: 'Training Institute' },
 ];
+
+/** Display labels for stored level (includes legacy enum values from older rows). */
+const EDUCATION_LEVEL_DISPLAY: Record<string, string> = {
+  degree: 'Degree',
+  college: 'College',
+  primary_school: 'Primary School',
+  secondary_school: 'Secondary School',
+  training_institute: 'Training Institute',
+  high_school: 'High School',
+  associate: 'Associate',
+  bachelor: 'Bachelor',
+  master: 'Master',
+  doctorate: 'Doctorate',
+  certificate: 'Certificate',
+  diploma: 'Diploma',
+};
 const MONTH_OPTIONS = [
   { value: '01', label: 'January' },
   { value: '02', label: 'February' },
@@ -879,22 +933,21 @@ const SCHOOL_TYPE_OPTIONS = [
   { value: 'accelerator', label: 'Accelerator' },
 ];
 
+/** Qualification dropdown (education tab); label text matches product copy exactly. */
 const QUALIFICATION_OPTIONS = [
-  { value: 'BSc', label: 'B.Sc.' },
-  { value: 'BA', label: 'B.A.' },
-  { value: 'BTech', label: 'B.Tech.' },
-  { value: 'MSc', label: 'M.Sc.' },
-  { value: 'MA', label: 'M.A.' },
+  { value: 'PhD', label: 'PhD' },
+  { value: 'MSc', label: 'MSc' },
+  { value: 'MA', label: 'MA' },
   { value: 'MBA', label: 'MBA' },
-  { value: 'PhD', label: 'Ph.D.' },
-  { value: 'MD', label: 'M.D.' },
-  { value: 'LLB', label: 'LL.B.' },
-  { value: 'LLM', label: 'LL.M.' },
+  { value: 'BSc', label: 'BSc' },
+  { value: 'BA', label: 'BA' },
+  { value: 'BEng', label: 'BEng' },
   { value: 'HND', label: 'HND' },
-  { value: 'ND', label: 'ND' },
-  { value: 'Certificate', label: 'Certificate' },
+  { value: 'OND', label: 'OND' },
   { value: 'Diploma', label: 'Diploma' },
-  { value: 'WAEC_SSCE', label: 'WAEC / SSCE' },
+  { value: 'Certificate', label: 'Certificate' },
+  { value: 'SSCE', label: 'SSCE' },
+  { value: 'FSLC', label: 'FSLC' },
   { value: 'Other', label: 'Other' },
 ];
 
@@ -981,7 +1034,9 @@ function formatEducationDurationLine(entry: EducationEntry): string {
 }
 
 function educationLevelLabel(value: string): string {
-  return EDUCATION_LEVELS.find((o) => o.value === value)?.label || value?.trim() || '—';
+  const v = value?.trim();
+  if (!v) return '—';
+  return EDUCATION_LEVEL_DISPLAY[v] || v.replace(/_/g, ' ');
 }
 
 function educationQualificationDisplay(value: string): string {
@@ -990,19 +1045,31 @@ function educationQualificationDisplay(value: string): string {
   return QUALIFICATION_OPTIONS.find((o) => o.value === v)?.label || v;
 }
 
-function educationSkillChipsFromEntry(entry: EducationEntry): string[] {
-  return (entry.associatedSkills || '')
+/** Split stored comma/semicolon/pipe/newline-separated tokens into chip labels. */
+function educationChipsFromDelimitedText(text: string | undefined): string[] {
+  return (text || '')
     .split(/[,;|\n]+/)
     .map((t) => t.trim())
     .filter(Boolean);
 }
 
-function educationCourseworkChipsFromEntry(entry: EducationEntry): string[] {
-  return (entry.academicResponsibilities || '')
-    .split(/[,;|\n]+/)
-    .map((t) => t.trim())
-    .filter(Boolean);
+function educationSkillChipsFromEntry(entry: EducationEntry): string[] {
+  return educationChipsFromDelimitedText(entry.associatedSkills);
 }
+
+function educationCourseworkChipsFromEntry(entry: EducationEntry): string[] {
+  return educationChipsFromDelimitedText(entry.academicResponsibilities);
+}
+
+/** Tag input styling for education list fields (lavender pills + white input). */
+const EDU_VERIF_TAG_INPUT_CLASS =
+  'w-full rounded-lg border bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100';
+const EDU_VERIF_TAG_CHIP_CLASS =
+  'inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-900 ring-1 ring-indigo-200';
+const EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS =
+  'rounded-full p-0.5 text-indigo-600 hover:bg-indigo-100';
+const EDU_VERIF_TAG_CHIP_STATIC_CLASS =
+  'inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-900 ring-1 ring-indigo-200';
 
 function formatEducationMoneyLine(currency: string | undefined, amount: string | undefined): string | null {
   const a = amount?.trim();
@@ -1011,10 +1078,7 @@ function formatEducationMoneyLine(currency: string | undefined, amount: string |
 }
 
 function cloneEducationEntry(e: EducationEntry): EducationEntry {
-  return {
-    ...e,
-    programMilestones: e.programMilestones.map((m) => ({ ...m })),
-  };
+  return { ...e };
 }
 
 function parseYearMonthFromIso(iso: string | undefined): { month: string; year: string } {
@@ -1031,6 +1095,7 @@ function buildMonthYear(month: string, year: string): string | undefined {
 
 function deriveProgramLevel(level: string): string | undefined {
   if (level === 'master' || level === 'doctorate') return 'postgraduate';
+  if (level === 'primary_school') return undefined;
   if (level) return 'undergraduate';
   return undefined;
 }
@@ -1202,19 +1267,6 @@ function educationEntryFieldErrors(entry: EducationEntry, slug: string): Record<
   const stuEmail = entry.studentVerificationEmail?.trim();
   if (stuEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(stuEmail)) {
     o[k('studentVerificationEmail')] = 'Enter a valid email or leave blank';
-  }
-  for (let mi = 0; mi < entry.programMilestones.length; mi++) {
-    const m = entry.programMilestones[mi];
-    const hasT = !!m.title?.trim();
-    const hasS = !!m.startDate?.trim();
-    if (hasT && !hasS) {
-      o[k(`milestone_${mi}_startDate`)] = 'Start date is required when a title is entered';
-      break;
-    }
-    if (m.startDate && m.endDate && m.startDate > m.endDate) {
-      o[k(`milestone_${mi}_endDate`)] = 'End date cannot be before start date';
-      break;
-    }
   }
   return o;
 }
@@ -1498,21 +1550,28 @@ export default function VerificationCenter() {
   const [educationAddFormOpen, setEducationAddFormOpen] = useState(false);
   const [educationSkillInput, setEducationSkillInput] = useState('');
   const [educationCourseworkInput, setEducationCourseworkInput] = useState('');
+  const [educationScholarshipInput, setEducationScholarshipInput] = useState('');
+  const [educationAchievementInput, setEducationAchievementInput] = useState('');
+  const [educationActivitiesInput, setEducationActivitiesInput] = useState('');
   const educationDraftSkillChips = useMemo(
-    () =>
-      educationDraft.associatedSkills
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean),
+    () => educationChipsFromDelimitedText(educationDraft.associatedSkills),
     [educationDraft.associatedSkills],
   );
   const educationDraftCourseworkChips = useMemo(
-    () =>
-      educationDraft.academicResponsibilities
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean),
+    () => educationChipsFromDelimitedText(educationDraft.academicResponsibilities),
     [educationDraft.academicResponsibilities],
+  );
+  const educationDraftScholarshipChips = useMemo(
+    () => educationChipsFromDelimitedText(educationDraft.scholarshipsAndAid),
+    [educationDraft.scholarshipsAndAid],
+  );
+  const educationDraftAchievementChips = useMemo(
+    () => educationChipsFromDelimitedText(educationDraft.academicAchievements),
+    [educationDraft.academicAchievements],
+  );
+  const educationDraftActivitiesChips = useMemo(
+    () => educationChipsFromDelimitedText(educationDraft.activitiesSocieties),
+    [educationDraft.activitiesSocieties],
   );
   const [verifyEducationModal, setVerifyEducationModal] = useState<{
     open: boolean;
@@ -1936,20 +1995,6 @@ export default function VerificationCenter() {
             eduList.map((e: any) => {
               const sm = parseYearMonthFromIso(e.startDate);
               const em = parseYearMonthFromIso(e.endDate);
-              const rawProg = e.programProgression;
-              let programMilestones: EducationProgramMilestoneEntry[] = [];
-              if (Array.isArray(rawProg) && rawProg.length > 0) {
-                programMilestones = rawProg.map((m: any) => ({
-                  title: typeof m?.title === 'string' ? m.title : '',
-                  startDate:
-                    typeof m?.startDate === 'string' && m.startDate
-                      ? m.startDate.slice(0, 10)
-                      : '',
-                  endDate:
-                    typeof m?.endDate === 'string' && m.endDate ? m.endDate.slice(0, 10) : '',
-                  currentlyActive: !!m?.currentlyActive,
-                }));
-              }
               const hasLoan =
                 (e.pendingLoanAmount != null && String(e.pendingLoanAmount).trim() !== '') ||
                 !!(typeof e.loanRepaymentFrequency === 'string' && e.loanRepaymentFrequency.trim());
@@ -1979,7 +2024,6 @@ export default function VerificationCenter() {
                 programDescription: e.programDescription || '',
                 academicResponsibilities: e.academicResponsibilities || '',
                 academicAchievements: e.academicAchievements || '',
-                programMilestones,
                 activitiesSocieties: e.activitiesSocieties || '',
                 associatedSkills: e.associatedSkills || '',
                 supportingMediaUrl: e.supportingMediaUrl || '',
@@ -1989,6 +2033,11 @@ export default function VerificationCenter() {
                   typeof e.studentVerificationEmail === 'string' ? e.studentVerificationEmail : '',
                 eduVerificationStatus:
                   e.verificationStatus === 'verified' ? 'verified' : 'pending',
+                verificationDocuments: e.verificationDocuments ?? undefined,
+                verifiedAt: e.verifiedAt ?? null,
+                reviewedBy: e.reviewedBy ?? null,
+                createdAt: e.createdAt ?? null,
+                updatedAt: e.updatedAt ?? null,
               };
             }),
           );
@@ -2011,8 +2060,22 @@ export default function VerificationCenter() {
                   ? parseOtherRolesLine(respArr[otherIdx] as string)
                   : [];
               const achArr = Array.isArray(w.achievements) ? w.achievements.filter((x: unknown) => typeof x === 'string') : [];
-              const skillsLine = achArr.find((a: string) => /^Skills:\s*/i.test(a));
-              const achievementsOnly = achArr.filter((a: string) => !/^Skills:\s*/i.test(a));
+              const ocIdxAch = achArr.findIndex((a: string) => /^Other compensation:\s*/i.test(a));
+              let otherCompensationFromApi: string[] = [];
+              let achForSkillsAndText = achArr;
+              if (ocIdxAch >= 0) {
+                const line = achArr[ocIdxAch] as string;
+                const m = line.match(/^Other compensation:\s*(.+)$/i);
+                if (m?.[1]) {
+                  otherCompensationFromApi = m[1]
+                    .split(/\s*\|\s*/)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                }
+                achForSkillsAndText = [...achArr.slice(0, ocIdxAch), ...achArr.slice(ocIdxAch + 1)];
+              }
+              const skillsLine = achForSkillsAndText.find((a: string) => /^Skills:\s*/i.test(a));
+              const achievementsOnly = achForSkillsAndText.filter((a: string) => !/^Skills:\s*/i.test(a));
               const vMethod = typeof w.verificationMethod === 'string' ? w.verificationMethod : '';
               const verified = w.verificationStatus === 'verified';
               const selfDeclared = !verified && vMethod === 'self_declaration';
@@ -2045,7 +2108,7 @@ export default function VerificationCenter() {
                 responsibilitiesText: respWithoutOther.join('\n'),
                 achievementsText: achievementsOnly.join('\n'),
                 associatedSkills: skillsLine ? skillsLine.replace(/^Skills:\s*/i, '').trim() : '',
-                otherCompensation: [],
+                otherCompensation: otherCompensationFromApi,
                 otherCompensationInput: '',
                 otherCompensationNotes: '',
                 selfDeclared,
@@ -2614,30 +2677,102 @@ export default function VerificationCenter() {
     });
   };
 
+  const addEducationDraftScholarship = () => {
+    const t = educationScholarshipInput.trim();
+    if (!t) return;
+    const prev = educationDraftScholarshipChips;
+    if (prev.includes(t)) {
+      setEducationScholarshipInput('');
+      return;
+    }
+    updateEducationDraft({ scholarshipsAndAid: [...prev, t].join(', ') });
+    setEducationScholarshipInput('');
+  };
+
+  const removeEducationDraftScholarship = (token: string) => {
+    updateEducationDraft({
+      scholarshipsAndAid: educationDraftScholarshipChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
+  const addEducationDraftAchievement = () => {
+    const t = educationAchievementInput.trim();
+    if (!t) return;
+    const prev = educationDraftAchievementChips;
+    if (prev.includes(t)) {
+      setEducationAchievementInput('');
+      return;
+    }
+    updateEducationDraft({ academicAchievements: [...prev, t].join(', ') });
+    setEducationAchievementInput('');
+  };
+
+  const removeEducationDraftAchievement = (token: string) => {
+    updateEducationDraft({
+      academicAchievements: educationDraftAchievementChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
+  const addEducationDraftActivities = () => {
+    const t = educationActivitiesInput.trim();
+    if (!t) return;
+    const prev = educationDraftActivitiesChips;
+    if (prev.includes(t)) {
+      setEducationActivitiesInput('');
+      return;
+    }
+    updateEducationDraft({ activitiesSocieties: [...prev, t].join(', ') });
+    setEducationActivitiesInput('');
+  };
+
+  const removeEducationDraftActivities = (token: string) => {
+    updateEducationDraft({
+      activitiesSocieties: educationDraftActivitiesChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
   const commitEducationDraft = () => {
     let draft = educationDraft;
     const pendingSkill = educationSkillInput.trim();
     if (pendingSkill) {
-      const prev = draft.associatedSkills
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const prev = educationChipsFromDelimitedText(draft.associatedSkills);
       if (!prev.includes(pendingSkill)) {
         draft = { ...draft, associatedSkills: [...prev, pendingSkill].join(', ') };
       }
     }
     const pendingCw = educationCourseworkInput.trim();
     if (pendingCw) {
-      const prev = draft.academicResponsibilities
-        .split(/[,;]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const prev = educationChipsFromDelimitedText(draft.academicResponsibilities);
       if (!prev.includes(pendingCw)) {
         draft = { ...draft, academicResponsibilities: [...prev, pendingCw].join(', ') };
       }
     }
+    const pendingSch = educationScholarshipInput.trim();
+    if (pendingSch) {
+      const prev = educationChipsFromDelimitedText(draft.scholarshipsAndAid);
+      if (!prev.includes(pendingSch)) {
+        draft = { ...draft, scholarshipsAndAid: [...prev, pendingSch].join(', ') };
+      }
+    }
+    const pendingAch = educationAchievementInput.trim();
+    if (pendingAch) {
+      const prev = educationChipsFromDelimitedText(draft.academicAchievements);
+      if (!prev.includes(pendingAch)) {
+        draft = { ...draft, academicAchievements: [...prev, pendingAch].join(', ') };
+      }
+    }
+    const pendingAct = educationActivitiesInput.trim();
+    if (pendingAct) {
+      const prev = educationChipsFromDelimitedText(draft.activitiesSocieties);
+      if (!prev.includes(pendingAct)) {
+        draft = { ...draft, activitiesSocieties: [...prev, pendingAct].join(', ') };
+      }
+    }
     setEducationSkillInput('');
     setEducationCourseworkInput('');
+    setEducationScholarshipInput('');
+    setEducationAchievementInput('');
+    setEducationActivitiesInput('');
     const eduFe = educationEntryFieldErrors(draft, 'draft');
     if (Object.keys(eduFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^edu_draft_/), ...eduFe }));
@@ -2889,6 +3024,26 @@ export default function VerificationCenter() {
     });
   };
 
+  const addWorkDraftOtherCompensation = () => {
+    setWorkDraft((d) => {
+      const t = d.otherCompensationInput.trim();
+      if (!t) return d;
+      if (d.otherCompensation.includes(t)) return { ...d, otherCompensationInput: '' };
+      return {
+        ...d,
+        otherCompensation: [...d.otherCompensation, t],
+        otherCompensationInput: '',
+      };
+    });
+  };
+
+  const removeWorkDraftOtherCompensation = (token: string) => {
+    setWorkDraft((d) => ({
+      ...d,
+      otherCompensation: d.otherCompensation.filter((s) => s !== token),
+    }));
+  };
+
   const commitWorkDraft = () => {
     const pendingSkill = workSkillInput.trim();
     let mergedSkillsLine = workDraft.associatedSkills;
@@ -2899,7 +3054,15 @@ export default function VerificationCenter() {
         : [...chips, pendingSkill].join(', ');
     }
     setWorkSkillInput('');
-    const draftForValidate: WorkEntry = { ...workDraft, associatedSkills: mergedSkillsLine };
+    const pendingOc = workDraft.otherCompensationInput.trim();
+    let mergedOther = [...workDraft.otherCompensation];
+    if (pendingOc && !mergedOther.includes(pendingOc)) mergedOther.push(pendingOc);
+    const draftForValidate: WorkEntry = {
+      ...workDraft,
+      associatedSkills: mergedSkillsLine,
+      otherCompensation: mergedOther,
+      otherCompensationInput: '',
+    };
     const workFe = workEntryFieldErrors(draftForValidate, 'draft');
     if (Object.keys(workFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^work_draft_/), ...workFe }));
@@ -3367,14 +3530,6 @@ export default function VerificationCenter() {
       for (const entry of toSave) {
         const startDate = buildMonthYear(entry.startMonth, entry.startYear)!;
         const endDate = buildMonthYear(entry.endMonth, entry.endYear);
-        const programProgression = entry.programMilestones
-          .filter((m) => m.title.trim())
-          .map((m) => ({
-            title: m.title.trim(),
-            startDate: m.startDate.trim(),
-            endDate: m.endDate.trim() || undefined,
-            currentlyActive: m.currentlyActive,
-          }));
         const payload = {
           schoolType: entry.schoolType || undefined,
           levelOfEducation: entry.levelOfEducation,
@@ -3404,7 +3559,6 @@ export default function VerificationCenter() {
           programDescription: entry.programDescription?.trim() || undefined,
           academicResponsibilities: entry.academicResponsibilities?.trim() || undefined,
           academicAchievements: entry.academicAchievements?.trim() || undefined,
-          programProgression: programProgression.length ? programProgression : undefined,
           activitiesSocieties: entry.activitiesSocieties?.trim() || undefined,
           associatedSkills: entry.associatedSkills?.trim() || undefined,
           supportingMediaUrl: entry.supportingMediaUrl?.trim() || undefined,
@@ -3442,10 +3596,11 @@ export default function VerificationCenter() {
       ...entry.responsibilitiesText.split('\n').map((s) => s.trim()).filter(Boolean),
       ...(extraRoles.length ? [`Other roles: ${extraRoles.join('; ')}`] : []),
     ];
+    const ocTokens = entry.otherCompensation.map((s) => String(s).trim()).filter(Boolean);
     const achievementsLines = [
       ...entry.achievementsText.split('\n').map((s) => s.trim()).filter(Boolean),
+      ...(ocTokens.length ? [`Other compensation: ${ocTokens.join(' | ')}`] : []),
       ...(entry.otherCompensationNotes.trim() ? [entry.otherCompensationNotes.trim()] : []),
-      ...entry.otherCompensation.filter(Boolean),
       ...(entry.associatedSkills.trim() ? [`Skills: ${entry.associatedSkills.trim()}`] : []),
     ];
     const startDate =
@@ -4292,7 +4447,7 @@ export default function VerificationCenter() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-x-10 gap-y-6 border-b border-gray-200 pb-6 text-sm md:grid-cols-2">
+                  {/* <div className="grid grid-cols-1 gap-x-10 gap-y-6 border-b border-gray-200 pb-6 text-sm md:grid-cols-2">
                     <div className="space-y-5">
                       <div>
                         <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -4353,7 +4508,7 @@ export default function VerificationCenter() {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </div> */}
 
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
@@ -5431,6 +5586,9 @@ export default function VerificationCenter() {
                       : instName || qualShort || 'Education';
                   const skillChips = educationSkillChipsFromEntry(entry);
                   const courseworkChips = educationCourseworkChipsFromEntry(entry);
+                  const scholarshipChips = educationChipsFromDelimitedText(entry.scholarshipsAndAid);
+                  const achievementChips = educationChipsFromDelimitedText(entry.academicAchievements);
+                  const activitiesChips = educationChipsFromDelimitedText(entry.activitiesSocieties);
                   const costLine = formatEducationMoneyLine(entry.currency, entry.costOfEducation);
                   const loanLine = formatEducationMoneyLine(entry.loanCurrency, entry.pendingLoanAmount);
                   const mediaHref = entry.supportingMediaUrl?.trim()
@@ -5670,8 +5828,21 @@ export default function VerificationCenter() {
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Scholarships &amp; aid
                               </dt>
-                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
-                                {entry.scholarshipsAndAid?.trim() || '—'}
+                              <dd className="mt-0.5">
+                                {scholarshipChips.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {scholarshipChips.map((chip, sci) => (
+                                      <span
+                                        key={`${eduCardKey}-sch-${chip}-${sci}`}
+                                        className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
+                                      >
+                                        {chip}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-semibold text-gray-900">—</span>
+                                )}
                               </dd>
                             </div>
                             <div className="sm:col-span-2">
@@ -5692,7 +5863,7 @@ export default function VerificationCenter() {
                                     {courseworkChips.map((chip, cci) => (
                                       <span
                                         key={`${eduCardKey}-cw-${chip}-${cci}`}
-                                        className="inline-flex rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 ring-1 ring-slate-200"
+                                        className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
                                       >
                                         {chip}
                                       </span>
@@ -5707,49 +5878,45 @@ export default function VerificationCenter() {
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Honors / achievements
                               </dt>
-                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
-                                {entry.academicAchievements?.trim() || '—'}
+                              <dd className="mt-0.5">
+                                {achievementChips.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {achievementChips.map((chip, aci) => (
+                                      <span
+                                        key={`${eduCardKey}-ach-${chip}-${aci}`}
+                                        className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
+                                      >
+                                        {chip}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-semibold text-gray-900">—</span>
+                                )}
+                              </dd>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                Activities &amp; Societies
+                              </dt>
+                              <dd className="mt-0.5">
+                                {activitiesChips.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {activitiesChips.map((chip, aci) => (
+                                      <span
+                                        key={`${eduCardKey}-act-${chip}-${aci}`}
+                                        className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
+                                      >
+                                        {chip}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm font-semibold text-gray-900">—</span>
+                                )}
                               </dd>
                             </div>
                           </dl>
-
-                          <div className="rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
-                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                              Program milestones
-                            </p>
-                            {Array.isArray(entry.programMilestones) &&
-                            entry.programMilestones.some((m: EducationProgramMilestoneEntry) => m.title?.trim()) ? (
-                              <ul className="mt-2 space-y-2">
-                                {entry.programMilestones
-                                  .filter((m: EducationProgramMilestoneEntry) => m.title?.trim())
-                                  .map((m: EducationProgramMilestoneEntry, mi: number) => (
-                                    <li
-                                      key={`${eduCardKey}-m-${mi}`}
-                                      className="border-b border-gray-200/80 pb-2 text-sm last:border-0 last:pb-0"
-                                    >
-                                      <p className="font-semibold text-gray-900">{m.title.trim()}</p>
-                                      <p className="mt-0.5 text-xs text-gray-600">
-                                        {m.startDate?.trim() ? m.startDate.slice(0, 10) : '—'} —{' '}
-                                        {m.currentlyActive ? 'Active' : m.endDate?.trim() ? m.endDate.slice(0, 10) : '—'}
-                                      </p>
-                                    </li>
-                                  ))}
-                              </ul>
-                            ) : (
-                              <p className="mt-2 text-sm font-semibold text-gray-900">—</p>
-                            )}
-                          </div>
-
-                          {entry.activitiesSocieties?.trim() ? (
-                            <div className="rounded-lg border border-gray-100 bg-gray-50/80 px-4 py-3">
-                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Activities & Societies
-                              </p>
-                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-gray-900">
-                                {entry.activitiesSocieties.trim()}
-                              </p>
-                            </div>
-                          ) : null}
 
                           {skillChips.length > 0 ? (
                             <div>
@@ -5758,7 +5925,7 @@ export default function VerificationCenter() {
                                 {skillChips.map((chip, ci) => (
                                   <span
                                     key={`${eduCardKey}-${chip}-${ci}`}
-                                    className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
+                                    className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
                                   >
                                     {chip}
                                   </span>
@@ -5766,6 +5933,70 @@ export default function VerificationCenter() {
                               </div>
                             </div>
                           ) : null}
+
+                          <div className="mt-6 border-t border-gray-100 pt-5">
+                            <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+                              <div>
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Supporting media
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 break-all">
+                                  {mediaHref ? (
+                                    <a
+                                      href={mediaHref}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-brand-600 hover:underline"
+                                    >
+                                      View file
+                                    </a>
+                                  ) : (
+                                    '—'
+                                  )}
+                                </dd>
+                              </div>
+                              <div className="hidden sm:block" aria-hidden />
+                              <div className="sm:col-span-1">
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Verification documents
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                  {educationVerificationDocumentsBlock(entry.verificationDocuments)}
+                                </dd>
+                              </div>
+                              <div className="hidden sm:block" aria-hidden />
+                              <div>
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Verified at
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                  {formatEducationVerificationDateTime(entry.verifiedAt)}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Reviewed by
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                  {entry.reviewedBy?.trim() || '—'}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Created</dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                  {formatEducationVerificationDateTime(entry.createdAt)}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Last updated
+                                </dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
+                                  {formatEducationVerificationDateTime(entry.updatedAt)}
+                                </dd>
+                              </div>
+                            </dl>
+                          </div>
                         </div>
                       ) : null}
                         </div>
@@ -5847,6 +6078,9 @@ export default function VerificationCenter() {
                       setEducationDraft(emptyEducation());
                       setEducationSkillInput('');
                       setEducationCourseworkInput('');
+                      setEducationScholarshipInput('');
+                      setEducationAchievementInput('');
+                      setEducationActivitiesInput('');
                       setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
                     }}
                     className="text-sm font-medium text-gray-600 hover:text-gray-900"
@@ -6228,13 +6462,37 @@ export default function VerificationCenter() {
 
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">Scholarships &amp; aid</label>
-                    <textarea
-                      value={educationDraft.scholarshipsAndAid}
-                      onChange={(e) => updateEducationDraft({ scholarshipsAndAid: e.target.value })}
-                      rows={3}
-                      className="min-h-[88px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                    {educationDraftScholarshipChips.length > 0 ? (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {educationDraftScholarshipChips.map((chip, chipIdx) => (
+                          <span key={`sch-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
+                            {chip}
+                            <button
+                              type="button"
+                              onClick={() => removeEducationDraftScholarship(chip)}
+                              className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
+                              aria-label={`Remove ${chip}`}
+                            >
+                              <HiX className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <input
+                      type="text"
+                      value={educationScholarshipInput}
+                      onChange={(e) => setEducationScholarshipInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEducationDraftScholarship();
+                        }
+                      }}
+                      className={EDU_VERIF_TAG_INPUT_CLASS}
                       placeholder="Scholarships, grants, bursaries, employer sponsorship…"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item.</p>
                   </div>
 
                   <div>
@@ -6255,15 +6513,12 @@ export default function VerificationCenter() {
                     {educationDraftCourseworkChips.length > 0 ? (
                       <div className="mb-2 flex flex-wrap gap-2">
                         {educationDraftCourseworkChips.map((chip, chipIdx) => (
-                          <span
-                            key={`cw-${chip}-${chipIdx}`}
-                            className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 ring-1 ring-slate-200"
-                          >
+                          <span key={`cw-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
                             {chip}
                             <button
                               type="button"
                               onClick={() => removeEducationDraftCoursework(chip)}
-                              className="rounded-full p-0.5 text-slate-600 hover:bg-slate-200"
+                              className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
                               aria-label={`Remove ${chip}`}
                             >
                               <HiX className="h-3.5 w-3.5" aria-hidden />
@@ -6282,166 +6537,82 @@ export default function VerificationCenter() {
                           addEducationDraftCoursework();
                         }
                       }}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      className={EDU_VERIF_TAG_INPUT_CLASS}
                       placeholder="e.g. Data Structures lab, Thesis supervision…"
                     />
-                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item (same as skills).</p>
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item.</p>
                   </div>
 
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">Honors / achievements</label>
-                    <textarea
-                      value={educationDraft.academicAchievements}
-                      onChange={(e) => updateEducationDraft({ academicAchievements: e.target.value })}
-                      rows={4}
-                      className="min-h-[104px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
-                      placeholder="Dean’s list, awards, competitions, publications…"
-                    />
-                  </div>
-
-                  <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 sm:p-5">
-                    <div className="flex flex-wrap items-end justify-between gap-2">
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-900">Program milestones</h4>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          Optional program phases. Fields stay hidden until you add a milestone.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEducationDraft((d) => ({
-                            ...d,
-                            programMilestones: [...d.programMilestones, emptyEducationMilestone()],
-                          }))
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50"
-                      >
-                        <HiPlus className="h-3.5 w-3.5" />
-                        Add milestone
-                      </button>
-                    </div>
-                    {educationDraft.programMilestones.length === 0 ? (
-                      <p className="mt-3 text-xs text-gray-500">
-                        Click <span className="font-medium text-gray-700">Add milestone</span> to enter titles and
-                        dates.
-                      </p>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                      {educationDraft.programMilestones.map((m, mi) => (
-                        <div
-                          key={`draft-milestone-${mi}`}
-                          className="space-y-3 rounded-lg border border-gray-200 bg-white p-3 sm:p-4"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                              Milestone {mi + 1}
-                            </span>
+                    {educationDraftAchievementChips.length > 0 ? (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {educationDraftAchievementChips.map((chip, chipIdx) => (
+                          <span key={`ach-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
+                            {chip}
                             <button
                               type="button"
-                              onClick={() =>
-                                setEducationDraft((d) => ({
-                                  ...d,
-                                  programMilestones: d.programMilestones.filter((_, i) => i !== mi),
-                                }))
-                              }
-                              className="text-xs font-medium text-red-600 hover:text-red-700"
+                              onClick={() => removeEducationDraftAchievement(chip)}
+                              className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
+                              aria-label={`Remove ${chip}`}
                             >
-                              Remove
+                              <HiX className="h-3.5 w-3.5" aria-hidden />
                             </button>
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">Title</label>
-                            <input
-                              type="text"
-                              value={m.title}
-                              onChange={(e) =>
-                                setEducationDraft((d) => ({
-                                  ...d,
-                                  programMilestones: d.programMilestones.map((row, i) =>
-                                    i === mi ? { ...row, title: e.target.value } : row,
-                                  ),
-                                }))
-                              }
-                              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
-                              placeholder="e.g. Pre-clinical years"
-                            />
-                          </div>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div>
-                              <label className="mb-1 block text-xs font-medium text-gray-600">Start date</label>
-                              <input
-                                type="date"
-                                value={m.startDate?.slice(0, 10) ?? ''}
-                                onChange={(e) =>
-                                  setEducationDraft((d) => ({
-                                    ...d,
-                                    programMilestones: d.programMilestones.map((row, i) =>
-                                      i === mi ? { ...row, startDate: e.target.value } : row,
-                                    ),
-                                  }))
-                                }
-                                className={`w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2(`edu_draft_milestone_${mi}_startDate`)}`}
-                              />
-                              {fe[`edu_draft_milestone_${mi}_startDate`] ? (
-                                <p className="mt-1 text-xs text-red-600">
-                                  {fe[`edu_draft_milestone_${mi}_startDate`]}
-                                </p>
-                              ) : null}
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-xs font-medium text-gray-600">End date</label>
-                              <input
-                                type="date"
-                                value={m.endDate?.slice(0, 10) ?? ''}
-                                onChange={(e) =>
-                                  setEducationDraft((d) => ({
-                                    ...d,
-                                    programMilestones: d.programMilestones.map((row, i) =>
-                                      i === mi ? { ...row, endDate: e.target.value } : row,
-                                    ),
-                                  }))
-                                }
-                                className={`w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 ${errB2(`edu_draft_milestone_${mi}_endDate`)}`}
-                              />
-                              {fe[`edu_draft_milestone_${mi}_endDate`] ? (
-                                <p className="mt-1 text-xs text-red-600">
-                                  {fe[`edu_draft_milestone_${mi}_endDate`]}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
-                          <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-700">
-                            <input
-                              type="checkbox"
-                              checked={m.currentlyActive}
-                              onChange={(e) =>
-                                setEducationDraft((d) => ({
-                                  ...d,
-                                  programMilestones: d.programMilestones.map((row, i) =>
-                                    i === mi ? { ...row, currentlyActive: e.target.checked } : row,
-                                  ),
-                                }))
-                              }
-                              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                            />
-                            Currently active
-                          </label>
-                        </div>
-                      ))}
+                          </span>
+                        ))}
                       </div>
-                    )}
+                    ) : null}
+                    <input
+                      type="text"
+                      value={educationAchievementInput}
+                      onChange={(e) => setEducationAchievementInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEducationDraftAchievement();
+                        }
+                      }}
+                      className={EDU_VERIF_TAG_INPUT_CLASS}
+                      placeholder="Dean’s list, awards, competitions, publications…"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item.</p>
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Activities & Societies</label>
-                    <textarea
-                      value={educationDraft.activitiesSocieties}
-                      onChange={(e) => updateEducationDraft({ activitiesSocieties: e.target.value })}
-                      rows={4}
-                      className="min-h-[104px] w-full resize-y rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Activities &amp; Societies
+                    </label>
+                    {educationDraftActivitiesChips.length > 0 ? (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {educationDraftActivitiesChips.map((chip, chipIdx) => (
+                          <span key={`act-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
+                            {chip}
+                            <button
+                              type="button"
+                              onClick={() => removeEducationDraftActivities(chip)}
+                              className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
+                              aria-label={`Remove ${chip}`}
+                            >
+                              <HiX className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <input
+                      type="text"
+                      value={educationActivitiesInput}
+                      onChange={(e) => setEducationActivitiesInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addEducationDraftActivities();
+                        }
+                      }}
+                      className={EDU_VERIF_TAG_INPUT_CLASS}
                       placeholder="Clubs, sports, volunteer work, etc."
                     />
+                    <p className="mt-1 text-xs text-gray-500">Press Enter to add each item.</p>
                   </div>
 
                   <div>
@@ -6449,15 +6620,12 @@ export default function VerificationCenter() {
                     {educationDraftSkillChips.length > 0 ? (
                       <div className="mb-2 flex flex-wrap gap-2">
                         {educationDraftSkillChips.map((chip, chipIdx) => (
-                          <span
-                            key={`${chip}-${chipIdx}`}
-                            className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100"
-                          >
+                          <span key={`${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
                             {chip}
                             <button
                               type="button"
                               onClick={() => removeEducationDraftSkill(chip)}
-                              className="rounded-full p-0.5 text-brand-700 hover:bg-brand-100"
+                              className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
                               aria-label={`Remove ${chip}`}
                             >
                               <HiX className="h-3.5 w-3.5" aria-hidden />
@@ -6476,7 +6644,7 @@ export default function VerificationCenter() {
                           addEducationDraftSkill();
                         }
                       }}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                      className={EDU_VERIF_TAG_INPUT_CLASS}
                       placeholder="Type to search skills or add custom…"
                     />
                     <p className="mt-1 text-xs text-gray-500">Press Enter to add a skill.</p>
@@ -6500,13 +6668,6 @@ export default function VerificationCenter() {
                   </div>
                 </div>
 
-                {Object.entries(fe)
-                  .filter(([k]) => k.startsWith('edu_draft_milestone'))
-                  .map(([k, msg]) => (
-                    <p key={k} className="mt-4 text-sm text-red-600">
-                      {msg}
-                    </p>
-                  ))}
                 <div className="mt-8 border-t border-gray-100 pt-6">
                   <button
                     type="button"
@@ -6751,11 +6912,32 @@ export default function VerificationCenter() {
                                 </div>
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                    Compensation
+                                    Other compensation
                                   </p>
-                                  <p className="mt-1 text-sm font-semibold text-gray-900">
-                                    {formatWorkCompensationSummary(entry)}
-                                  </p>
+                                  {(() => {
+                                    const tags = (entry.otherCompensation ?? [])
+                                      .map((p) => p?.trim())
+                                      .filter(Boolean);
+                                    if (tags.length > 0) {
+                                      return (
+                                        <div className="mt-1 flex flex-wrap gap-2">
+                                          {tags.map((t) => (
+                                            <span
+                                              key={`${entry.id ?? index}-oc-${t}`}
+                                              className={EDU_VERIF_TAG_CHIP_STATIC_CLASS}
+                                            >
+                                              {t}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      );
+                                    }
+                                    return (
+                                      <p className="mt-1 text-sm font-semibold text-gray-900">
+                                        {formatWorkCompensationSummary(entry)}
+                                      </p>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
@@ -6946,11 +7128,10 @@ export default function VerificationCenter() {
                           >
                             {[
                               { value: '', label: 'Select' },
-                              { value: 'on_site', label: 'On-site' },
-                              { value: 'remote', label: 'Remote' },
-                              { value: 'location', label: 'Location Remote' },
-                              { value: 'hybrid', label: 'Hybrid' },
                               { value: 'global_remote', label: 'Global Remote' },
+                              { value: 'remote', label: 'Location Remote' },
+                              { value: 'hybrid', label: 'Hybrid' },
+                              { value: 'on_site', label: 'Onsite' },
                             ].map((o) => (
                               <option key={o.value || '__wm'} value={o.value}>
                                 {o.label}
@@ -7006,14 +7187,40 @@ export default function VerificationCenter() {
                       </div>
 
                       <div>
-                        <label className="mb-1.5 block text-sm font-medium text-gray-700">Other Compensation</label>
+                        <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                          Other Compensation
+                        </label>
+                        {workDraft.otherCompensation.length > 0 ? (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {workDraft.otherCompensation.map((chip, chipIdx) => (
+                              <span key={`oc-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
+                                {chip}
+                                <button
+                                  type="button"
+                                  onClick={() => removeWorkDraftOtherCompensation(chip)}
+                                  className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
+                                  aria-label={`Remove ${chip}`}
+                                >
+                                  <HiX className="h-3.5 w-3.5" aria-hidden />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                         <input
                           type="text"
-                          value={workDraft.otherCompensationNotes}
-                          onChange={(e) => updateWorkDraft({ otherCompensationNotes: e.target.value })}
-                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+                          value={workDraft.otherCompensationInput}
+                          onChange={(e) => updateWorkDraft({ otherCompensationInput: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              addWorkDraftOtherCompensation();
+                            }
+                          }}
+                          className={EDU_VERIF_TAG_INPUT_CLASS}
                           placeholder="Stock options, bonus, HMO, etc."
                         />
+                        <p className="mt-1 text-xs text-gray-500">Press Enter to add each item.</p>
                       </div>
 
                       <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-5 sm:p-6">
