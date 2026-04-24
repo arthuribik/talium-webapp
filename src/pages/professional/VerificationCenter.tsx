@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
@@ -38,6 +38,20 @@ import {
   HiArrowUp,
 } from 'react-icons/hi';
 import { COUNTRIES } from '@/utils/countries';
+import {
+  type WorkEntry,
+  type WorkRoleEntry,
+  WORK_SALARY_FREQUENCY_OPTIONS,
+  apiWorkExperienceToWorkEntry,
+  formatWorkExperienceHeaderSubtitle,
+  workTenureYearsAtOrganisation,
+  workRolesForTimelineDisplay,
+  formatWorkRoleDateRange,
+  formatWorkRemunerationLine,
+  formatWorkCompensationSummary,
+  workAssociatedSkillTags,
+  workLatestRoleTitleForHeader,
+} from '@/utils/workExperienceDisplay';
 
 /** Same option list as signup country field; first row label reflects nationality. */
 const NATIONALITY_SEARCHABLE_OPTIONS = [
@@ -118,6 +132,100 @@ const VALID_SECTION_KEYS: SectionKey[] = VERIFICATION_TABS.map((t) => t.id);
 
 function isSectionKey(value: string | null): value is SectionKey {
   return value !== null && VALID_SECTION_KEYS.includes(value as SectionKey);
+}
+
+type VerificationFormDrawerProps = {
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** Wider panel from `sm` up (dense forms: education, work, projects). */
+  wide?: boolean;
+};
+
+function VerificationFormDrawer({
+  open,
+  title,
+  subtitle,
+  onClose,
+  children,
+  wide = false,
+}: VerificationFormDrawerProps) {
+  const titleId = useId();
+  const [panelIn, setPanelIn] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelIn(false);
+      return;
+    }
+    const raf = requestAnimationFrame(() => setPanelIn(true));
+    return () => cancelAnimationFrame(raf);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[55] flex justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
+      <button
+        type="button"
+        className={`absolute inset-0 cursor-default bg-black/40 transition-opacity duration-300 ${
+          panelIn ? 'opacity-100' : 'opacity-0'
+        }`}
+        aria-label="Close panel"
+        onClick={onClose}
+      />
+      <div
+        className={`relative flex h-full w-full flex-col bg-white shadow-[0_0_40px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out max-w-xl ${
+          wide
+            ? 'sm:max-w-[31rem] lg:max-w-[40rem] xl:max-w-[44rem]'
+            : 'sm:max-w-[28rem]'
+        } ${panelIn ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+          <div className="min-w-0 pr-2">
+            <h2 id={titleId} className="text-lg font-semibold leading-tight text-gray-900">
+              {title}
+            </h2>
+            {subtitle ? <p className="mt-1 text-sm text-gray-500">{subtitle}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            aria-label="Close panel"
+          >
+            <HiX className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 const GENDERS = ['Male', 'Female'];
@@ -563,50 +671,12 @@ function educationVerificationMethodLabel(entry: EducationEntry): string | null 
   return null;
 }
 
-type WorkRoleEntry = {
-  title: string;
-  startDate: string;
-  endDate: string;
-  currentlyWorking: boolean;
-};
-
 const emptyWorkRole = (): WorkRoleEntry => ({
   title: '',
   startDate: '',
   endDate: '',
   currentlyWorking: false,
 });
-
-type WorkEntry = {
-  id?: string;
-  organisationName: string;
-  industry: string;
-  /** Where the role is based (stored as `location.roleLocation` on the API). */
-  roleLocation: string;
-  role: string;
-  employmentType: string;
-  workMode: string;
-  startDate: string;
-  endDate: string;
-  currency: string;
-  salary: string;
-  salaryFrequency: string;
-  workRoles: WorkRoleEntry[];
-  jobDescription: string;
-  responsibilitiesText: string;
-  achievementsText: string;
-  associatedSkills: string;
-  otherCompensation: string[];
-  otherCompensationInput: string;
-  otherCompensationNotes: string;
-  selfDeclared: boolean;
-  workVerificationStatus?: 'pending' | 'verified';
-  /** How the user chose to verify (synced with API `verificationMethod`). */
-  verificationMethod?: string | null;
-  /** Work email used for OTP verification (from API after send/verify). */
-  workVerificationEmail?: string;
-  supportingMediaUrl?: string;
-};
 
 function workVerificationMethodLabel(entry: WorkEntry): string | null {
   const st = entry.workVerificationStatus ?? 'pending';
@@ -650,141 +720,12 @@ const emptyWork = (): WorkEntry => ({
   supportingMediaUrl: '',
 });
 
-const WORK_SALARY_FREQUENCY_OPTIONS = [
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'annually', label: 'Annually' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'hourly', label: 'Hourly' },
-  { value: 'one_time', label: 'One-time' },
-];
-
 function cloneWorkEntry(e: WorkEntry): WorkEntry {
   return {
     ...e,
     workRoles: e.workRoles.map((r) => ({ ...r })),
     otherCompensation: [...e.otherCompensation],
   };
-}
-
-function workEmploymentTypeLabel(value: string): string {
-  const map: Record<string, string> = {
-    full_time: 'Full-time',
-    part_time: 'Part-time',
-    contract: 'Contract',
-    internship: 'Internship',
-  };
-  return map[value] || value || '—';
-}
-
-function workModeLabel(value: string): string {
-  const map: Record<string, string> = {
-    global_remote: 'Global Remote',
-    remote: 'Location Remote',
-    hybrid: 'Hybrid',
-    on_site: 'Onsite',
-    location: 'Location Remote',
-  };
-  return map[value] || value || '—';
-}
-
-/** Subtitle under job title: organisation · employment type · work mode (matches work card mock). */
-function formatWorkExperienceHeaderSubtitle(entry: WorkEntry): string {
-  const org = entry.organisationName?.trim() || '—';
-  return [org, workEmploymentTypeLabel(entry.employmentType), workModeLabel(entry.workMode)].join(' · ');
-}
-
-function parseWorkYmd(dateStr: string): Date | null {
-  const s = dateStr?.trim();
-  if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
-  const d = new Date(`${s.slice(0, 10)}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function workExperienceEffectiveEndDate(entry: WorkEntry): Date {
-  const rootEnd = parseWorkYmd(entry.endDate ?? '');
-  if (rootEnd) return rootEnd;
-  const primary = entry.workRoles[0];
-  if (primary?.currentlyWorking) return new Date();
-  const roleEnd = parseWorkYmd(primary?.endDate ?? '');
-  if (roleEnd) return roleEnd;
-  return new Date();
-}
-
-/** Years between entry start and end (or today if current); null if no valid start. */
-function workTenureYearsAtOrganisation(entry: WorkEntry): number | null {
-  const start = parseWorkYmd(entry.startDate ?? '');
-  if (!start) return null;
-  const end = workExperienceEffectiveEndDate(entry);
-  const ms = end.getTime() - start.getTime();
-  if (ms < 0) return 0;
-  return ms / (365.25 * 24 * 60 * 60 * 1000);
-}
-
-/** Parses `Other roles: Title (start – end); …` produced when syncing multiple roles to the API. */
-function parseOtherRolesLine(line: string): WorkRoleEntry[] {
-  const m = line.trim().match(/^Other roles:\s*(.+)$/i);
-  if (!m?.[1]) return [];
-  const segments = m[1].split(/;\s+/).map((s) => s.trim()).filter(Boolean);
-  const out: WorkRoleEntry[] = [];
-  for (const seg of segments) {
-    const inner = seg.match(/^(.+?)\s*\(\s*(.*?)\s*[–-]\s*(.*?)\s*\)\s*$/);
-    if (!inner) continue;
-    const title = inner[1].trim();
-    const d1 = inner[2].trim();
-    const d2 = inner[3].trim();
-    const currentlyWorking = d2.toLowerCase() === 'present';
-    out.push({
-      title,
-      startDate: d1 === '?' ? '' : d1,
-      endDate: currentlyWorking ? '' : d2 === '?' ? '' : d2,
-      currentlyWorking,
-    });
-  }
-  return out;
-}
-
-function formatWorkRoleDateRange(role: WorkRoleEntry): string {
-  const fmt = (d: Date) =>
-    d.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-  const start = parseWorkYmd(role.startDate ?? '');
-  const startStr = start ? fmt(start) : role.startDate?.trim() || '—';
-  const endExplicit = parseWorkYmd(role.endDate ?? '');
-  if (role.currentlyWorking && !role.endDate?.trim()) {
-    return `${startStr} — Present`;
-  }
-  const endStr = endExplicit ? fmt(endExplicit) : role.endDate?.trim() || '—';
-  return `${startStr} — ${endStr}`;
-}
-
-function workSalaryFrequencyDisplay(value: string): string {
-  const opt = WORK_SALARY_FREQUENCY_OPTIONS.find((o) => o.value === value);
-  if (opt) return opt.label;
-  const v = value?.trim();
-  return v || '—';
-}
-
-function formatWorkRemunerationLine(entry: WorkEntry): string {
-  const cur = entry.currency?.trim() || 'USD';
-  const sal = entry.salary?.trim();
-  if (!sal) return '—';
-  return `${cur} ${sal} / ${workSalaryFrequencyDisplay(entry.salaryFrequency)}`;
-}
-
-function formatWorkCompensationSummary(entry: WorkEntry): string {
-  const notes = entry.otherCompensationNotes?.trim();
-  if (notes) return notes;
-  const parts = (entry.otherCompensation ?? []).map((p) => p?.trim()).filter(Boolean);
-  if (parts.length) return parts.join(', ');
-  return '—';
-}
-
-function workAssociatedSkillTags(entry: WorkEntry): string[] {
-  const raw = entry.associatedSkills?.trim();
-  if (!raw) return [];
-  return raw
-    .split(/[,;|\n]+/)
-    .map((t) => t.trim())
-    .filter(Boolean);
 }
 
 type ProjectTeamMemberEntry = { name: string; role: string };
@@ -795,12 +736,19 @@ type ProjectEntry = {
   description: string;
   projectLink: string;
   mediaUrl: string;
+  /** 1–12 with `startYear`, or both null if unknown */
+  startMonth: number | null;
+  startYear: number | null;
+  endMonth: number | null;
+  endYear: number | null;
   teamMembers: ProjectTeamMemberEntry[];
   projectVerificationStatus?: 'pending' | 'verified';
   /** Persisted via API as `verificationMethod` (e.g. self_declaration). */
   verificationMethod?: string | null;
   /** Optimistic flag until sync completes. */
   projectSelfDeclared?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 const emptyProjectTeamMember = (): ProjectTeamMemberEntry => ({ name: '', role: '' });
@@ -810,11 +758,84 @@ const emptyProject = (): ProjectEntry => ({
   description: '',
   projectLink: '',
   mediaUrl: '',
+  startMonth: null,
+  startYear: null,
+  endMonth: null,
+  endYear: null,
   teamMembers: [emptyProjectTeamMember()],
   projectVerificationStatus: 'pending',
   projectSelfDeclared: false,
   verificationMethod: null,
+  createdAt: null,
+  updatedAt: null,
 });
+
+function projectLeadMemberDisplayName(firstName: string, lastName: string): string {
+  return [firstName.trim(), lastName.trim()].filter(Boolean).join(' ').trim();
+}
+
+/** First team row is the signed-in user; name comes from profile / Personal. */
+function newProjectDraftWithLeadMemberFromUser(firstName: string, lastName: string): ProjectEntry {
+  const e = emptyProject();
+  const displayName = projectLeadMemberDisplayName(firstName || '', lastName || '');
+  return {
+    ...e,
+    teamMembers: [{ name: displayName, role: '' }, ...e.teamMembers.slice(1)],
+  };
+}
+
+const PROJECT_MONTH_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Month' },
+  ...Array.from({ length: 12 }, (_, i) => ({
+    value: String(i + 1),
+    label: new Date(2000, i, 1).toLocaleString(undefined, { month: 'long' }),
+  })),
+];
+
+const PROJECT_YEAR_MIN = 1970;
+const PROJECT_YEAR_MAX = 2100;
+
+function parseApiOptionalProjectInt(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isInteger(v)) return v;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+const PROJECT_MONTH_SHORT = [
+  '',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+function formatProjectMonthYearShort(
+  month: number | null | undefined,
+  year: number | null | undefined,
+): string | null {
+  if (month == null || year == null) return null;
+  if (month < 1 || month > 12) return null;
+  return `${PROJECT_MONTH_SHORT[month]} ${year}`;
+}
+
+/** Human-readable project span from stored month/year fields. */
+function formatProjectTimelineLine(entry: ProjectEntry): string | null {
+  const a = formatProjectMonthYearShort(entry.startMonth, entry.startYear);
+  const b = formatProjectMonthYearShort(entry.endMonth, entry.endYear);
+  if (a && b) return `${a} – ${b}`;
+  if (a) return `${a} – Present`;
+  if (b) return b;
+  return null;
+}
 
 function cloneProjectEntry(p: ProjectEntry): ProjectEntry {
   return {
@@ -823,18 +844,29 @@ function cloneProjectEntry(p: ProjectEntry): ProjectEntry {
   };
 }
 
-function formatProjectCardSubtitle(entry: ProjectEntry): string {
-  const parts: string[] = [];
-  const desc = entry.description?.trim();
-  if (desc) {
-    parts.push(desc.length > 100 ? `${desc.slice(0, 97)}…` : desc);
-  }
-  const link = entry.projectLink?.trim();
-  if (link) parts.push(link);
-  if (entry.mediaUrl?.trim()) parts.push('Media attached');
-  const n = entry.teamMembers.filter((m) => m.name.trim() || m.role.trim()).length;
-  if (n > 0) parts.push(`${n} team member${n === 1 ? '' : 's'}`);
-  return parts.length ? parts.join(' · ') : 'No details yet';
+function formatIsoDateForProjectCard(iso: string | null | undefined): string | null {
+  const s = iso?.trim();
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** Single human-readable date line for project cards (uses API `createdAt` / `updatedAt`). */
+function formatProjectCardDateLine(entry: ProjectEntry): string | null {
+  const fc = formatIsoDateForProjectCard(entry.createdAt ?? undefined);
+  const fu = formatIsoDateForProjectCard(entry.updatedAt ?? undefined);
+  if (fc && fu && fc !== fu) return `Added ${fc} · Updated ${fu}`;
+  if (fu) return `Updated ${fu}`;
+  if (fc) return `Added ${fc}`;
+  return null;
+}
+
+function projectTeamMemberInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function normalizeProjectVerificationMethodKey(v: string | null | undefined): string {
@@ -1137,15 +1169,19 @@ function cloneCertificate(c: CertificateEntry): CertificateEntry {
   return { ...c };
 }
 
-function formatCertificateCardSubtitle(c: CertificateEntry): string {
-  const parts: string[] = [];
-  if (c.issuedBy?.trim()) parts.push(`Issued by ${c.issuedBy.trim()}`);
-  if (c.issuedDate?.trim()) parts.push(`Issued ${c.issuedDate}`);
-  if (!c.noExpiration && c.expirationDate?.trim()) parts.push(`Expires ${c.expirationDate}`);
-  if (c.noExpiration) parts.push('No expiration');
-  if (c.credentialId?.trim()) parts.push(`ID ${c.credentialId.trim()}`);
-  if (c.associatedSkills?.trim()) parts.push(`Skills: ${c.associatedSkills.trim()}`);
-  return parts.length ? parts.join(' · ') : 'No dates or credential ID';
+function certificateCardSubtitleLines(c: CertificateEntry): { primary: string; secondary: string } {
+  const primaryParts: string[] = [];
+  const secondaryParts: string[] = [];
+  if (c.issuedBy?.trim()) primaryParts.push(`Issued by ${c.issuedBy.trim()}`);
+  if (c.issuedDate?.trim()) primaryParts.push(`Issued ${c.issuedDate}`);
+  if (!c.noExpiration && c.expirationDate?.trim()) primaryParts.push(`Expires ${c.expirationDate}`);
+  if (c.noExpiration) primaryParts.push('No expiration');
+  if (c.credentialId?.trim()) secondaryParts.push(`ID ${c.credentialId.trim()}`);
+  if (c.associatedSkills?.trim()) secondaryParts.push(`Skills: ${c.associatedSkills.trim()}`);
+  return {
+    primary: primaryParts.length ? primaryParts.join(' · ') : 'No dates or issuer',
+    secondary: secondaryParts.join(' · '),
+  };
 }
 
 const MARITAL_STATUS_OPTIONS = [
@@ -1154,15 +1190,17 @@ const MARITAL_STATUS_OPTIONS = [
   { value: 'divorced', label: 'Divorced' },
   { value: 'widowed', label: 'Widow/Widower' },
   { value: 'separated', label: 'Separated' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ];
 
 const RELATION_TYPE_OPTIONS = [
-  { value: 'spouse', label: 'Spouse' },
-  { value: 'child', label: 'Child' },
-  { value: 'sibling', label: 'Sibling' },
-  { value: 'parent', label: 'Parent' },
-  { value: 'other', label: 'Other' },
+  { value: 'son', label: 'Son' },
+  { value: 'daughter', label: 'Daughter' },
+  { value: 'mother', label: 'Mother' },
+  { value: 'father', label: 'Father' },
+  { value: 'wife', label: 'Wife' },
+  { value: 'husband', label: 'Husband' },
+  { value: 'brother', label: 'Brother' },
+  { value: 'sister', label: 'Sister' },
 ];
 
 type FamilyRelationEntry = { relationType: string; fullName: string };
@@ -1316,10 +1354,36 @@ function projectEntryFieldErrors(entry: ProjectEntry, slug: string): Record<stri
   if (linkErr) o[k('projectLink')] = linkErr;
   const mediaErr = validateOptionalHttpUrl('Media URL', entry.mediaUrl);
   if (mediaErr) o[k('mediaUrl')] = mediaErr;
+  const sm = entry.startMonth;
+  const sy = entry.startYear;
+  const em = entry.endMonth;
+  const ey = entry.endYear;
+  const startPartial = (sm != null) !== (sy != null);
+  const endPartial = (em != null) !== (ey != null);
+  if (startPartial) {
+    o[k('start')] = 'Choose both start month and year, or leave both empty';
+  }
+  if (endPartial) {
+    o[k('end')] = 'Choose both end month and year, or leave both empty';
+  }
+  if (!startPartial && !endPartial && sm != null && sy != null && em != null && ey != null) {
+    const s = sy * 12 + sm;
+    const e = ey * 12 + em;
+    if (e < s) o[k('timeline')] = 'End date cannot be before start date';
+  }
   for (let mi = 0; mi < entry.teamMembers.length; mi++) {
     const m = entry.teamMembers[mi];
     const hasN = !!m.name?.trim();
     const hasR = !!m.role?.trim();
+    if (mi === 0) {
+      if (hasN && !hasR) {
+        o[k(`team_${mi}`)] = 'Enter your role on this project';
+      } else if (!hasN && hasR) {
+        o[k(`team_${mi}`)] =
+          'Add your first and last name under Personal, or clear this role until your name is saved';
+      }
+      continue;
+    }
     if (hasN !== hasR) {
       o[k(`team_${mi}`)] = 'Team member needs both name and role, or leave the row empty';
       break;
@@ -1537,6 +1601,17 @@ export default function VerificationCenter() {
   const locationVerifyFileInputRef = useRef<HTMLInputElement>(null);
   const locationVerifyUploadIndexRef = useRef<number | null>(null);
   const [uploadingLocationIndex, setUploadingLocationIndex] = useState<number | null>(null);
+  const verifyAddressUploadInProgress = useMemo(
+    () =>
+      verifyAddressModal.open &&
+      verifyAddressModal.locationIndex != null &&
+      uploadingLocationIndex === verifyAddressModal.locationIndex,
+    [
+      verifyAddressModal.open,
+      verifyAddressModal.locationIndex,
+      uploadingLocationIndex,
+    ],
+  );
   const [locationRemoveConfirm, setLocationRemoveConfirm] = useState<{
     open: boolean;
     index: number | null;
@@ -1685,6 +1760,11 @@ export default function VerificationCenter() {
   const [certDraft, setCertDraft] = useState<CertificateEntry>(() => emptyCertificate());
   const [certAddFormOpen, setCertAddFormOpen] = useState(false);
   const [certDraftUploading, setCertDraftUploading] = useState(false);
+  const [certSkillInput, setCertSkillInput] = useState('');
+  const certDraftSkillChips = useMemo(
+    () => educationChipsFromDelimitedText(certDraft.associatedSkills ?? ''),
+    [certDraft.associatedSkills],
+  );
 
   // Family & Relationship
   const [maritalStatus, setMaritalStatus] = useState('');
@@ -1752,6 +1832,18 @@ export default function VerificationCenter() {
   const personalAdminReviewPending = useMemo(
     () => personalIdentityAwaitingAdminReview(profile),
     [profile],
+  );
+
+  /** Personal self-declaration counts as verified in this UI (no government / admin verification yet). */
+  const personalShowsAsVerified = useMemo(
+    () =>
+      verificationStatus.personal.verified ||
+      (identityVerificationPath === 'self' && personalSelfDeclarationAcknowledged),
+    [
+      verificationStatus.personal.verified,
+      identityVerificationPath,
+      personalSelfDeclarationAcknowledged,
+    ],
   );
 
   /** Which flow group (0–2) is currently active for pill highlighting — matches stacked sections. */
@@ -2053,89 +2145,7 @@ export default function VerificationCenter() {
         }
         const workList = data.workExperience || [];
         if (Array.isArray(workList) && workList.length > 0) {
-          setWorkEntriesList(
-            workList.map((w: any) => {
-              const sr = w.salaryRange && typeof w.salaryRange === 'object' ? w.salaryRange : null;
-              const startD = w.startDate ? (typeof w.startDate === 'string' ? w.startDate.slice(0, 10) : '') : '';
-              const endD = w.endDate ? (typeof w.endDate === 'string' ? w.endDate.slice(0, 10) : '') : '';
-              const respArr = Array.isArray(w.responsibilities) ? w.responsibilities.filter((x: unknown) => typeof x === 'string') : [];
-              const otherIdx = respArr.findIndex((a: string) => /^Other roles:\s*/i.test(a));
-              const respWithoutOther =
-                otherIdx >= 0 ? [...respArr.slice(0, otherIdx), ...respArr.slice(otherIdx + 1)] : [...respArr];
-              const parsedExtras =
-                otherIdx >= 0 && typeof respArr[otherIdx] === 'string'
-                  ? parseOtherRolesLine(respArr[otherIdx] as string)
-                  : [];
-              const achArr = Array.isArray(w.achievements) ? w.achievements.filter((x: unknown) => typeof x === 'string') : [];
-              const ocIdxAch = achArr.findIndex((a: string) => /^Other compensation:\s*/i.test(a));
-              let otherCompensationFromApi: string[] = [];
-              let achForSkillsAndText = achArr;
-              if (ocIdxAch >= 0) {
-                const line = achArr[ocIdxAch] as string;
-                const m = line.match(/^Other compensation:\s*(.+)$/i);
-                if (m?.[1]) {
-                  otherCompensationFromApi = m[1]
-                    .split(/\s*\|\s*/)
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                }
-                achForSkillsAndText = [...achArr.slice(0, ocIdxAch), ...achArr.slice(ocIdxAch + 1)];
-              }
-              const skillsLine = achForSkillsAndText.find((a: string) => /^Skills:\s*/i.test(a));
-              const achievementsOnly = achForSkillsAndText.filter((a: string) => !/^Skills:\s*/i.test(a));
-              const vMethod = typeof w.verificationMethod === 'string' ? w.verificationMethod : '';
-              const verified = w.verificationStatus === 'verified';
-              const selfDeclared = !verified && vMethod === 'self_declaration';
-              const jobDescFromApi =
-                typeof (w as { jobDescription?: unknown }).jobDescription === 'string'
-                  ? String((w as { jobDescription?: string }).jobDescription).trim()
-                  : '';
-              const locRaw = w.location && typeof w.location === 'object' ? w.location : {};
-              const loc = locRaw as Record<string, unknown>;
-              const roleLocFromApi =
-                typeof loc.roleLocation === 'string' ? String(loc.roleLocation).trim() : '';
-              const legacyLocLine = [loc.city, loc.state, loc.country]
-                .map((x) => (typeof x === 'string' ? x.trim() : ''))
-                .filter(Boolean)
-                .join(', ');
-              return {
-                id: w.id,
-                organisationName: w.organisationName || '',
-                industry: w.industry || '',
-                roleLocation: roleLocFromApi || legacyLocLine,
-                role: w.role || '',
-                employmentType: w.employmentType || '',
-                workMode: w.workMode || '',
-                startDate: startD,
-                endDate: endD,
-                currency: w.currency || 'USD',
-                salary: sr != null && (sr.min != null || sr.max != null) ? String(sr.min ?? sr.max ?? '') : '',
-                salaryFrequency: typeof w.paymentMode === 'string' ? w.paymentMode : 'monthly',
-                workRoles: [
-                  {
-                    title: w.role || '',
-                    startDate: startD,
-                    endDate: endD,
-                    currentlyWorking: !!w.currentlyWorking || !endD,
-                  },
-                  ...parsedExtras,
-                ],
-                jobDescription: jobDescFromApi,
-                responsibilitiesText: respWithoutOther.join('\n'),
-                achievementsText: achievementsOnly.join('\n'),
-                associatedSkills: skillsLine ? skillsLine.replace(/^Skills:\s*/i, '').trim() : '',
-                otherCompensation: otherCompensationFromApi,
-                otherCompensationInput: '',
-                otherCompensationNotes: '',
-                selfDeclared,
-                workVerificationStatus: verified ? 'verified' : 'pending',
-                verificationMethod: vMethod || undefined,
-                workVerificationEmail:
-                  typeof w.workVerificationEmail === 'string' ? w.workVerificationEmail : '',
-                supportingMediaUrl: typeof w.supportingMediaUrl === 'string' ? w.supportingMediaUrl : '',
-              };
-            }),
-          );
+          setWorkEntriesList(workList.map((w: Record<string, unknown>) => apiWorkExperienceToWorkEntry(w)));
         } else {
           setWorkEntriesList([]);
         }
@@ -2168,10 +2178,26 @@ export default function VerificationCenter() {
                 description: p.description || '',
                 projectLink: p.projectLink || '',
                 mediaUrl: p.mediaUrl || '',
+                startMonth: parseApiOptionalProjectInt(p.startMonth),
+                startYear: parseApiOptionalProjectInt(p.startYear),
+                endMonth: parseApiOptionalProjectInt(p.endMonth),
+                endYear: parseApiOptionalProjectInt(p.endYear),
                 teamMembers,
                 projectVerificationStatus: isVerifiedRow ? 'verified' : 'pending',
                 verificationMethod: vmRaw,
                 projectSelfDeclared: selfDeclFromApi && !isVerifiedRow,
+                createdAt:
+                  p.createdAt != null
+                    ? typeof p.createdAt === 'string'
+                      ? p.createdAt
+                      : new Date(p.createdAt).toISOString()
+                    : null,
+                updatedAt:
+                  p.updatedAt != null
+                    ? typeof p.updatedAt === 'string'
+                      ? p.updatedAt
+                      : new Date(p.updatedAt).toISOString()
+                    : null,
               };
             }),
           );
@@ -3707,14 +3733,28 @@ export default function VerificationCenter() {
   };
 
   const removeProjectDraftMember = (memberIndex: number) => {
+    if (memberIndex === 0) return;
     setProjectDraft((d) => {
       if (d.teamMembers.length <= 1) return d;
       return { ...d, teamMembers: d.teamMembers.filter((_, j) => j !== memberIndex) };
     });
   };
 
+  const openProjectAddDrawer = () => {
+    setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
+    setProjectDraft(newProjectDraftWithLeadMemberFromUser(personal.firstName, personal.lastName));
+    setProjectAddFormOpen(true);
+  };
+
   const commitProjectDraft = () => {
-    const projFe = projectEntryFieldErrors(projectDraft, 'draft');
+    const leadName = projectLeadMemberDisplayName(personal.firstName, personal.lastName);
+    const draftForSave: ProjectEntry = {
+      ...projectDraft,
+      teamMembers: projectDraft.teamMembers.map((m, i) =>
+        i === 0 ? { ...m, name: leadName || m.name } : m,
+      ),
+    };
+    const projFe = projectEntryFieldErrors(draftForSave, 'draft');
     if (Object.keys(projFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^proj_draft_/), ...projFe }));
       toast.error('Please fix the highlighted fields');
@@ -3722,7 +3762,7 @@ export default function VerificationCenter() {
     }
     setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
     const entry = cloneProjectEntry({
-      ...projectDraft,
+      ...draftForSave,
       id: undefined,
       projectVerificationStatus: 'pending',
       projectSelfDeclared: false,
@@ -3894,6 +3934,10 @@ export default function VerificationCenter() {
           description: entry.description?.trim() || undefined,
           projectLink: entry.projectLink?.trim() || undefined,
           mediaUrl: entry.mediaUrl?.trim() || undefined,
+          startMonth: entry.startMonth ?? null,
+          startYear: entry.startYear ?? null,
+          endMonth: entry.endMonth ?? null,
+          endYear: entry.endYear ?? null,
           teamMembers: teamMembers.length ? teamMembers : undefined,
           /** Empty string clears a stale method on PUT; omitted coerced to null on create */
           verificationMethod: verificationMethod ?? '',
@@ -3919,17 +3963,45 @@ export default function VerificationCenter() {
     setCertDraft((d) => ({ ...d, ...updates }));
   };
 
+  const addCertDraftSkill = () => {
+    const t = certSkillInput.trim();
+    if (!t) return;
+    const prev = certDraftSkillChips;
+    if (prev.includes(t)) {
+      setCertSkillInput('');
+      return;
+    }
+    updateCertDraft({ associatedSkills: [...prev, t].join(', ') });
+    setCertSkillInput('');
+  };
+
+  const removeCertDraftSkill = (token: string) => {
+    updateCertDraft({
+      associatedSkills: certDraftSkillChips.filter((s) => s !== token).join(', '),
+    });
+  };
+
   const commitCertDraft = () => {
-    const certFe = certificateEntryFieldErrors(certDraft, 'draft');
+    const pendingSkill = certSkillInput.trim();
+    let mergedSkillsLine = certDraft.associatedSkills ?? '';
+    if (pendingSkill && !certDraftSkillChips.includes(pendingSkill)) {
+      mergedSkillsLine = [...certDraftSkillChips, pendingSkill].join(', ');
+    }
+    const draftForValidate: CertificateEntry = {
+      ...certDraft,
+      associatedSkills: mergedSkillsLine,
+    };
+    const certFe = certificateEntryFieldErrors(draftForValidate, 'draft');
     if (Object.keys(certFe).length) {
       setFormFieldErrors((p) => ({ ...omitKeysMatching(p, /^cert_draft_/), ...certFe }));
       toast.error('Please fix the highlighted fields');
       return;
     }
+    setCertSkillInput('');
     setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
     const entry = cloneCertificate({
-      ...certDraft,
-      expirationDate: certDraft.noExpiration ? '' : certDraft.expirationDate,
+      ...draftForValidate,
+      expirationDate: draftForValidate.noExpiration ? '' : draftForValidate.expirationDate,
       certVerificationStatus: 'pending',
       certSelfDeclared: false,
       verificationMethod: null,
@@ -4154,7 +4226,8 @@ export default function VerificationCenter() {
           <nav className="flex flex-wrap gap-px overflow-x-auto" aria-label="Verification sections">
             {VERIFICATION_TABS.map(({ id, label }) => {
               const status = verificationStatus[id];
-              const verified = status?.verified ?? false;
+              const verified =
+                id === 'personal' ? personalShowsAsVerified : (status?.verified ?? false);
               const isActive = activeTab === id;
               return (
                 <button
@@ -4179,7 +4252,7 @@ export default function VerificationCenter() {
           {activeTab === 'personal' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                {verificationStatus.personal.verified ? (
+                {personalShowsAsVerified ? (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                     Verified
                   </span>
@@ -4234,23 +4307,13 @@ export default function VerificationCenter() {
               )}
 
               {sectionEditMode.personal && personalBasicComplete ? (
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="text-lg font-semibold text-gray-900">Personal Identity Information</h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Update your details, then tap Add Data to save. Use Back to return to this tab and continue the
-                        verification steps (identity, email & phone, liveness) on one page.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: false }))}
-                      className="shrink-0 px-3 py-1.5 text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                      Back
-                    </button>
-                  </div>
+                <VerificationFormDrawer
+                  open={activeTab === 'personal'}
+                  title="Edit personal details"
+                  subtitle="Update your details, then tap Add Data to save. Verification steps stay on this tab."
+                  onClose={() => setSectionEditMode((prev) => ({ ...prev, personal: false }))}
+                >
+                  <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -4363,7 +4426,8 @@ export default function VerificationCenter() {
                     <HiPlus className="w-4 h-4" />
                     {saving ? 'Saving...' : 'Add Data'}
                   </button>
-                </div>
+                  </div>
+                </VerificationFormDrawer>
               ) : showPersonalIdentityReadOnlySummary ? (
                 <div className="space-y-6 min-h-[280px]">
                   {identityVerificationPath === 'self' && !verificationStatus.personal.verified ? (
@@ -4398,7 +4462,7 @@ export default function VerificationCenter() {
                       Personal Identity Information
                     </h2>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
-                      {verificationStatus.personal.verified ? (
+                      {personalShowsAsVerified ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           Verified
                         </span>
@@ -5447,25 +5511,18 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showLocationAddForm ? (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <HiLocationMarker className="w-5 h-5 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add new location</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLocationAddFormOpen(false);
-                        setLocationDraft({ country: '', state: '', city: '', address: '' });
-                        setFormFieldErrors((p) => omitKeysMatching(p, /^loc_draft_/));
-                      }}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+              {activeTab === 'location' && showLocationAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  title="Add new location"
+                  subtitle="Enter where you live or work so employers can verify your address."
+                  onClose={() => {
+                    setLocationAddFormOpen(false);
+                    setLocationDraft({ country: '', state: '', city: '', address: '' });
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^loc_draft_/));
+                  }}
+                >
+                  <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Country of Residence</label>
@@ -5536,7 +5593,8 @@ export default function VerificationCenter() {
                     <HiPlus className="w-4 h-4" />
                     {saving ? 'Saving...' : 'Add Location'}
                   </button>
-                </div>
+                  </div>
+                </VerificationFormDrawer>
               ) : locationsList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -6075,36 +6133,23 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showEducationAddForm ? (
-              <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
-                <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 ring-1 ring-brand-100">
-                      <HiAcademicCap className="h-6 w-6 text-brand-600" aria-hidden />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900">Add Education</h3>
-                      <p className="mt-0.5 text-sm text-gray-500">Enter your qualification details below.</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEducationAddFormOpen(false);
-                      setEducationDraft(emptyEducation());
-                      setEducationSkillInput('');
-                      setEducationCourseworkInput('');
-                      setEducationScholarshipInput('');
-                      setEducationAchievementInput('');
-                      setEducationActivitiesInput('');
-                      setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
-                    }}
-                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
+              {activeTab === 'education' && showEducationAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  wide
+                  title="Add Education"
+                  subtitle="Enter your qualification details below."
+                  onClose={() => {
+                    setEducationAddFormOpen(false);
+                    setEducationDraft(emptyEducation());
+                    setEducationSkillInput('');
+                    setEducationCourseworkInput('');
+                    setEducationScholarshipInput('');
+                    setEducationAchievementInput('');
+                    setEducationActivitiesInput('');
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^edu_draft_/));
+                  }}
+                >
                 <div className="space-y-8">
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                     <div>
@@ -6678,7 +6723,7 @@ export default function VerificationCenter() {
                     {educationSaving ? 'Saving...' : 'Add Data'}
                   </button>
                 </div>
-              </div>
+                </VerificationFormDrawer>
               ) : educationEntriesList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -6735,11 +6780,13 @@ export default function VerificationCenter() {
                 {workEntriesList.map((entry, index) => {
                   const status = entry.workVerificationStatus ?? 'pending';
                   const org = entry.organisationName?.trim() || '';
-                  const role = entry.role?.trim() || '';
-                  const headerTitle = role || org || 'Work experience';
+                  const headerTitle =
+                    workLatestRoleTitleForHeader(entry) || org || 'Work experience';
                   const headerSubtitle = formatWorkExperienceHeaderSubtitle(entry);
+                  const roleLocationLine = entry.roleLocation?.trim() || '';
                   const tenureYears = workTenureYearsAtOrganisation(entry);
-                  const roleTimelineRows = entry.workRoles.filter((r) => r.title?.trim());
+                  const roleTimelineRows = workRolesForTimelineDisplay(entry);
+                  const primaryRoleRef = entry.workRoles[0];
                   const skillTags = workAssociatedSkillTags(entry);
                   const workRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`work_${index}_`));
                   const workCardKey = entry.id ? String(entry.id) : `tmp-${index}`;
@@ -6820,6 +6867,13 @@ export default function VerificationCenter() {
                               <div className="min-w-0 flex-1">
                                 <p className="text-lg font-semibold leading-tight text-gray-900">{headerTitle}</p>
                                 <p className="mt-1 text-sm text-gray-500">{headerSubtitle}</p>
+                                {roleLocationLine ? (
+                                  <p className="mt-0.5 text-sm text-gray-500">
+                                    {/* <span className="text-gray-400">Role location</span>
+                                    <span className="text-gray-400"> · </span> */}
+                                    <span>{roleLocationLine}</span>
+                                  </p>
+                                ) : null}
                               </div>
                             </div>
                             <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -6884,7 +6938,7 @@ export default function VerificationCenter() {
                                           <div className="min-w-0 flex-1 pt-0.5">
                                             <p className="text-sm font-semibold text-gray-900">
                                               {roleRow.title}
-                                              {ri === 0 ? (
+                                              {primaryRoleRef && roleRow === primaryRoleRef ? (
                                                 <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
                                                   Primary
                                                 </span>
@@ -6909,14 +6963,14 @@ export default function VerificationCenter() {
                                     {formatWorkRemunerationLine(entry)}
                                   </p>
                                 </div>
-                                <div>
+                                {/* <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Role location
                                   </p>
                                   <p className="mt-1 text-sm font-semibold text-gray-900">
                                     {entry.roleLocation?.trim() ? entry.roleLocation.trim() : '—'}
                                   </p>
-                                </div>
+                                </div> */}
                                 <div className="sm:col-span-1">
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Other compensation
@@ -6970,6 +7024,8 @@ export default function VerificationCenter() {
                                 </p>
                               </div>
                               {skillTags.length > 0 ? (
+                                <>
+                                <p className="text-xs font-medium text-gray-500">Skills</p>
                                 <div className="flex flex-wrap gap-2">
                                   {skillTags.map((t) => (
                                     <span
@@ -6980,6 +7036,7 @@ export default function VerificationCenter() {
                                     </span>
                                   ))}
                                 </div>
+                                </>
                               ) : null}
                             </div>
                           ) : null}
@@ -7034,35 +7091,19 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showWorkAddForm ? (
-                <div className={workEntriesList.length > 0 ? 'mt-6 border-t border-gray-200 pt-6' : ''}>
-                  <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
-                    <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 ring-1 ring-brand-100">
-                          <HiBriefcase className="h-6 w-6 text-brand-600" aria-hidden />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">Add Work Experience</h3>
-                          <p className="mt-0.5 text-sm text-gray-500">
-                            Enter your role and employer details below.
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setWorkAddFormOpen(false);
-                          setWorkDraft(emptyWork());
-                          setWorkSkillInput('');
-                          setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
-                        }}
-                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-
+              {activeTab === 'work' && showWorkAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  wide
+                  title="Add Work Experience"
+                  subtitle="Enter your role and employer details below."
+                  onClose={() => {
+                    setWorkAddFormOpen(false);
+                    setWorkDraft(emptyWork());
+                    setWorkSkillInput('');
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^work_draft_/));
+                  }}
+                >
                     <div className="space-y-8">
                       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                         <div>
@@ -7242,16 +7283,8 @@ export default function VerificationCenter() {
                       </div>
 
                       <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-5 sm:p-6">
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="mb-4">
                           <h4 className="text-sm font-semibold text-gray-900">Roles / Role Progression</h4>
-                          <button
-                            type="button"
-                            onClick={addWorkDraftRole}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
-                          >
-                            <HiPlus className="h-4 w-4" aria-hidden />
-                            Add Role
-                          </button>
                         </div>
                         <div className="space-y-4">
                           {workDraft.workRoles.map((roleRow, ri) => {
@@ -7354,6 +7387,16 @@ export default function VerificationCenter() {
                         {fe.work_draft_workRoles ? (
                           <p className="mt-3 text-sm text-red-600">{fe.work_draft_workRoles}</p>
                         ) : null}
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={addWorkDraftRole}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
+                          >
+                            <HiPlus className="h-4 w-4" aria-hidden />
+                            Add Role
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-5">
@@ -7439,8 +7482,7 @@ export default function VerificationCenter() {
                         {workSaving ? 'Saving…' : 'Add Data'}
                       </button>
                     </div>
-                  </div>
-                </div>
+                </VerificationFormDrawer>
               ) : workEntriesList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -7511,6 +7553,9 @@ export default function VerificationCenter() {
                     : '';
                   const showSelfDeclBanner = isSelfDeclaredProject;
                   const showVerifyCta = status === 'pending' && !isSelfDeclaredProject;
+                  const projectDateLine = formatProjectCardDateLine(entry);
+                  const projectTimelineLine = formatProjectTimelineLine(entry);
+                  const descTrim = entry.description?.trim() ?? '';
                   return (
                     <div key={entry.id ?? `proj-${index}`} className="space-y-3">
                       {projRowErrs.length > 0 && (
@@ -7531,6 +7576,9 @@ export default function VerificationCenter() {
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-lg font-semibold leading-tight text-gray-900">{entry.title}</p>
+                                  {projectTimelineLine ? (
+                                    <p className="mt-1 text-sm text-gray-500">{projectTimelineLine}</p>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -7542,8 +7590,8 @@ export default function VerificationCenter() {
                                 ) : null}
                               </div>
                             </div>
-                            {entry.description?.trim() ? (
-                              <p className="text-sm text-gray-700 whitespace-pre-wrap">{entry.description.trim()}</p>
+                            {descTrim ? (
+                              <p className="text-sm text-gray-700 whitespace-pre-wrap">{descTrim}</p>
                             ) : null}
                             {linkTrim ? (
                               <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
@@ -7558,20 +7606,40 @@ export default function VerificationCenter() {
                                 </a>
                               </div>
                             ) : null}
+                            {entry.mediaUrl?.trim() ? (
+                              <p className="text-xs text-gray-500">Media attached</p>
+                            ) : null}
+                            {projectDateLine ? (
+                              <p className="text-xs font-medium text-gray-500">{projectDateLine}</p>
+                            ) : null}
                             {teamRows.length > 0 ? (
                               <div>
-                                <p className="text-xs font-medium text-gray-500">Team</p>
-                                <div className="mt-2 flex flex-wrap gap-2">
+                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                  Team members
+                                </p>
+                                <ul className="mt-2 flex flex-wrap gap-4">
                                   {teamRows.map((m, mi) => (
-                                    <span
-                                      key={`${entry.id ?? index}-tm-${mi}`}
-                                      className="inline-flex rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800"
+                                    <li
+                                      key={`${entry.id ?? index}-vtm-${mi}`}
+                                      className="flex min-w-0 max-w-[240px] items-center gap-2.5"
                                     >
-                                      {m.name.trim()}
-                                      {m.role.trim() ? ` (${m.role.trim()})` : ''}
-                                    </span>
+                                      <div
+                                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 shadow-sm ring-2 ring-white"
+                                        aria-hidden
+                                      >
+                                        {projectTeamMemberInitials(m.name.trim() || m.role.trim() || '?')}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-gray-900">
+                                          {m.name.trim() || '—'}
+                                        </p>
+                                        {m.role.trim() ? (
+                                          <p className="truncate text-xs text-gray-500">{m.role.trim()}</p>
+                                        ) : null}
+                                      </div>
+                                    </li>
                                   ))}
-                                </div>
+                                </ul>
                               </div>
                             ) : null}
                           </div>
@@ -7635,9 +7703,9 @@ export default function VerificationCenter() {
                                 )}
                                 <div className="min-w-0">
                                   <p className="text-lg font-semibold leading-tight text-gray-900">{entry.title}</p>
-                                  <p className="mt-1 line-clamp-2 text-sm text-gray-500">
-                                    {formatProjectCardSubtitle(entry)}
-                                  </p>
+                                  {projectTimelineLine ? (
+                                    <p className="mt-1 text-sm text-gray-500">{projectTimelineLine}</p>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -7658,6 +7726,69 @@ export default function VerificationCenter() {
                                 ) : null}
                               </div>
                             </div>
+                            {descTrim ||
+                            linkTrim ||
+                            entry.mediaUrl?.trim() ||
+                            projectDateLine ||
+                            teamRows.length > 0 ? (
+                              <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
+                                {descTrim ? (
+                                  <p className="text-sm text-gray-700 line-clamp-6 whitespace-pre-wrap">{descTrim}</p>
+                                ) : null}
+                                {linkTrim ? (
+                                  <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline  sm:gap-2">
+                                    <span className="shrink-0 text-sm text-gray-500">Link:</span>
+                                    <a
+                                      href={linkHref}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="break-all text-sm font-semibold text-gray-900 hover:text-brand-600 sm:text-right"
+                                    >
+                                      {linkTrim}
+                                    </a>
+                                  </div>
+                                ) : null}
+                                {entry.mediaUrl?.trim() ? (
+                                  <p className="text-xs text-gray-500">Media attached</p>
+                                ) : null}
+                                {teamRows.length > 0 ? (
+                                  <div>
+                                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                                      Team members
+                                    </p>
+                                    <ul className="mt-2 flex flex-wrap gap-4">
+                                      {teamRows.map((m, mi) => (
+                                        <li
+                                          key={`${entry.id ?? index}-ptm-${mi}`}
+                                          className="flex min-w-0 max-w-[240px] items-center gap-2.5"
+                                        >
+                                          <div
+                                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800 shadow-sm ring-2 ring-white"
+                                            aria-hidden
+                                          >
+                                            {projectTeamMemberInitials(m.name.trim() || m.role.trim() || '?')}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="truncate text-sm font-medium text-gray-900">
+                                              {m.name.trim() || '—'}
+                                            </p>
+                                            {m.role.trim() ? (
+                                              <p className="truncate text-xs text-gray-500">{m.role.trim()}</p>
+                                            ) : null}
+                                          </div>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ) : null}
+                                
+                                {projectDateLine ? (
+                                  <p className="text-xs font-medium text-gray-500">{projectDateLine}</p>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <p className="mt-3 text-sm text-gray-500">No details yet</p>
+                            )}
                           </div>
 
                           <div
@@ -7713,25 +7844,19 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showProjectAddForm ? (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <HiFolder className="w-5 h-5 text-brand-600 shrink-0" />
-                      <h3 className="text-base font-semibold text-gray-900">Add new project</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProjectAddFormOpen(false);
-                        setProjectDraft(emptyProject());
-                        setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
-                      }}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+              {activeTab === 'projects' && showProjectAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  wide
+                  title="Add new project"
+                  subtitle="Showcase work you have contributed to."
+                  onClose={() => {
+                    setProjectAddFormOpen(false);
+                    setProjectDraft(emptyProject());
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^proj_draft_/));
+                  }}
+                >
+                  <div className="space-y-4">
                   <div className="grid grid-cols-1 gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-800 mb-1">Project Title</label>
@@ -7758,6 +7883,98 @@ export default function VerificationCenter() {
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 resize-y min-h-[100px]"
                         placeholder="Enter project description..."
                       />
+                    </div>
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-gray-800">Project dates (optional)</p>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                          <p className="mb-2 text-xs font-medium text-gray-500">Start</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              value={projectDraft.startMonth != null ? String(projectDraft.startMonth) : ''}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                updateProjectDraft({
+                                  startMonth: v === '' ? null : Number(v),
+                                });
+                                clearFormError('proj_draft_start');
+                                clearFormError('proj_draft_end');
+                                clearFormError('proj_draft_timeline');
+                              }}
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                            >
+                              {PROJECT_MONTH_OPTIONS.map((o) => (
+                                <option key={o.value || 'sm'} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              min={PROJECT_YEAR_MIN}
+                              max={PROJECT_YEAR_MAX}
+                              placeholder="Year"
+                              value={projectDraft.startYear ?? ''}
+                              onChange={(e) => {
+                                const t = e.target.value.trim();
+                                updateProjectDraft({
+                                  startYear: t === '' ? null : Number(t),
+                                });
+                                clearFormError('proj_draft_start');
+                                clearFormError('proj_draft_end');
+                                clearFormError('proj_draft_timeline');
+                              }}
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                          <p className="mb-2 text-xs font-medium text-gray-500">End</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              value={projectDraft.endMonth != null ? String(projectDraft.endMonth) : ''}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                updateProjectDraft({
+                                  endMonth: v === '' ? null : Number(v),
+                                });
+                                clearFormError('proj_draft_start');
+                                clearFormError('proj_draft_end');
+                                clearFormError('proj_draft_timeline');
+                              }}
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                            >
+                              {PROJECT_MONTH_OPTIONS.map((o) => (
+                                <option key={`e-${o.value || 'sm'}`} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              min={PROJECT_YEAR_MIN}
+                              max={PROJECT_YEAR_MAX}
+                              placeholder="Year"
+                              value={projectDraft.endYear ?? ''}
+                              onChange={(e) => {
+                                const t = e.target.value.trim();
+                                updateProjectDraft({
+                                  endYear: t === '' ? null : Number(t),
+                                });
+                                clearFormError('proj_draft_start');
+                                clearFormError('proj_draft_end');
+                                clearFormError('proj_draft_timeline');
+                              }}
+                              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      {fe.proj_draft_start || fe.proj_draft_end || fe.proj_draft_timeline ? (
+                        <p className="mt-2 text-sm text-red-600">
+                          {fe.proj_draft_start || fe.proj_draft_end || fe.proj_draft_timeline}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
@@ -7797,59 +8014,108 @@ export default function VerificationCenter() {
 
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-semibold text-gray-900">Team Members</span>
+                      <div>
+                        <span className="text-sm font-semibold text-gray-900">Team members</span>
+                        <p className="mt-0.5 text-xs text-gray-500">
+                          You are listed first — add your role, then add other collaborators.
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={addProjectDraftMember}
                         className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
                       >
                         <HiPlus className="h-4 w-4" />
-                        Add Member
+                        Add member
                       </button>
                     </div>
                     {projectDraft.teamMembers.map((member, memberIndex) => {
                       const teamKey = `proj_draft_team_${memberIndex}`;
+                      const isYou = memberIndex === 0;
+                      const youNameLine = projectLeadMemberDisplayName(
+                        personal.firstName,
+                        personal.lastName,
+                      );
                       return (
-                      <div
-                        key={memberIndex}
-                        className="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end"
-                      >
-                        <div>
-                          <input
-                            type="text"
-                            value={member.name}
-                            onChange={(e) => {
-                              updateProjectDraftMember(memberIndex, { name: e.target.value });
-                              clearFormError(teamKey);
-                            }}
-                            className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
-                            placeholder="Name"
-                          />
-                          {fe[teamKey] ? <p className="mt-1 text-sm text-red-600">{fe[teamKey]}</p> : null}
-                        </div>
-                        <div className="flex gap-2 items-end">
-                          <input
-                            type="text"
-                            value={member.role}
-                            onChange={(e) => {
-                              updateProjectDraftMember(memberIndex, { role: e.target.value });
-                              clearFormError(teamKey);
-                            }}
-                            className={`flex-1 min-w-0 px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
-                            placeholder="Role"
-                          />
-                          {projectDraft.teamMembers.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeProjectDraftMember(memberIndex)}
-                              className="mb-0.5 p-2 text-red-600 hover:bg-red-50 rounded-lg shrink-0"
-                              aria-label="Remove member"
-                            >
-                              <HiX className="w-4 h-4" />
-                            </button>
+                        <div
+                          key={memberIndex}
+                          className="rounded-lg border border-gray-100 bg-white p-3 shadow-sm"
+                        >
+                          {isYou ? (
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-end">
+                              <div>
+                                <p className="mb-1 text-xs font-medium text-gray-500">Team member</p>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                                  <p className="text-sm font-semibold text-gray-900">You</p>
+                                  {youNameLine ? (
+                                    <p className="mt-0.5 text-xs text-gray-600">{youNameLine}</p>
+                                  ) : (
+                                    <p className="mt-0.5 text-xs text-amber-800">
+                                      Add your first and last name under the Personal tab to show your name here.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500">
+                                  Your role on this project
+                                </label>
+                                <input
+                                  type="text"
+                                  value={member.role}
+                                  onChange={(e) => {
+                                    updateProjectDraftMember(memberIndex, { role: e.target.value });
+                                    clearFormError(teamKey);
+                                  }}
+                                  className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
+                                  placeholder="e.g. Lead developer"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end">
+                              <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500">Name</label>
+                                <input
+                                  type="text"
+                                  value={member.name}
+                                  onChange={(e) => {
+                                    updateProjectDraftMember(memberIndex, { name: e.target.value });
+                                    clearFormError(teamKey);
+                                  }}
+                                  className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
+                                  placeholder="Name"
+                                />
+                              </div>
+                              <div className="flex gap-2 items-end">
+                                <div className="min-w-0 flex-1">
+                                  <label className="mb-1 block text-xs font-medium text-gray-500">Role</label>
+                                  <input
+                                    type="text"
+                                    value={member.role}
+                                    onChange={(e) => {
+                                      updateProjectDraftMember(memberIndex, { role: e.target.value });
+                                      clearFormError(teamKey);
+                                    }}
+                                    className={`w-full px-3 py-2 border rounded-lg bg-gray-50 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 ${errB2(teamKey)}`}
+                                    placeholder="Role"
+                                  />
+                                </div>
+                                {projectDraft.teamMembers.length > 1 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeProjectDraftMember(memberIndex)}
+                                    className="mb-0.5 shrink-0 rounded-lg p-2 text-red-600 hover:bg-red-50"
+                                    aria-label="Remove member"
+                                  >
+                                    <HiX className="h-4 w-4" />
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
                           )}
+                          {fe[teamKey] ? <p className="mt-2 text-sm text-red-600">{fe[teamKey]}</p> : null}
                         </div>
-                      </div>
                       );
                     })}
                   </div>
@@ -7863,7 +8129,8 @@ export default function VerificationCenter() {
                     <HiPlus className="w-4 h-4" />
                     {projectSaving ? 'Saving...' : 'Add Project'}
                   </button>
-                </div>
+                  </div>
+                </VerificationFormDrawer>
               ) : projectsList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -7875,7 +8142,7 @@ export default function VerificationCenter() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setProjectAddFormOpen(true)}
+                    onClick={openProjectAddDrawer}
                     className="mt-6 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
                   >
                     <HiPlus className="w-4 h-4 text-brand-600" />
@@ -7885,7 +8152,7 @@ export default function VerificationCenter() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setProjectAddFormOpen(true)}
+                  onClick={openProjectAddDrawer}
                   className="inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-800 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-800"
                 >
                   <HiPlus className="w-4 h-4 text-brand-600" />
@@ -7921,6 +8188,7 @@ export default function VerificationCenter() {
                   const status = cert.certVerificationStatus ?? 'pending';
                   const isSelfDeclaredCert = !!cert.certSelfDeclared && status !== 'verified';
                   const certRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`cert_${index}_`));
+                  const certSubtitle = certificateCardSubtitleLines(cert);
                   return (
                     <div
                       key={`cert-${index}-${cert.name}`}
@@ -7981,9 +8249,12 @@ export default function VerificationCenter() {
                                   <p className="truncate text-base font-semibold leading-tight text-gray-900">
                                     {cert.name}
                                   </p>
-                                  <p className="mt-0.5 line-clamp-2 text-xs text-gray-500">
-                                    {formatCertificateCardSubtitle(cert)}
-                                  </p>
+                                  <div className="mt-0.5 space-y-0.5 text-xs text-gray-500">
+                                    <p className="truncate">{certSubtitle.primary}</p>
+                                    {certSubtitle.secondary ? (
+                                      <p className="truncate">{certSubtitle.secondary}</p>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
                               <div className="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
@@ -7997,14 +8268,6 @@ export default function VerificationCenter() {
 
                           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/50 px-3 py-2.5 sm:px-4">
                             <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openVerifyCertModal(index)}
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 sm:px-3.5 sm:py-2 sm:text-sm"
-                              >
-                                <HiShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                Verify
-                              </button>
                               <button
                                 type="button"
                                 onClick={() => openVerifyCertModal(index)}
@@ -8045,9 +8308,12 @@ export default function VerificationCenter() {
                               <HiBadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
                               <div className="min-w-0">
                                 <p className="truncate font-semibold text-gray-900">{cert.name}</p>
-                                <p className="mt-0.5 line-clamp-2 text-sm text-gray-500">
-                                  {formatCertificateCardSubtitle(cert)}
-                                </p>
+                                <div className="mt-0.5 space-y-0.5 text-sm text-gray-500">
+                                  <p className="truncate">{certSubtitle.primary}</p>
+                                  {certSubtitle.secondary ? (
+                                    <p className="truncate">{certSubtitle.secondary}</p>
+                                  ) : null}
+                                </div>
                               </div>
                             </div>
                             <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -8109,28 +8375,19 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showCertificationAddForm ? (
-                <div className="rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm">
-                  <div className="mb-8 flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 pb-5">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 ring-1 ring-emerald-100">
-                        <HiBadgeCheck className="h-6 w-6 text-emerald-700" aria-hidden />
-                      </div>
-                      <h3 className="text-lg font-semibold text-gray-900">Add Certification</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCertAddFormOpen(false);
-                        setCertDraft(emptyCertificate());
-                        setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
-                      }}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-
+              {activeTab === 'certification' && showCertificationAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  title="Add Certification"
+                  subtitle="Add certificates and credentials to strengthen your profile."
+                  onClose={() => {
+                    setCertAddFormOpen(false);
+                    setCertDraft(emptyCertificate());
+                    setCertSkillInput('');
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^cert_draft_/));
+                  }}
+                  wide
+                >
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-6 md:gap-y-5">
                     <div>
                       <label className="mb-1.5 block text-sm font-semibold text-gray-900" htmlFor="cert_draft_name">
@@ -8286,20 +8543,41 @@ export default function VerificationCenter() {
                       ) : null}
                     </div>
                     <div className="md:col-span-2">
-                      <label
-                        className="mb-1.5 block text-sm font-semibold text-gray-900"
-                        htmlFor="cert_draft_associatedSkills"
-                      >
+                      <label className="mb-1.5 block text-sm font-semibold text-gray-900">
                         Associated Skills
                       </label>
+                      {certDraftSkillChips.length > 0 ? (
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          {certDraftSkillChips.map((chip, chipIdx) => (
+                            <span key={`cert-skill-${chip}-${chipIdx}`} className={EDU_VERIF_TAG_CHIP_CLASS}>
+                              {chip}
+                              <button
+                                type="button"
+                                onClick={() => removeCertDraftSkill(chip)}
+                                className={EDU_VERIF_TAG_CHIP_REMOVE_BTN_CLASS}
+                                aria-label={`Remove ${chip}`}
+                              >
+                                <HiX className="h-3.5 w-3.5" aria-hidden />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <input
                         id="cert_draft_associatedSkills"
                         type="text"
-                        value={certDraft.associatedSkills ?? ''}
-                        onChange={(e) => updateCertDraft({ associatedSkills: e.target.value })}
-                        className="min-h-[2.75rem] w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="Comma-separated"
+                        value={certSkillInput}
+                        onChange={(e) => setCertSkillInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addCertDraftSkill();
+                          }
+                        }}
+                        className={EDU_VERIF_TAG_INPUT_CLASS}
+                        placeholder="Type to search skills or add custom..."
                       />
+                      <p className="mt-1 text-xs text-gray-500">Press Enter to add a skill.</p>
                     </div>
                     <div className="md:col-span-2">
                       <label className="mb-1.5 block text-sm font-semibold text-gray-900">
@@ -8365,7 +8643,7 @@ export default function VerificationCenter() {
                       {saving ? 'Saving…' : 'Add Certification'}
                     </button>
                   </div>
-                </div>
+                </VerificationFormDrawer>
               ) : certList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -8422,36 +8700,30 @@ export default function VerificationCenter() {
                   <h2 className="text-lg font-semibold text-gray-900">Family &amp; Relationship</h2>
                 </div>
 
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-800">Marital Status</label>
-                  <div className="relative">
-                    <select
-                      value={maritalStatus}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMaritalStatus(v);
-                        clearFormError('fam_spouseName');
-                        setRelationsList((relList) => {
-                          queueMicrotask(() =>
-                            void syncFamilyToApi(v, spouseName, relList, { silentSuccess: true }),
-                          );
-                          return relList;
-                        });
-                      }}
-                      className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
-                    >
-                      <option value="">Select</option>
-                      {MARITAL_STATUS_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-800">Marital Status</label>
+                    <div className="relative">
+                      <select
+                        value={maritalStatus}
+                        onChange={(e) => {
+                          setMaritalStatus(e.target.value);
+                          clearFormError('fam_spouseName');
+                        }}
+                        className="w-full appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-10 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                      >
+                        <option value="">Select</option>
+                        {MARITAL_STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <HiChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    </div>
                   </div>
-                </div>
 
-                {maritalStatus === 'married' && (
+                  {maritalStatus === 'married' && (
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-800">Spouse name</label>
                     <input
@@ -8461,16 +8733,6 @@ export default function VerificationCenter() {
                         setSpouseName(e.target.value);
                         clearFormError('fam_spouseName');
                       }}
-                      onBlur={(e) => {
-                        setRelationsList((relList) => {
-                          queueMicrotask(() =>
-                            void syncFamilyToApi(maritalStatus, e.target.value, relList, {
-                              silentSuccess: true,
-                            }),
-                          );
-                          return relList;
-                        });
-                      }}
                       className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500/25 ${errB2('fam_spouseName')}`}
                       placeholder="Full name"
                     />
@@ -8478,7 +8740,18 @@ export default function VerificationCenter() {
                       <p className="mt-1 text-sm text-red-600">{fe.fam_spouseName}</p>
                     ) : null}
                   </div>
-                )}
+                  )}
+                </div>
+                <div className="flex justify-start">
+                  <button
+                    type="button"
+                    onClick={() => void syncFamilyToApi(maritalStatus, spouseName, relationsList)}
+                    disabled={saving}
+                    className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                  >
+                    {saving ? 'Updating...' : 'Update'}
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -8523,26 +8796,18 @@ export default function VerificationCenter() {
                 })}
               </div>
 
-              {showFamilyRelationAddForm ? (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6 space-y-4 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <HiUsers className="w-5 h-5 shrink-0 text-brand-600" aria-hidden />
-                      <h3 className="text-base font-semibold text-gray-900">Add new family relation</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFamilyRelationAddFormOpen(false);
-                        setFamilyRelationDraft(emptyFamilyRelation());
-                        setFormFieldErrors((p) => omitKeysMatching(p, /^fam_draft_/));
-                      }}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {activeTab === 'family' && showFamilyRelationAddForm ? (
+                <VerificationFormDrawer
+                  open
+                  title="Add new family relation"
+                  subtitle="Add parents, children, or other relations."
+                  onClose={() => {
+                    setFamilyRelationAddFormOpen(false);
+                    setFamilyRelationDraft(emptyFamilyRelation());
+                    setFormFieldErrors((p) => omitKeysMatching(p, /^fam_draft_/));
+                  }}
+                >
+                  <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Relation name</label>
                       <input
@@ -8583,7 +8848,6 @@ export default function VerificationCenter() {
                         <p className="mt-1 text-sm text-red-600">{fe.fam_draft_type}</p>
                       ) : null}
                     </div>
-                  </div>
                   <button
                     type="button"
                     onClick={commitFamilyRelationDraft}
@@ -8593,7 +8857,8 @@ export default function VerificationCenter() {
                     <HiPlus className="w-4 h-4" />
                     {saving ? 'Saving...' : 'Add relation'}
                   </button>
-                </div>
+                  </div>
+                </VerificationFormDrawer>
               ) : relationsList.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 px-6 py-14 text-center">
                   <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-100 bg-white shadow-sm">
@@ -9899,11 +10164,14 @@ export default function VerificationCenter() {
       {verifyAddressModal.open && verifyAddressModal.locationIndex != null && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
-          onClick={closeVerifyAddressModal}
+          onClick={() => {
+            if (!verifyAddressUploadInProgress) closeVerifyAddressModal();
+          }}
         >
           <div
             className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-4"
             onClick={(e) => e.stopPropagation()}
+            aria-busy={verifyAddressUploadInProgress}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -9913,7 +10181,8 @@ export default function VerificationCenter() {
               <button
                 type="button"
                 onClick={closeVerifyAddressModal}
-                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                disabled={verifyAddressUploadInProgress}
+                className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:pointer-events-none disabled:opacity-40"
                 aria-label="Close"
               >
                 <HiX className="w-5 h-5" />
@@ -9929,7 +10198,8 @@ export default function VerificationCenter() {
                     step: m.step === 'document' ? 'residence' : 'method',
                   }))
                 }
-                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                disabled={verifyAddressUploadInProgress}
+                className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 disabled:pointer-events-none disabled:opacity-40"
               >
                 <HiArrowLeft className="w-4 h-4" />
                 Back
@@ -10027,6 +10297,19 @@ export default function VerificationCenter() {
             {verifyAddressModal.step === 'document' && (
               <div className="space-y-3">
                 <p className="text-sm font-semibold text-gray-900">Upload supporting document:</p>
+                {verifyAddressUploadInProgress ? (
+                  <div
+                    className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50/70 px-4 py-3.5"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div
+                      className="h-5 w-5 shrink-0 rounded-full border-2 border-brand-200 border-t-brand-600 animate-spin"
+                      aria-hidden
+                    />
+                    <p className="text-sm font-medium text-gray-900">Uploading your document…</p>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   {[
                     { value: 'utility_bill', label: 'Utility Bill' },
@@ -10038,9 +10321,9 @@ export default function VerificationCenter() {
                       type="button"
                       onClick={() => triggerVerifyModalDocumentUpload(opt.value)}
                       disabled={uploadingLocationIndex !== null}
-                      className="w-full flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-900 hover:border-brand-300 hover:bg-brand-50/40 disabled:opacity-50"
+                      className="w-full flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-900 hover:border-brand-300 hover:bg-brand-50/40 disabled:pointer-events-none disabled:opacity-50"
                     >
-                      <HiUpload className="w-5 h-5 text-brand-600" />
+                      <HiUpload className="w-5 h-5 shrink-0 text-brand-600" />
                       {opt.label}
                     </button>
                   ))}

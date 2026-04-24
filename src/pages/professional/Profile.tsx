@@ -494,23 +494,25 @@ export default function Profile() {
                   disabled={uploadingPhoto || !livenessComplete}
                 />
                 <div className="relative flex flex-col items-start">
-                  <div className="relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-lg ring-4 ring-white sm:h-32 sm:w-32">
-                    {avatarDisplayUrl && !photoError ? (
-                      <img
-                        src={avatarDisplayUrl}
-                        alt=""
-                        className="h-full w-full object-cover"
-                        onError={() => setPhotoError(true)}
-                      />
-                    ) : (
-                      <HiUser className="h-14 w-14 text-gray-400 sm:h-16 sm:w-16" />
-                    )}
+                  <div className="relative h-28 w-28 sm:h-32 sm:w-32">
+                    <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gray-100 shadow-lg ring-4 ring-white">
+                      {avatarDisplayUrl && !photoError ? (
+                        <img
+                          src={avatarDisplayUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          onError={() => setPhotoError(true)}
+                        />
+                      ) : (
+                        <HiUser className="h-14 w-14 text-gray-400 sm:h-16 sm:w-16" />
+                      )}
+                    </div>
                     {livenessComplete ? (
                       <button
                         type="button"
                         disabled={uploadingPhoto}
                         onClick={() => photoInputRef.current?.click()}
-                        className="absolute bottom-0.5 right-0.5 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-white/80 bg-brand-500 text-white shadow-md hover:bg-brand-600 disabled:opacity-50 sm:bottom-1 sm:right-1"
+                        className="absolute bottom-0 right-0 z-20 flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brand-500 text-white shadow-md hover:bg-brand-600 disabled:opacity-50 sm:h-10 sm:w-10"
                         aria-label={profilePhotoUrl ? 'Change profile photo' : 'Add profile photo'}
                         title={profilePhotoUrl ? 'Change photo' : 'Add photo'}
                       >
@@ -518,7 +520,7 @@ export default function Profile() {
                       </button>
                     ) : null}
                     {uploadingPhoto ? (
-                      <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-xs font-medium text-gray-700">
+                      <div className="absolute inset-0 flex items-center justify-center rounded-full bg-white/70 text-xs font-medium text-gray-700">
                         Uploading…
                       </div>
                     ) : null}

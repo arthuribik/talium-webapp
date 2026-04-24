@@ -1,39 +1,29 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   HiAcademicCap,
   HiBadgeCheck,
   HiBriefcase,
   HiCheckCircle,
   HiChevronDown,
+  HiClock,
   HiExclamationCircle,
   HiFolder,
   HiLocationMarker,
 } from 'react-icons/hi';
 import { api } from '@/services/api';
-
-const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
-  full_time: 'Full-time',
-  part_time: 'Part-time',
-  contract: 'Contract',
-  internship: 'Internship',
-};
-
-const WORK_MODE_LABELS: Record<string, string> = {
-  global_remote: 'Global Remote',
-  remote: 'Location Remote',
-  hybrid: 'Hybrid',
-  on_site: 'Onsite',
-  location: 'Location Remote',
-};
-
-const WORK_SALARY_FREQUENCY_LABELS: Record<string, string> = {
-  monthly: 'Monthly',
-  annually: 'Annually',
-  weekly: 'Weekly',
-  hourly: 'Hourly',
-  one_time: 'One-time',
-};
+import {
+  apiWorkExperienceToWorkEntry,
+  formatWorkCompensationSummary,
+  formatWorkExperienceHeaderSubtitle,
+  formatWorkRemunerationLine,
+  formatWorkRoleDateRange,
+  workAssociatedSkillTags,
+  workLatestRoleTitleForHeader,
+  workRolesForTimelineDisplay,
+  workTenureYearsAtOrganisation,
+  type WorkEntry,
+} from '@/utils/workExperienceDisplay';
 
 const RESIDENCE_TYPE_LABELS: Record<string, string> = {
   own_home: 'I own my home',
@@ -319,15 +309,10 @@ const CARD_SHELL = 'space-y-4 rounded-xl border border-gray-200 bg-white p-4 sha
 const DETAIL_GRID = 'grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2';
 const DETAIL_STACK_FULL = 'grid grid-cols-1 gap-y-5';
 
-function formatWorkCardSubtitle(exp: any): string {
-  const industry = displayText(exp.industry) || '—';
-  const et =
-    EMPLOYMENT_TYPE_LABELS[displayText(exp.employmentType)] ||
-    displayText(exp.employmentType) ||
-    '—';
-  const wm = WORK_MODE_LABELS[displayText(exp.workMode)] || displayText(exp.workMode) || '—';
-  return [industry, et, wm].join(' · ');
-}
+const WORK_OCCOMP_CHIP_CLASS =
+  'inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-900 ring-1 ring-indigo-200';
+const WORK_SKILL_CHIP_CLASS =
+  'inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-brand-100';
 
 function resolveWorkVerificationRowStatus(exp: any): 'pending' | 'verified' {
   if (exp.workVerificationStatus === 'verified') return 'verified';
@@ -433,34 +418,6 @@ function projectVerificationMethodDisplay(m: string | undefined | null): string 
   return raw ? raw.replace(/_/g, ' ') : '';
 }
 
-function salaryFrequencyLabel(v: string | undefined | null): string {
-  const key = displayText(v).toLowerCase();
-  return WORK_SALARY_FREQUENCY_LABELS[key] || displayText(v) || '—';
-}
-
-function parseWorkResponsibilities(resp: unknown): { body: string; otherRolesDetail: string } {
-  const arr = Array.isArray(resp) ? resp.filter((x): x is string => typeof x === 'string') : [];
-  const otherIdx = arr.findIndex((a) => /^Other roles:\s*/i.test(a));
-  const main =
-    otherIdx >= 0 ? [...arr.slice(0, otherIdx), ...arr.slice(otherIdx + 1)] : [...arr];
-  const otherLine = otherIdx >= 0 ? String(arr[otherIdx]).replace(/^Other roles:\s*/i, '').trim() : '';
-  return { body: main.map((s) => s.trim()).filter(Boolean).join('\n'), otherRolesDetail: otherLine };
-}
-
-function parseWorkAchievements(ach: unknown): { body: string; skills: string } {
-  const arr = Array.isArray(ach)
-    ? ach.filter((x): x is string => typeof x === 'string').map((s) => s.trim()).filter(Boolean)
-    : [];
-  let skills = '';
-  const body: string[] = [];
-  for (const line of arr) {
-    const sm = line.match(/^Skills:\s*(.+)$/i);
-    if (sm) skills = sm[1].trim();
-    else body.push(line);
-  }
-  return { body: body.join('\n'), skills };
-}
-
 function maskIdNumber(raw: string | undefined | null): string {
   const s = displayText(raw);
   if (!s) return '';
@@ -499,6 +456,38 @@ function formatProjectCardSubtitle(entry: any): string {
   return parts.length ? parts.join(' · ') : 'No details yet';
 }
 
+const PROFILE_PROJECT_MONTH_SHORT = [
+  '',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+function profileProjectMonthYearLine(m: unknown, y: unknown): string | null {
+  const mi = typeof m === 'number' && Number.isInteger(m) ? m : m != null ? parseInt(String(m), 10) : NaN;
+  const yi = typeof y === 'number' && Number.isInteger(y) ? y : y != null ? parseInt(String(y), 10) : NaN;
+  if (!Number.isFinite(mi) || !Number.isFinite(yi) || mi < 1 || mi > 12) return null;
+  return `${PROFILE_PROJECT_MONTH_SHORT[mi]} ${yi}`;
+}
+
+function formatProjectTimelineForProfile(proj: any): string | null {
+  const a = profileProjectMonthYearLine(proj.startMonth, proj.startYear);
+  const b = profileProjectMonthYearLine(proj.endMonth, proj.endYear);
+  if (a && b) return `${a} – ${b}`;
+  if (a) return `${a} – Present`;
+  if (b) return b;
+  return null;
+}
+
 function resolveProjectRowStatus(proj: any): 'pending' | 'verified' {
   if (proj.projectVerificationStatus === 'verified') return 'verified';
   if (displayText(proj.verificationStatus).toLowerCase() === 'verified') return 'verified';
@@ -522,179 +511,242 @@ function resolveCertRowVerified(cert: any): boolean {
 }
 
 function ProfileWorkRecordCard({ exp }: { exp: any }) {
-  const [open, setOpen] = useState(false);
-  const loc = exp.location && typeof exp.location === 'object' ? exp.location : {};
-  const roleLoc = displayText((loc as any).roleLocation);
-  const city = displayText((loc as any).city);
-  const state = displayText((loc as any).state);
-  const country = displayText((loc as any).country);
-  const legacyLine = [city, state, country].filter(Boolean).join(', ');
-  const locLine = roleLoc || legacyLine || '—';
-  const sr = exp.salaryRange && typeof exp.salaryRange === 'object' ? exp.salaryRange : null;
-  let salaryLine = '—';
-  if (sr && (sr.min != null || sr.max != null)) {
-    const cur = displayText(exp.currency) || '';
-    const a = sr.min != null ? Number(sr.min) : null;
-    const b = sr.max != null ? Number(sr.max) : null;
-    if (a != null && b != null && a === b) {
-      salaryLine = cur ? `${cur} ${a}` : String(a);
-    } else if (a != null || b != null) {
-      salaryLine = cur ? `${cur} ${a ?? '—'} – ${b ?? '—'}` : `${a ?? '—'} – ${b ?? '—'}`;
-    }
-  }
-  const selfDeclared = isWorkSelfDeclaredForProfile(exp);
-  const { body: respBody, otherRolesDetail } = parseWorkResponsibilities(exp.responsibilities);
-  const { body: achBody, skills: achSkills } = parseWorkAchievements(exp.achievements);
+  const [open, setOpen] = useState(true);
+  const entry: WorkEntry = useMemo(() => {
+    const base = apiWorkExperienceToWorkEntry(exp as Record<string, unknown>);
+    return { ...base, selfDeclared: isWorkSelfDeclaredForProfile(exp) };
+  }, [exp]);
+
+  const headerTitle =
+    workLatestRoleTitleForHeader(entry) ||
+    displayText(exp.organisationName) ||
+    'Work experience';
+  const headerSubtitle = formatWorkExperienceHeaderSubtitle(entry);
+  const roleLocationLine = entry.roleLocation?.trim() || '';
+  const tenureYears = workTenureYearsAtOrganisation(entry);
+  const roleTimelineRows = workRolesForTimelineDisplay(entry);
+  const primaryRoleRef = entry.workRoles[0];
+  const skillTags = workAssociatedSkillTags(entry);
   const rowStatus = resolveWorkVerificationRowStatus(exp);
-  const org = displayText(exp.organisationName);
-  const role = displayText(exp.role);
-  const title = org || role || 'Work experience';
-  const subtitle =
-    org && role ? `${role} · ${formatWorkCardSubtitle(exp)}` : formatWorkCardSubtitle(exp);
+  const selfDeclared = entry.selfDeclared;
+  const showSelfDeclStrip = selfDeclared && rowStatus !== 'verified';
+  const workSupportingHref = (() => {
+    const u = displayText(exp.supportingMediaUrl);
+    if (!u) return null;
+    return u.startsWith('http') ? u : resolveUrl(u);
+  })();
+  const cardKey = String(exp.id ?? headerTitle);
 
   return (
-    <li className={CARD_SHELL}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full flex-col gap-2 rounded-xl text-left outline-none ring-brand-500/0 transition-shadow focus-visible:ring-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3 -m-px p-px sm:-mx-0.5"
-      >
-        <div className="flex min-w-0 flex-1 gap-2 sm:gap-2.5">
-          <HiBriefcase className="mt-0.5 h-4 w-4 shrink-0 text-brand-600 sm:h-5 sm:w-5" />
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold leading-snug text-gray-900">{title}</p>
-            <p className="mt-0.5 text-xs text-gray-500 sm:text-sm">{subtitle}</p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 self-stretch sm:self-start">
-          <div className="flex flex-wrap justify-end gap-1">
-            {selfDeclared && (
-              <span className="inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-900">
-                Self Declared
-              </span>
-            )}
-            {rowStatus === 'pending' && (
-              <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">
-                Pending
-              </span>
-            )}
-            {rowStatus === 'verified' && (
-              <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
-                Verified
-              </span>
-            )}
-          </div>
-          <HiChevronDown
-            className={`mt-0.5 h-5 w-5 shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-            aria-hidden
-          />
-        </div>
-      </button>
-
-      {open ? (
-        <div className="mt-4 space-y-6 border-t border-gray-100 pt-4">
-          {selfDeclared ? (
-            <>
-              <p className="text-[11px] font-medium text-gray-500">Self declared — optional full verification</p>
-              <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950">
-                <HiExclamationCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                <span>
-                  Self Declaration — limited network access. Use the Verification Center to verify with work email or a
-                  supporting document.
-                </span>
-              </div>
-            </>
-          ) : null}
-
-          <dl className={DETAIL_GRID}>
-            <Field label="Name of organisation" value={displayText(exp.organisationName)} />
-            <Field label="Industry / Sector" value={displayText(exp.industry)} />
-            <Field label="Role / Position" value={displayText(exp.role)} />
-            <Field
-              label="Employment type"
-              value={EMPLOYMENT_TYPE_LABELS[exp.employmentType] || displayText(exp.employmentType)}
-            />
-            <Field label="Work mode" value={WORK_MODE_LABELS[exp.workMode] || displayText(exp.workMode)} />
-            <Field label="Start date" value={formatIsoDate(exp.startDate)} />
-            <Field
-              label="End date"
-              value={
-                exp.currentlyWorking || !displayText(exp.endDate) ? 'Present' : formatIsoDate(exp.endDate)
-              }
-            />
-            <Field label="Role location" value={locLine} />
-            <Field label="Salary" value={salaryLine} />
-            <Field label="Pay frequency" value={salaryFrequencyLabel(exp.paymentMode)} />
-          </dl>
-
-          <div className={PROFILE_INSET_SECTION_CLASS}>
-            <p className={PROFILE_FIELD_LABEL_CLASS}>Job description</p>
-            <div className="mt-2">
-              <MultilineFieldValue text={displayText(exp.jobDescription)} />
-            </div>
-          </div>
-
-          <dl className={DETAIL_STACK_FULL}>
-            <Field label="Responsibilities" value={<ProfileChipList text={respBody} />} span2 />
-            <Field label="Other roles" value={<MultilineFieldValue text={otherRolesDetail} />} span2 />
-            <Field
-              label="Achievements & additional notes"
-              value={<ProfileChipList text={achBody} />}
-              span2
-            />
-            <Field
-              label="Associated skills"
-              value={
-                <ProfileChipList text={displayText(achSkills || exp.associatedSkills)} />
-              }
-              span2
-            />
-            <div className="col-span-full">
-              <dt className={PROFILE_FIELD_LABEL_CLASS}>Verification</dt>
-              <dd className={PROFILE_FIELD_VALUE_CLASS}>
-                {selfDeclared ? (
-                  'Self declared'
-                ) : (
-                  <span className="space-y-1 text-[15px] font-bold leading-snug text-gray-900">
-                    {workVerificationMethodDisplay(exp.verificationMethod) ? (
-                      <div>Method: {workVerificationMethodDisplay(exp.verificationMethod)}</div>
-                    ) : null}
-                    {displayText(exp.workVerificationEmail) ? (
-                      <div>Work email: {displayText(exp.workVerificationEmail)}</div>
-                    ) : null}
-                    {displayText(exp.supportingMediaUrl) ? (
-                      <div>
-                        Document:{' '}
-                        <a
-                          href={resolveUrl(displayText(exp.supportingMediaUrl))}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={PROFILE_FIELD_LINK_CLASS}
-                        >
-                          Open
-                        </a>
-                      </div>
-                    ) : null}
-                    {!workVerificationMethodDisplay(exp.verificationMethod) &&
-                    !displayText(exp.workVerificationEmail) &&
-                    !displayText(exp.supportingMediaUrl) ? (
-                      <span>—</span>
-                    ) : null}
-                  </span>
-                )}
-              </dd>
-            </div>
-          </dl>
+    <li className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      {showSelfDeclStrip ? (
+        <div className="flex gap-2 border-b border-amber-200/80 bg-[#fffbeb] px-4 py-3.5 sm:px-6">
+          <HiExclamationCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden />
+          <p className="text-sm font-medium leading-snug text-amber-950">
+            Self Declaration — limited network access. Use the Verification Center to verify with work email or a
+            supporting document.
+          </p>
         </div>
       ) : null}
+
+      <div className="space-y-4 p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="mt-1 shrink-0 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+              aria-expanded={open}
+              aria-label={open ? 'Collapse details' : 'Expand details'}
+            >
+              <HiChevronDown
+                className={`h-5 w-5 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+                aria-hidden
+              />
+            </button>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 ring-1 ring-brand-100">
+              <HiBriefcase className="h-6 w-6 text-brand-600" aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-lg font-semibold leading-tight text-gray-900">{headerTitle}</p>
+              <p className="mt-1 text-sm text-gray-500">{headerSubtitle}</p>
+              {roleLocationLine ? (
+                <p className="mt-0.5 text-sm text-gray-500">
+                  {/* <span className="text-gray-400">Role location</span>
+                  <span className="text-gray-400"> · </span> */}
+                  <span>{roleLocationLine}</span>
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+            <div className="flex flex-wrap gap-1.5 sm:justify-end">
+              {rowStatus === 'pending' && !selfDeclared ? (
+                <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-900">
+                  Pending verification
+                </span>
+              ) : null}
+              {selfDeclared && rowStatus === 'pending' ? (
+                <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-950">
+                  Self Declared
+                </span>
+              ) : null}
+              {rowStatus === 'verified' ? (
+                <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                  Verified
+                </span>
+              ) : null}
+            </div>
+            {selfDeclared && rowStatus === 'pending' ? (
+              <p className="text-xs text-gray-400">via Self Declaration</p>
+            ) : null}
+          </div>
+        </div>
+
+        {open ? (
+          <div className="space-y-5 border-t border-gray-100 pt-4 sm:pt-5">
+            {tenureYears != null ? (
+              <p className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600">
+                <HiClock className="h-4 w-4 shrink-0" aria-hidden />
+                {tenureYears.toFixed(1)} years at this organisation
+              </p>
+            ) : null}
+
+            {roleTimelineRows.length > 0 ? (
+              <div className="space-y-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Roles</p>
+                <ul className="flow-root">
+                  {roleTimelineRows.map((roleRow, ri) => (
+                    <li key={`${cardKey}-role-${ri}`} className="relative pb-6 last:pb-0">
+                      {ri < roleTimelineRows.length - 1 ? (
+                        <div
+                          className="absolute bottom-0 left-[11px] top-5 w-px bg-gray-200"
+                          aria-hidden
+                        />
+                      ) : null}
+                      <div className="relative flex gap-3">
+                        <div className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-brand-200 bg-white">
+                          <span className="h-2 w-2 rounded-full bg-brand-600" aria-hidden />
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <p className="text-sm font-semibold text-gray-900">
+                            {roleRow.title}
+                            {primaryRoleRef && roleRow === primaryRoleRef ? (
+                              <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
+                                Primary
+                              </span>
+                            ) : null}
+                          </p>
+                          <p className="mt-0.5 text-sm text-gray-500">{formatWorkRoleDateRange(roleRow)}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Remuneration</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{formatWorkRemunerationLine(entry)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Other compensation</p>
+                {entry.otherCompensation?.length ? (
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {entry.otherCompensation.map((t) => (
+                      <span key={`${cardKey}-oc-${t}`} className={WORK_OCCOMP_CHIP_CLASS}>
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {formatWorkCompensationSummary(entry)}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium text-gray-500">Job description</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                {entry.jobDescription?.trim() ? entry.jobDescription.trim() : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium text-gray-500">Responsibilities</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                {entry.responsibilitiesText?.trim() ? entry.responsibilitiesText.trim() : '—'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-medium text-gray-500">Achievements</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
+                {entry.achievementsText?.trim() ? entry.achievementsText.trim() : '—'}
+              </p>
+            </div>
+
+            {skillTags.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {skillTags.map((t) => (
+                  <span key={`${cardKey}-sk-${t}`} className={WORK_SKILL_CHIP_CLASS}>
+                    {t}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {!selfDeclared ? (
+              <div className="rounded-lg border border-gray-100 bg-white px-4 py-3 text-sm text-gray-700">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Verification</p>
+                <div className="mt-2 space-y-1.5">
+                  {workVerificationMethodDisplay(exp.verificationMethod) ? (
+                    <p>
+                      <span className="text-gray-500">Method: </span>
+                      <span className="font-medium text-gray-900">
+                        {workVerificationMethodDisplay(exp.verificationMethod)}
+                      </span>
+                    </p>
+                  ) : null}
+                  {displayText(exp.workVerificationEmail) ? (
+                    <p>
+                      <span className="text-gray-500">Work email: </span>
+                      <span className="font-medium text-gray-900">{displayText(exp.workVerificationEmail)}</span>
+                    </p>
+                  ) : null}
+                  {workSupportingHref ? (
+                    <p>
+                      <span className="text-gray-500">Document: </span>
+                      <a
+                        href={workSupportingHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={PROFILE_FIELD_LINK_CLASS}
+                      >
+                        Open
+                      </a>
+                    </p>
+                  ) : null}
+                  {!workVerificationMethodDisplay(exp.verificationMethod) &&
+                  !displayText(exp.workVerificationEmail) &&
+                  !workSupportingHref ? (
+                    <p className="text-gray-500">—</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </li>
   );
 }
 
 export function ProfileWorkSection({ items }: { items: any[] }) {
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-6">
       {items.map((exp, index) => (
         <ProfileWorkRecordCard key={exp.id ?? index} exp={exp} />
       ))}
@@ -844,7 +896,9 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
           <dl className={DETAIL_STACK_FULL}>
             <Field label="Verification method" value={vMethodLabel || '—'} span2 />
             <Field label="Row verification status" value={rowVs} span2 />
-            <Field label="Student verification email" value={displayText(edu.studentVerificationEmail)} span2 />
+            {displayText(edu.studentVerificationEmail) ? (
+              <Field label="Student verification email" value={displayText(edu.studentVerificationEmail)} span2 />
+            ) : null}
             <Field label="Scholarships & aid" value={displayText(edu.scholarshipsAndAid)} span2 />
             <Field
               label="Program description"
@@ -1216,6 +1270,7 @@ export function ProfileProjectsSection({ items }: { items: any[] }) {
         const team: { name?: string; role?: string }[] = Array.isArray(rawTeam) ? rawTeam : [];
         const projStatus = resolveProjectRowStatus(proj);
         const title = displayText(proj.title) || 'Project';
+        const projectTimeline = formatProjectTimelineForProfile(proj);
 
         return (
           <li key={proj.id ?? index} className={CARD_SHELL}>
@@ -1258,6 +1313,7 @@ export function ProfileProjectsSection({ items }: { items: any[] }) {
                 }
                 span2
               />
+              <Field label="Project period" value={projectTimeline || '—'} span2 />
               <Field
                 label="Verification method"
                 value={projectVerificationMethodDisplay(proj.verificationMethod) || '—'}
