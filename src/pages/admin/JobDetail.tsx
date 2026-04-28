@@ -4,6 +4,7 @@ import { api } from '@/services/api';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { HiArrowLeft, HiBriefcase, HiCheckCircle, HiPause, HiXCircle, HiStar, HiClock } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+import { formatMoney } from '@/utils/formatMoney';
 
 function jobStatusLabel(status: string): string {
   const map: Record<string, string> = {
@@ -247,11 +248,10 @@ export default function JobDetail() {
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
             <p className="text-sm font-medium text-gray-500 mb-1">Salary / Pay</p>
             <p className="text-lg font-semibold text-gray-900">
-              {job.pay.currency}{' '}
               {job.pay.min != null && job.pay.max != null
-                ? `${Number(job.pay.min).toLocaleString()} – ${Number(job.pay.max).toLocaleString()}`
+                ? `${formatMoney(job.pay.currency, job.pay.min)} – ${formatMoney(job.pay.currency, job.pay.max)}`
                 : job.pay.amount != null
-                  ? Number(job.pay.amount).toLocaleString()
+                  ? formatMoney(job.pay.currency, job.pay.amount)
                   : ''}{' '}
               {job.pay.period || 'Per annum'}
             </p>

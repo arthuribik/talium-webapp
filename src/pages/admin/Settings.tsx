@@ -16,6 +16,7 @@ import {
 import { api } from '@/services/api';
 import logo from '@/assets/logo.svg';
 import { APP_DESCRIPTION, APP_NAME } from '@/constants/app';
+import { formatMoney } from '@/utils/formatMoney';
 
 type SettingsTab = 'general' | 'users' | 'verification' | 'billing';
 type UsersSubTab = 'admin-users' | 'role-management';
@@ -843,9 +844,9 @@ export default function Settings() {
                                   <p className="text-sm text-gray-500 mt-1">
                                     {plan.price === 0
                                       ? 'Free'
-                                      : `$${plan.price}/mo${
+                                      : `${formatMoney('USD', plan.price)}/mo${
                                           plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
-                                            ? ` · $${plan.priceAnnualUsd}/yr`
+                                            ? ` · ${formatMoney('USD', plan.priceAnnualUsd)}/yr`
                                             : ''
                                         }`}
                                   </p>
@@ -919,9 +920,9 @@ export default function Settings() {
                                   <p className="text-sm text-gray-500 mt-1">
                                     {plan.price === 0
                                       ? 'Free'
-                                      : `$${plan.price}/mo${
+                                      : `${formatMoney('USD', plan.price)}/mo${
                                           plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
-                                            ? ` · $${plan.priceAnnualUsd}/yr`
+                                            ? ` · ${formatMoney('USD', plan.priceAnnualUsd)}/yr`
                                             : ''
                                         }`}
                                   </p>

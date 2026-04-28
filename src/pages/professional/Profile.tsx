@@ -19,7 +19,15 @@ import {
   HiAcademicCap,
   HiFolder,
 } from 'react-icons/hi';
-import { FaLinkedin, FaTwitter, FaGithub } from 'react-icons/fa';
+import {
+  FaFacebookF,
+  FaGithub,
+  FaInstagram,
+  FaLinkedin,
+  FaSnapchatGhost,
+  FaTiktok,
+  FaYoutube,
+} from 'react-icons/fa';
 import { HiGlobeAlt } from 'react-icons/hi2';
 import {
   formatTimezoneRowDisplay,
@@ -66,6 +74,14 @@ const EMPTY_VERIFICATION_ICONS: Record<
   certification: HiShieldCheck,
   projects: HiFolder,
 };
+
+function XLogoIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.656l-5.214-6.817-5.967 6.817H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77Z" />
+    </svg>
+  );
+}
 
 function ProfileSectionVerificationBadge({
   status,
@@ -395,10 +411,25 @@ export default function Profile() {
       ? Object.values(profile.certifications)
       : [];
   const social = profile.socialMedia || {};
-  const identityOk = profile.identityStatus === 'verified' || profile.identityVerified;
   const verifiedAt = profile.identityVerification?.verifiedAt
     ? new Date(profile.identityVerification.verifiedAt)
     : null;
+  const profileValidFrom =
+    verifiedAt ||
+    (profile.createdAt ? new Date(profile.createdAt) : null) ||
+    (profile.updatedAt ? new Date(profile.updatedAt) : new Date());
+  const profileValidTo = new Date(profileValidFrom);
+  profileValidTo.setFullYear(profileValidTo.getFullYear() + 5);
+  profileValidTo.setDate(profileValidTo.getDate() - 1);
+  const profileValidityLine = `${profileValidFrom.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })} to ${profileValidTo.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  })}`;
   const updatedLabel = profile.updatedAt
     ? new Date(profile.updatedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
     : new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
@@ -428,21 +459,59 @@ export default function Profile() {
     { id: 'projects', label: 'Projects' },
   ];
 
-  const socialLinks: { key: string; href: string; Icon: React.ComponentType<{ className?: string }> }[] =
-    [];
-  const add = (key: string, url: string, Icon: React.ComponentType<{ className?: string }>) => {
+  const socialLinks: {
+    key: string;
+    label: string;
+    href: string;
+    Icon: React.ComponentType<{ className?: string }>;
+  }[] = [];
+  const socialIconMap: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
+    linkedin: { label: 'LinkedIn', Icon: FaLinkedin },
+    twitter: { label: 'X', Icon: XLogoIcon },
+    x: { label: 'X', Icon: XLogoIcon },
+    facebook: { label: 'Facebook', Icon: FaFacebookF },
+    instagram: { label: 'Instagram', Icon: FaInstagram },
+    tiktok: { label: 'TikTok', Icon: FaTiktok },
+    snapchat: { label: 'Snapchat', Icon: FaSnapchatGhost },
+    github: { label: 'GitHub', Icon: FaGithub },
+    portfolio: { label: 'Portfolio', Icon: HiGlobeAlt },
+    website: { label: 'Website', Icon: HiGlobeAlt },
+    youtube: { label: 'YouTube', Icon: FaYoutube },
+  };
+  const add = (
+    key: string,
+    url: unknown,
+    fallback?: { label: string; Icon: React.ComponentType<{ className?: string }> },
+  ) => {
     const u = typeof url === 'string' ? url.trim() : '';
     if (!u) return;
+    const normalizedKey = key.toLowerCase();
+    const meta = socialIconMap[normalizedKey] || fallback || {
+      label: key.replace(/[_-]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+      Icon: HiGlobeAlt,
+    };
+    if (socialLinks.some((link) => link.key === normalizedKey)) return;
     socialLinks.push({
-      key,
+      key: normalizedKey,
+      label: meta.label,
       href: u.startsWith('http') ? u : `https://${u}`,
-      Icon,
+      Icon: meta.Icon,
     });
   };
-  add('linkedin', social.linkedin, FaLinkedin);
-  add('twitter', social.twitter, FaTwitter);
-  add('github', social.github, FaGithub);
-  add('portfolio', social.portfolio, HiGlobeAlt);
+  [
+    'linkedin',
+    'twitter',
+    'x',
+    'facebook',
+    'instagram',
+    'tiktok',
+    'snapchat',
+    'github',
+    'portfolio',
+    'website',
+    'youtube',
+  ].forEach((key) => add(key, social[key]));
+  Object.entries(social).forEach(([key, url]) => add(key, url));
 
   const viewPublic = () => {
     window.open(`/professionals/${profile.id}`, '_blank', 'noopener,noreferrer');
@@ -711,22 +780,21 @@ export default function Profile() {
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {socialLinks.length === 0 ? (
-                      <span className="text-sm text-gray-400">No social links yet</span>
-                    ) : (
-                      socialLinks.map(({ key, href, Icon }) => (
+                    {socialLinks.length > 0
+                      ? socialLinks.map(({ key, label, href, Icon }) => (
                         <a
                           key={key}
                           href={href}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-brand-600"
-                          aria-label={key}
+                          aria-label={label}
+                          title={label}
                         >
                           <Icon className="h-4 w-4" />
                         </a>
                       ))
-                    )}
+                      : null}
                   </div>
               </div>
 
@@ -775,16 +843,8 @@ export default function Profile() {
                 <HiCalendar className="h-6 w-6" />
               </div>
               <div>
-                <p className="text-lg font-bold text-gray-900">
-                  {identityOk ? 'Profile valid' : 'Action required'}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {identityOk && verifiedAt
-                    ? `Since ${verifiedAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                    : identityOk
-                      ? 'Identity verified'
-                      : 'Complete verification to unlock full trust'}
-                </p>
+                <p className="text-lg font-bold text-gray-900">Profile Valid</p>
+                <p className="text-sm text-gray-500">{profileValidityLine}</p>
               </div>
             </div>
           </div>

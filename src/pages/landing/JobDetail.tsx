@@ -5,6 +5,7 @@ import { buildCanonicalUrl } from '@/seo/resolveRouteSeo';
 import { usePageSeo } from '@/seo/usePageSeo';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 import { useAppSelector } from '@/store/hooks';
 import toast from 'react-hot-toast';
 import LandingLayout from '@/components/landing/LandingLayout';
@@ -453,7 +454,7 @@ export default function JobDetail() {
                       <div className="flex items-center text-gray-900 font-medium">
                         <HiCurrencyDollar className="w-5 h-5 mr-1" />
                         <span>
-                          {job.pay.currency} {job.pay.amount.toLocaleString()}
+                          {formatMoney(job.pay.currency, job.pay.amount)}
                           {job.pay.period && ` / ${job.pay.period}`}
                         </span>
                       </div>

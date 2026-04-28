@@ -18,6 +18,7 @@ import { HiBuildingOffice2 } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 
 type BillingTab = 'topup' | 'pricing' | 'invoices' | 'history';
 type UsageSubTab = 'plan' | 'token';
@@ -26,7 +27,7 @@ type BillingCyclePricing = 'monthly' | 'annual';
 type TierIcon = 'bolt' | 'crown' | 'building';
 
 function formatNgnCompact(amount: number): string {
-  return `₦${Math.round(amount).toLocaleString('en-NG')}`;
+  return formatMoney('NGN', Math.round(amount)) || '₦0';
 }
 
 const PRICING_CARDS: Array<{
@@ -158,15 +159,7 @@ function PricingTierIcon({ icon, tone }: { icon: TierIcon; tone: 'muted' | 'bran
 }
 
 function formatNgn(amount: number): string {
-  try {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      minimumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
-  }
+  return formatMoney('NGN', amount) || '₦0';
 }
 
 function formatDueDate(iso: string | null | undefined): string {
@@ -946,7 +939,7 @@ export default function BillingSubscription() {
             <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
               <h2 className="text-lg font-bold text-gray-900 sm:text-xl">Available Add-ons</h2>
               <p className="mt-1 text-sm text-gray-600">
-                Extend your plan with Taldium Tokens (1 TTK = $0.05 / ₦35)
+                Extend your plan with Taldium Tokens (1 TTK = {formatMoney('USD', 0.05)} / {formatMoney('NGN', 35)})
               </p>
               <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {ADD_ONS.map((addon) => (
@@ -1259,7 +1252,7 @@ export default function BillingSubscription() {
                   Fund Your Wallet
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Purchase Taldium Tokens (TTK). 1 TTK = $0.05 / ₦35
+                  Purchase Taldium Tokens (TTK). 1 TTK = {formatMoney('USD', 0.05)} / {formatMoney('NGN', 35)}
                 </p>
               </div>
               <button

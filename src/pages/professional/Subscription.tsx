@@ -3,6 +3,7 @@ import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { HiCheck, HiCalendar } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 
 export default function ProfessionalSubscription() {
   const [loading, setLoading] = useState(true);
@@ -188,7 +189,7 @@ export default function ProfessionalSubscription() {
                   
                   <div className="mb-4">
                     <span className="text-3xl font-bold text-gray-900">
-                      {plan.price === 0 || plan.price === '0' ? 'Free' : `$${plan.price}`}
+                      {plan.price === 0 || plan.price === '0' ? 'Free' : formatMoney('USD', plan.price)}
                     </span>
                     {plan.price > 0 && (
                       <span className="text-gray-600 ml-2">/{plan.billingCycle || 'month'}</span>
@@ -283,7 +284,7 @@ export default function ProfessionalSubscription() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm font-semibold text-gray-900">
-                          {transaction.currency} {transaction.amount?.toLocaleString()}
+                          {formatMoney(transaction.currency, transaction.amount)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 import toast from 'react-hot-toast';
 import { HiArrowLeft, HiUser, HiLocationMarker, HiCheckCircle, HiXCircle, HiX, HiClock, HiStar, HiPause, HiPlay, HiDotsVertical, HiAcademicCap, HiBriefcase, HiPencil, HiPlus, HiTrash, HiOfficeBuilding } from 'react-icons/hi';
 
@@ -582,11 +583,10 @@ export default function OrganisationJobDetail() {
                 <div className="flex items-baseline gap-2">
                   <span className="text-sm font-medium text-gray-500 uppercase tracking-wide">Salary</span>
                   <span className="text-xl font-semibold text-gray-900">
-                    {job.pay.currency || 'USD'}{' '}
                     {job.pay.min != null || job.pay.max != null
-                      ? [job.pay.min != null ? Number(job.pay.min).toLocaleString() : '', job.pay.max != null ? Number(job.pay.max).toLocaleString() : ''].filter(Boolean).join(' – ')
+                      ? [job.pay.min != null ? formatMoney(job.pay.currency || 'USD', job.pay.min) : '', job.pay.max != null ? formatMoney(job.pay.currency || 'USD', job.pay.max) : ''].filter(Boolean).join(' – ')
                       : job.pay.amount != null
-                        ? Number(job.pay.amount).toLocaleString()
+                        ? formatMoney(job.pay.currency || 'USD', job.pay.amount)
                         : '—'}{' '}
                     <span className="text-base font-normal text-gray-500">{job.pay.period || 'Per annum'}</span>
                   </span>

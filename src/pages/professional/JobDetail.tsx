@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 import toast from 'react-hot-toast';
 import {
   HiBriefcase,
@@ -723,7 +724,7 @@ export default function ProfessionalJobDetail() {
                     <span className="text-gray-500 block">Salary</span>
                     <div className="flex items-center font-medium text-gray-900">
                       <HiCurrencyDollar className="w-4 h-4 mr-1" />
-                      {job.pay.currency} {job.pay.amount.toLocaleString()}
+                      {formatMoney(job.pay.currency, job.pay.amount)}
                       {job.pay.period && ` / ${job.pay.period}`}
                     </div>
                   </div>

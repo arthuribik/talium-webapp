@@ -1,4 +1,5 @@
 /** Shared work experience display + API → editor/display row mapping (Profile, Verification Center). */
+import { formatMoney } from '@/utils/formatMoney';
 
 export type WorkRoleEntry = {
   title: string;
@@ -275,10 +276,9 @@ export function workSalaryFrequencyDisplay(value: string): string {
 }
 
 export function formatWorkRemunerationLine(entry: WorkEntry): string {
-  const cur = entry.currency?.trim() || 'USD';
   const sal = entry.salary?.trim();
   if (!sal) return '—';
-  return `${cur} ${sal} / ${workSalaryFrequencyDisplay(entry.salaryFrequency)}`;
+  return `${formatMoney(entry.currency || 'USD', sal) || sal} / ${workSalaryFrequencyDisplay(entry.salaryFrequency)}`;
 }
 
 export function formatWorkCompensationSummary(entry: WorkEntry): string {

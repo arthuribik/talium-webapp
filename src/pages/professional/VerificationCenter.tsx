@@ -52,6 +52,7 @@ import {
   workAssociatedSkillTags,
   workLatestRoleTitleForHeader,
 } from '@/utils/workExperienceDisplay';
+import { formatMoney } from '@/utils/formatMoney';
 
 /** Same option list as signup country field; first row label reflects nationality. */
 const NATIONALITY_SEARCHABLE_OPTIONS = [
@@ -224,6 +225,39 @@ function VerificationFormDrawer({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function verificationDisplayText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  const s = typeof value === 'string' ? value.trim() : String(value);
+  return s === '—' || s === '-' ? '' : s;
+}
+
+function VerificationReadOnlyField({
+  label,
+  value,
+  span2,
+  breakAll,
+}: {
+  label: string;
+  value: ReactNode;
+  span2?: boolean;
+  breakAll?: boolean;
+}) {
+  const empty =
+    value === null ||
+    value === undefined ||
+    value === false ||
+    (typeof value === 'string' && !verificationDisplayText(value));
+  if (empty) return null;
+  return (
+    <div className={span2 ? 'sm:col-span-2' : 'sm:col-span-1'}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</dt>
+      <dd className={`mt-0.5 text-sm font-semibold text-gray-900 ${breakAll ? 'break-all' : ''}`}>
+        {value}
+      </dd>
     </div>
   );
 }
@@ -1107,7 +1141,7 @@ const EDU_VERIF_TAG_CHIP_STATIC_CLASS =
 function formatEducationMoneyLine(currency: string | undefined, amount: string | undefined): string | null {
   const a = amount?.trim();
   if (!a) return null;
-  return `${(currency || 'USD').trim()} ${a}`;
+  return formatMoney(currency || 'USD', a) || a;
 }
 
 function cloneEducationEntry(e: EducationEntry): EducationEntry {
@@ -4486,52 +4520,62 @@ export default function VerificationCenter() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6 text-sm border-b border-gray-200 pb-6">
                     <div className="space-y-5">
+                      {personal.firstName?.trim() ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">First Name</p>
                         <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                          {personal.firstName?.trim() || '—'}
+                          {personal.firstName.trim()}
                           {!!personal.firstName?.trim() && (
                             <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
                           )}
                         </p>
                       </div>
+                      ) : null}
+                      {personal.middleName?.trim() ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Other Names</p>
-                        <p className="text-gray-900 font-semibold">{personal.middleName?.trim() || '—'}</p>
+                        <p className="text-gray-900 font-semibold">{personal.middleName.trim()}</p>
                       </div>
+                      ) : null}
+                      {personal.dateOfBirth ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Date of Birth</p>
                         <p className="text-gray-900 font-semibold flex flex-wrap items-baseline gap-2">
-                          {personal.dateOfBirth
-                            ? (() => {
+                          {(() => {
                                 const d = new Date(personal.dateOfBirth);
                                 return Number.isNaN(d.getTime()) ? personal.dateOfBirth : d.toLocaleDateString();
-                              })()
-                            : '—'}
+                              })()}
                           {personalAgeYears != null && (
                             <span className="text-gray-500 font-normal text-sm">({personalAgeYears} yrs)</span>
                           )}
                         </p>
                       </div>
+                      ) : null}
                     </div>
                     <div className="space-y-5">
+                      {personal.lastName?.trim() ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Last Name</p>
                         <p className="text-gray-900 font-semibold flex items-center gap-1.5 flex-wrap">
-                          {personal.lastName?.trim() || '—'}
+                          {personal.lastName.trim()}
                           {!!personal.lastName?.trim() && (
                             <HiCheckCircle className="w-4 h-4 text-green-600 shrink-0" aria-hidden />
                           )}
                         </p>
                       </div>
+                      ) : null}
+                      {personal.nationality?.trim() ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Nationality</p>
-                        <p className="text-gray-900 font-semibold">{personal.nationality?.trim() || '—'}</p>
+                        <p className="text-gray-900 font-semibold">{personal.nationality.trim()}</p>
                       </div>
+                      ) : null}
+                      {personal.gender?.trim() ? (
                       <div>
                         <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-1">Gender</p>
-                        <p className="text-gray-900 font-semibold">{personal.gender?.trim() || '—'}</p>
+                        <p className="text-gray-900 font-semibold">{personal.gender.trim()}</p>
                       </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -5317,7 +5361,7 @@ export default function VerificationCenter() {
                   const methodLabel = locationVerificationMethodLabel(loc);
                   const title =
                     [loc.city, loc.state].filter((s) => s?.trim()).join(', ') || 'Location';
-                  const subtitle = `${loc.country?.trim() || '—'} · ${loc.address?.trim() || '—'}`;
+                  const subtitle = [loc.country?.trim(), loc.address?.trim()].filter(Boolean).join(' · ');
                   const locRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`loc_${index}_`));
                   const showSelfDeclBanner = status === 'self_declared';
                   const showVerifyCta =
@@ -5374,7 +5418,7 @@ export default function VerificationCenter() {
                               </div>
                               <div className="min-w-0">
                                 <p className="text-lg font-semibold leading-tight text-gray-900">{title}</p>
-                                <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+                                {subtitle ? <p className="mt-1 text-sm text-gray-500">{subtitle}</p> : null}
                               </div>
                             </div>
                             <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -5808,102 +5852,38 @@ export default function VerificationCenter() {
                           {expanded ? (
                             <div className="space-y-6 border-t border-gray-100 pt-4 sm:pt-5">
                           <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Institution
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {entry.institutionName?.trim() || '—'}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                School Type
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {schoolTypeDisplayLabel(entry.schoolType)}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Level</dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {educationLevelLabel(entry.levelOfEducation)}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Qualification
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {educationQualificationDisplay(entry.degreeType)}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-2">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Field of Study
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {entry.fieldOfStudy?.trim() || '—'}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Grade</dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {entry.grade?.trim() || '—'}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Duration</dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {formatEducationDurationLine(entry)}
-                              </dd>
-                            </div>
-                            <div className="sm:col-span-1">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Country</dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                {entry.country?.trim() || '—'}
-                              </dd>
-                            </div>
+                            <VerificationReadOnlyField label="Institution" value={entry.institutionName?.trim()} />
+                            <VerificationReadOnlyField label="School Type" value={schoolTypeDisplayLabel(entry.schoolType)} />
+                            <VerificationReadOnlyField label="Level" value={educationLevelLabel(entry.levelOfEducation)} />
+                            <VerificationReadOnlyField label="Qualification" value={educationQualificationDisplay(entry.degreeType)} />
+                            <VerificationReadOnlyField label="Field of Study" value={entry.fieldOfStudy?.trim()} span2 />
+                            <VerificationReadOnlyField label="Grade" value={entry.grade?.trim()} />
+                            <VerificationReadOnlyField label="Duration" value={formatEducationDurationLine(entry)} />
+                            <VerificationReadOnlyField label="Country" value={entry.country?.trim()} />
                             {costLine ? (
-                              <div className="sm:col-span-1">
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Cost</dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">{costLine}</dd>
-                              </div>
+                              <VerificationReadOnlyField label="Cost" value={costLine} />
                             ) : null}
                             {entry.hasLoan ? (
                               <>
-                                <div className="sm:col-span-1">
-                                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                    Pending loan
-                                  </dt>
-                                  <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                    {loanLine || '—'}
-                                  </dd>
-                                </div>
-                                <div className="sm:col-span-1">
-                                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                    Loan repayment frequency
-                                  </dt>
-                                  <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                    {educationPaymentFrequencyLabel(entry.loanRepaymentFrequency)}
-                                  </dd>
-                                </div>
+                                <VerificationReadOnlyField label="Pending loan" value={loanLine} />
+                                <VerificationReadOnlyField
+                                  label="Loan repayment frequency"
+                                  value={educationPaymentFrequencyLabel(entry.loanRepaymentFrequency)}
+                                />
                               </>
                             ) : null}
-                            <div className="sm:col-span-2">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Student verification email
-                              </dt>
-                              <dd className="mt-0.5 text-sm font-semibold text-gray-900 break-all">
-                                {entry.studentVerificationEmail?.trim() || '—'}
-                              </dd>
-                            </div>
+                            <VerificationReadOnlyField
+                              label="Student verification email"
+                              value={entry.studentVerificationEmail?.trim()}
+                              span2
+                              breakAll
+                            />
+                            {scholarshipChips.length > 0 ? (
                             <div className="sm:col-span-2">
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Scholarships &amp; aid
                               </dt>
                               <dd className="mt-0.5">
-                                {scholarshipChips.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {scholarshipChips.map((chip, sci) => (
                                       <span
@@ -5914,25 +5894,20 @@ export default function VerificationCenter() {
                                       </span>
                                     ))}
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-semibold text-gray-900">—</span>
-                                )}
                               </dd>
                             </div>
-                            <div className="sm:col-span-2">
-                              <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                Program description
-                              </dt>
-                              <dd className="mt-0.5 whitespace-pre-wrap text-sm font-semibold text-gray-900">
-                                {entry.programDescription?.trim() || '—'}
-                              </dd>
-                            </div>
+                            ) : null}
+                            <VerificationReadOnlyField
+                              label="Program description"
+                              value={entry.programDescription?.trim()}
+                              span2
+                            />
+                            {courseworkChips.length > 0 ? (
                             <div className="sm:col-span-2">
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Coursework / responsibilities
                               </dt>
                               <dd className="mt-0.5">
-                                {courseworkChips.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {courseworkChips.map((chip, cci) => (
                                       <span
@@ -5943,17 +5918,15 @@ export default function VerificationCenter() {
                                       </span>
                                     ))}
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-semibold text-gray-900">—</span>
-                                )}
                               </dd>
                             </div>
+                            ) : null}
+                            {achievementChips.length > 0 ? (
                             <div className="sm:col-span-2">
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Honors / achievements
                               </dt>
                               <dd className="mt-0.5">
-                                {achievementChips.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {achievementChips.map((chip, aci) => (
                                       <span
@@ -5964,17 +5937,15 @@ export default function VerificationCenter() {
                                       </span>
                                     ))}
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-semibold text-gray-900">—</span>
-                                )}
                               </dd>
                             </div>
+                            ) : null}
+                            {activitiesChips.length > 0 ? (
                             <div className="sm:col-span-2">
                               <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                 Activities &amp; Societies
                               </dt>
                               <dd className="mt-0.5">
-                                {activitiesChips.length > 0 ? (
                                   <div className="flex flex-wrap gap-2">
                                     {activitiesChips.map((chip, aci) => (
                                       <span
@@ -5985,11 +5956,9 @@ export default function VerificationCenter() {
                                       </span>
                                     ))}
                                   </div>
-                                ) : (
-                                  <span className="text-sm font-semibold text-gray-900">—</span>
-                                )}
                               </dd>
                             </div>
+                            ) : null}
                           </dl>
 
                           {skillChips.length > 0 ? (
@@ -6008,14 +5977,20 @@ export default function VerificationCenter() {
                             </div>
                           ) : null}
 
+                          {mediaHref ||
+                          educationVerificationDocumentsBlock(entry.verificationDocuments) !== '—' ||
+                          formatEducationVerificationDateTime(entry.verifiedAt) !== '—' ||
+                          entry.reviewedBy?.trim() ||
+                          formatEducationVerificationDateTime(entry.createdAt) !== '—' ||
+                          formatEducationVerificationDateTime(entry.updatedAt) !== '—' ? (
                           <div className="mt-6 border-t border-gray-100 pt-5">
                             <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+                              {mediaHref ? (
                               <div>
                                 <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                   Supporting media
                                 </dt>
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900 break-all">
-                                  {mediaHref ? (
                                     <a
                                       href={mediaHref}
                                       target="_blank"
@@ -6024,12 +5999,10 @@ export default function VerificationCenter() {
                                     >
                                       View file
                                     </a>
-                                  ) : (
-                                    '—'
-                                  )}
                                 </dd>
                               </div>
-                              <div className="hidden sm:block" aria-hidden />
+                              ) : null}
+                              {educationVerificationDocumentsBlock(entry.verificationDocuments) !== '—' ? (
                               <div className="sm:col-span-1">
                                 <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                   Verification documents
@@ -6038,39 +6011,23 @@ export default function VerificationCenter() {
                                   {educationVerificationDocumentsBlock(entry.verificationDocuments)}
                                 </dd>
                               </div>
-                              <div className="hidden sm:block" aria-hidden />
-                              <div>
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Verified at
-                                </dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                  {formatEducationVerificationDateTime(entry.verifiedAt)}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Reviewed by
-                                </dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                  {entry.reviewedBy?.trim() || '—'}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Created</dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                  {formatEducationVerificationDateTime(entry.createdAt)}
-                                </dd>
-                              </div>
-                              <div>
-                                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                                  Last updated
-                                </dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900">
-                                  {formatEducationVerificationDateTime(entry.updatedAt)}
-                                </dd>
-                              </div>
+                              ) : null}
+                              <VerificationReadOnlyField
+                                label="Verified at"
+                                value={formatEducationVerificationDateTime(entry.verifiedAt)}
+                              />
+                              <VerificationReadOnlyField label="Reviewed by" value={entry.reviewedBy?.trim()} />
+                              <VerificationReadOnlyField
+                                label="Created"
+                                value={formatEducationVerificationDateTime(entry.createdAt)}
+                              />
+                              <VerificationReadOnlyField
+                                label="Last updated"
+                                value={formatEducationVerificationDateTime(entry.updatedAt)}
+                              />
                             </dl>
                           </div>
+                          ) : null}
                         </div>
                       ) : null}
                         </div>
@@ -6786,7 +6743,6 @@ export default function VerificationCenter() {
                   const roleLocationLine = entry.roleLocation?.trim() || '';
                   const tenureYears = workTenureYearsAtOrganisation(entry);
                   const roleTimelineRows = workRolesForTimelineDisplay(entry);
-                  const primaryRoleRef = entry.workRoles[0];
                   const skillTags = workAssociatedSkillTags(entry);
                   const workRowErrs = Object.entries(fe).filter(([k]) => k.startsWith(`work_${index}_`));
                   const workCardKey = entry.id ? String(entry.id) : `tmp-${index}`;
@@ -6938,11 +6894,6 @@ export default function VerificationCenter() {
                                           <div className="min-w-0 flex-1 pt-0.5">
                                             <p className="text-sm font-semibold text-gray-900">
                                               {roleRow.title}
-                                              {primaryRoleRef && roleRow === primaryRoleRef ? (
-                                                <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
-                                                  Primary
-                                                </span>
-                                              ) : null}
                                             </p>
                                             <p className="mt-0.5 text-sm text-gray-500">
                                               {formatWorkRoleDateRange(roleRow)}
@@ -6955,6 +6906,7 @@ export default function VerificationCenter() {
                                 </div>
                               ) : null}
                               <div className="grid gap-4 sm:grid-cols-3">
+                                {formatWorkRemunerationLine(entry) !== '—' ? (
                                 <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Remuneration
@@ -6963,6 +6915,7 @@ export default function VerificationCenter() {
                                     {formatWorkRemunerationLine(entry)}
                                   </p>
                                 </div>
+                                ) : null}
                                 {/* <div>
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Role location
@@ -6971,6 +6924,7 @@ export default function VerificationCenter() {
                                     {entry.roleLocation?.trim() ? entry.roleLocation.trim() : '—'}
                                   </p>
                                 </div> */}
+                                {formatWorkCompensationSummary(entry) !== '—' || (entry.otherCompensation ?? []).some((p) => p?.trim()) ? (
                                 <div className="sm:col-span-1">
                                   <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
                                     Other compensation
@@ -7000,29 +6954,32 @@ export default function VerificationCenter() {
                                     );
                                   })()}
                                 </div>
+                                ) : null}
                               </div>
+                              {entry.jobDescription?.trim() ? (
                               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                                 <p className="text-xs font-medium text-gray-500">Job description</p>
                                 <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                                  {entry.jobDescription?.trim() ? entry.jobDescription.trim() : '—'}
+                                  {entry.jobDescription.trim()}
                                 </p>
                               </div>
+                              ) : null}
+                              {entry.responsibilitiesText?.trim() ? (
                               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                                 <p className="text-xs font-medium text-gray-500">Responsibilities</p>
                                 <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                                  {entry.responsibilitiesText?.trim()
-                                    ? entry.responsibilitiesText.trim()
-                                    : '—'}
+                                  {entry.responsibilitiesText.trim()}
                                 </p>
                               </div>
+                              ) : null}
+                              {entry.achievementsText?.trim() ? (
                               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                                 <p className="text-xs font-medium text-gray-500">Achievements</p>
                                 <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                                  {entry.achievementsText?.trim()
-                                    ? entry.achievementsText.trim()
-                                    : '—'}
+                                  {entry.achievementsText.trim()}
                                 </p>
                               </div>
+                              ) : null}
                               {skillTags.length > 0 ? (
                                 <>
                                 <p className="text-xs font-medium text-gray-500">Skills</p>
@@ -7631,7 +7588,7 @@ export default function VerificationCenter() {
                                       </div>
                                       <div className="min-w-0">
                                         <p className="truncate text-sm font-medium text-gray-900">
-                                          {m.name.trim() || '—'}
+                                          {m.name.trim() || m.role.trim()}
                                         </p>
                                         {m.role.trim() ? (
                                           <p className="truncate text-xs text-gray-500">{m.role.trim()}</p>
@@ -7770,7 +7727,7 @@ export default function VerificationCenter() {
                                           </div>
                                           <div className="min-w-0">
                                             <p className="truncate text-sm font-medium text-gray-900">
-                                              {m.name.trim() || '—'}
+                                              {m.name.trim() || m.role.trim()}
                                             </p>
                                             {m.role.trim() ? (
                                               <p className="truncate text-xs text-gray-500">{m.role.trim()}</p>
@@ -8777,7 +8734,9 @@ export default function VerificationCenter() {
                         <HiChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-300" aria-hidden />
                         <HiUsers className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-gray-900 truncate">{rel.fullName || '—'}</p>
+                          {rel.fullName?.trim() ? (
+                            <p className="truncate font-semibold text-gray-900">{rel.fullName.trim()}</p>
+                          ) : null}
                           <p className="mt-0.5 text-sm text-gray-500">{typeLabel}</p>
                         </div>
                       </div>

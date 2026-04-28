@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 import toast from 'react-hot-toast';
 import { HiArrowLeft, HiCurrencyDollar, HiCheckCircle, HiXCircle, HiClock, HiUser, HiDocumentText, HiCalendar } from 'react-icons/hi';
 
@@ -161,7 +162,7 @@ export default function TransactionDetail() {
                 <div>
                   <label className="text-sm font-medium text-gray-500">Amount</label>
                   <p className="text-gray-900 text-lg font-semibold">
-                    {transaction.currency} {transaction.amount?.toLocaleString()}
+                    {formatMoney(transaction.currency, transaction.amount)}
                   </p>
                 </div>
                 <div>

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { isValidElement, useMemo, useState } from 'react';
 import {
   HiAcademicCap,
   HiBadgeCheck,
@@ -24,6 +24,7 @@ import {
   workTenureYearsAtOrganisation,
   type WorkEntry,
 } from '@/utils/workExperienceDisplay';
+import { formatMoney } from '@/utils/formatMoney';
 
 const RESIDENCE_TYPE_LABELS: Record<string, string> = {
   own_home: 'I own my home',
@@ -252,7 +253,7 @@ function splitTextToProfileChips(raw: string): string[] | null {
 
 function ProfileChipList({ text }: { text: string }) {
   const raw = displayText(text);
-  if (!raw) return <>—</>;
+  if (!raw) return null;
   const chips = splitTextToProfileChips(raw);
   if (!chips) {
     return <MultilineFieldValue text={raw} />;
@@ -288,19 +289,24 @@ function Field({
   const empty =
     value === null ||
     value === undefined ||
+    value === false ||
     value === '' ||
-    (typeof value === 'string' && !value.trim());
+    (typeof value === 'string' && (!value.trim() || value.trim() === '—' || value.trim() === '-')) ||
+    (isValidElement(value) &&
+      'text' in (value.props as Record<string, unknown>) &&
+      !displayText((value.props as { text?: unknown }).text));
+  if (empty) return null;
   return (
     <div className={span2 ? 'col-span-full' : 'min-w-0'}>
       <dt className={PROFILE_FIELD_LABEL_CLASS}>{label}</dt>
-      <dd className={`min-w-0 ${PROFILE_FIELD_VALUE_CLASS}`}>{empty ? '—' : value}</dd>
+      <dd className={`min-w-0 ${PROFILE_FIELD_VALUE_CLASS}`}>{value}</dd>
     </div>
   );
 }
 
 function MultilineFieldValue({ text }: { text: string }) {
   const t = displayText(text);
-  if (!t) return <>—</>;
+  if (!t) return null;
   return <span className="whitespace-pre-wrap break-words text-[15px] font-normal leading-relaxed text-gray-900">{t}</span>;
 }
 
@@ -525,7 +531,6 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
   const roleLocationLine = entry.roleLocation?.trim() || '';
   const tenureYears = workTenureYearsAtOrganisation(entry);
   const roleTimelineRows = workRolesForTimelineDisplay(entry);
-  const primaryRoleRef = entry.workRoles[0];
   const skillTags = workAssociatedSkillTags(entry);
   const rowStatus = resolveWorkVerificationRowStatus(exp);
   const selfDeclared = entry.selfDeclared;
@@ -535,6 +540,10 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
     if (!u) return null;
     return u.startsWith('http') ? u : resolveUrl(u);
   })();
+  const hasWorkVerificationDetails =
+    !!workVerificationMethodDisplay(exp.verificationMethod) ||
+    !!displayText(exp.workVerificationEmail) ||
+    !!workSupportingHref;
   const cardKey = String(exp.id ?? headerTitle);
 
   return (
@@ -631,11 +640,6 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
                         <div className="min-w-0 flex-1 pt-0.5">
                           <p className="text-sm font-semibold text-gray-900">
                             {roleRow.title}
-                            {primaryRoleRef && roleRow === primaryRoleRef ? (
-                              <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
-                                Primary
-                              </span>
-                            ) : null}
                           </p>
                           <p className="mt-0.5 text-sm text-gray-500">{formatWorkRoleDateRange(roleRow)}</p>
                         </div>
@@ -669,24 +673,30 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
               </div>
             </div>
 
+            {entry.jobDescription?.trim() ? (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
               <p className="text-xs font-medium text-gray-500">Job description</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                {entry.jobDescription?.trim() ? entry.jobDescription.trim() : '—'}
+                {entry.jobDescription.trim()}
               </p>
             </div>
+            ) : null}
+            {entry.responsibilitiesText?.trim() ? (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
               <p className="text-xs font-medium text-gray-500">Responsibilities</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                {entry.responsibilitiesText?.trim() ? entry.responsibilitiesText.trim() : '—'}
+                {entry.responsibilitiesText.trim()}
               </p>
             </div>
+            ) : null}
+            {entry.achievementsText?.trim() ? (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
               <p className="text-xs font-medium text-gray-500">Achievements</p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                {entry.achievementsText?.trim() ? entry.achievementsText.trim() : '—'}
+                {entry.achievementsText.trim()}
               </p>
             </div>
+            ) : null}
 
             {skillTags.length > 0 ? (
               <div className="flex flex-wrap gap-2">
@@ -698,7 +708,7 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
               </div>
             ) : null}
 
-            {!selfDeclared ? (
+            {!selfDeclared && hasWorkVerificationDetails ? (
               <div className="rounded-lg border border-gray-100 bg-white px-4 py-3 text-sm text-gray-700">
                 <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Verification</p>
                 <div className="mt-2 space-y-1.5">
@@ -728,11 +738,6 @@ function ProfileWorkRecordCard({ exp }: { exp: any }) {
                         Open
                       </a>
                     </p>
-                  ) : null}
-                  {!workVerificationMethodDisplay(exp.verificationMethod) &&
-                  !displayText(exp.workVerificationEmail) &&
-                  !workSupportingHref ? (
-                    <p className="text-gray-500">—</p>
                   ) : null}
                 </div>
               </div>
@@ -767,11 +772,11 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
     '—';
   const costStr =
     edu.costOfEducation != null && edu.costOfEducation !== ''
-      ? `${displayText(edu.currency) || ''} ${String(edu.costOfEducation)}`.trim()
+      ? formatMoney(displayText(edu.currency) || 'USD', edu.costOfEducation) || null
       : '—';
   const loanStr =
     edu.pendingLoanAmount != null && edu.pendingLoanAmount !== ''
-      ? `${displayText(edu.loanCurrency) || ''} ${String(edu.pendingLoanAmount)}`.trim()
+      ? formatMoney(displayText(edu.loanCurrency) || 'USD', edu.pendingLoanAmount) || null
       : 'Has no loan';
   /** When explicitly false, omit loan amount and repayment rows (matches Verification Center). */
   const hideLoanFields =
@@ -917,12 +922,14 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
             />
           </dl>
 
-          <div className={PROFILE_INSET_SECTION_CLASS}>
-            <p className={PROFILE_FIELD_LABEL_CLASS}>Activities & societies</p>
-            <div className="mt-2">
-              <MultilineFieldValue text={displayText(edu.activitiesSocieties)} />
+          {displayText(edu.activitiesSocieties) ? (
+            <div className={PROFILE_INSET_SECTION_CLASS}>
+              <p className={PROFILE_FIELD_LABEL_CLASS}>Activities & societies</p>
+              <div className="mt-2">
+                <MultilineFieldValue text={displayText(edu.activitiesSocieties)} />
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <dl className={DETAIL_STACK_FULL}>
             <Field
@@ -951,12 +958,14 @@ function ProfileEducationRecordCard({ edu }: { edu: any }) {
               ) : (
                 <Field label="Supporting media" value="—" span2 />
               )}
-              <div className="col-span-full">
-                <dt className={PROFILE_FIELD_LABEL_CLASS}>Verification documents</dt>
-                <dd className="min-w-0 text-[15px] font-bold leading-snug text-gray-900">
-                  {educationVerificationDocumentsDd(edu.verificationDocuments)}
-                </dd>
-              </div>
+              {educationVerificationDocumentsDd(edu.verificationDocuments) !== '—' ? (
+                <div className="col-span-full">
+                  <dt className={PROFILE_FIELD_LABEL_CLASS}>Verification documents</dt>
+                  <dd className="min-w-0 text-[15px] font-bold leading-snug text-gray-900">
+                    {educationVerificationDocumentsDd(edu.verificationDocuments)}
+                  </dd>
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -995,7 +1004,7 @@ export function ProfileLocationsSection({ items }: { items: any[] }) {
         const status = resolveLocationRowStatus(loc);
         const title =
           [displayText(loc.city), displayText(loc.state)].filter(Boolean).join(', ') || 'Location';
-        const subtitle = `${displayText(loc.country) || '—'} · ${displayText(loc.address) || '—'}`;
+        const subtitle = [displayText(loc.country), displayText(loc.address)].filter(Boolean).join(' · ');
 
         return (
           <li key={loc.id ?? `loc-${index}`} className={CARD_SHELL}>
@@ -1004,7 +1013,7 @@ export function ProfileLocationsSection({ items }: { items: any[] }) {
                 <HiLocationMarker className="w-4 h-4 text-brand-600 shrink-0 mt-0.5 sm:w-5 sm:h-5" />
                 <div className="min-w-0">
                   <p className="text-[15px] font-bold leading-snug text-gray-900">{title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 sm:text-sm">{subtitle}</p>
+                  {subtitle ? <p className="text-xs text-gray-500 mt-0.5 sm:text-sm">{subtitle}</p> : null}
                 </div>
               </div>
               <div className="flex flex-col items-start sm:items-end gap-0.5 shrink-0">
@@ -1354,23 +1363,21 @@ export function ProfileProjectsSection({ items }: { items: any[] }) {
                 <Field label="Media URL" value="—" span2 />
               )}
             </dl>
-            <div>
-              <p className={PROFILE_FIELD_LABEL_CLASS}>Team members</p>
-              {team.length === 0 ? (
-                <p className="mt-0.5 text-[15px] font-bold leading-snug text-gray-500">—</p>
-              ) : (
+            {team.length > 0 ? (
+              <div>
+                <p className={PROFILE_FIELD_LABEL_CLASS}>Team members</p>
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {team.map((m, mi) => (
                     <li key={mi} className={PROFILE_CHIP_CLASS}>
-                      <span className="truncate font-medium">{displayText(m.name) || '—'}</span>
+                      <span className="truncate font-medium">{displayText(m.name) || displayText(m.role)}</span>
                       {displayText(m.role) ? (
                         <span className="font-normal text-sky-800/90"> · {m.role}</span>
                       ) : null}
                     </li>
                   ))}
                 </ul>
-              )}
-            </div>
+              </div>
+            ) : null}
           </li>
         );
       })}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/services/api';
 import AdminLayout from '@/components/admin/AdminLayout';
+import { formatMoney } from '@/utils/formatMoney';
 import {
   HiSearch,
   HiFilter,
@@ -202,7 +203,7 @@ export default function TransactionsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
-                            {trans.currency} {trans.amount.toLocaleString()}
+                            {formatMoney(trans.currency, trans.amount)}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, type ComponentType } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ProfessionalLayout from '@/components/professional/ProfessionalLayout';
 import { api } from '@/services/api';
+import { formatMoney } from '@/utils/formatMoney';
 import toast from 'react-hot-toast';
 import {
   HiBriefcase,
@@ -13,6 +14,8 @@ import {
   HiPaperAirplane,
   HiLightningBolt,
   HiBadgeCheck,
+  HiPlus,
+  HiTrash,
 } from 'react-icons/hi';
 
 interface Job {
@@ -49,6 +52,25 @@ interface JobFilters {
   payPreset: string;
 }
 
+interface JobAutomationFlow {
+  id: string;
+  role: string;
+  workMode: string;
+  employmentType: string;
+  payRange: string;
+  organisations: string;
+  location: string;
+}
+
+interface JobSettingsState {
+  jobTitles: string;
+  workMode: string;
+  location: string;
+  employmentType: string;
+  allowRecruiters: boolean;
+  automationFlows: JobAutomationFlow[];
+}
+
 const TAB_PARAM = 'tab';
 const MY_JOBS_VIEW_PARAM = 'view';
 const VALID_MY_JOBS_VIEWS = ['applied', 'in_progress', 'hired'] as const;
@@ -65,6 +87,40 @@ const TAB_LABELS: Record<(typeof VALID_TABS)[number], string> = {
 
 const filterSelectClass =
   'w-full cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-2.5 pl-3 pr-9 text-sm text-gray-900 shadow-sm focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200';
+const settingsInputClass =
+  'w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20';
+const settingsSelectClass =
+  'w-full cursor-pointer appearance-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 pr-9 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20';
+
+const JOB_WORK_MODE_OPTIONS = [
+  { value: '', label: 'Select' },
+  { value: 'remote', label: 'Remote' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'on_site', label: 'Onsite' },
+  { value: 'global_remote', label: 'Global Remote' },
+];
+
+const JOB_EMPLOYMENT_TYPE_OPTIONS = [
+  { value: '', label: 'Select' },
+  { value: 'full_time', label: 'Full-time' },
+  { value: 'part_time', label: 'Part-time' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'internship', label: 'Internship' },
+  { value: 'freelance', label: 'Freelance' },
+];
+
+const emptyAutomationFlow = (): JobAutomationFlow => ({
+  id:
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `flow-${Date.now()}`,
+  role: '',
+  workMode: '',
+  employmentType: '',
+  payRange: '',
+  organisations: '',
+  location: '',
+});
 
 function workModeLabel(mode: string): string {
   const m = (mode || '').toLowerCase();
@@ -90,19 +146,13 @@ function formatEmploymentType(t: string): string {
 
 function formatPayRange(pay: Job['pay']): string | null {
   if (!pay || typeof pay !== 'object') return null;
-  const sym = pay.currency === 'USD' || !pay.currency ? '$' : `${pay.currency} `;
-  const fmtK = (n: number) => {
-    const v = Number(n);
-    if (Number.isNaN(v)) return '';
-    if (v >= 1000) return `${sym}${Math.round(v / 1000)}k`;
-    return `${sym}${v}`;
-  };
+  const fmt = (n: number) => formatMoney(pay.currency, n) || '';
   if (pay.min != null && pay.max != null) {
-    return `${fmtK(pay.min)} - ${fmtK(pay.max)}`;
+    return `${fmt(pay.min)} - ${fmt(pay.max)}`;
   }
-  if (pay.amount != null) return fmtK(pay.amount);
-  if (pay.min != null) return `${fmtK(pay.min)}+`;
-  if (pay.max != null) return `Up to ${fmtK(pay.max)}`;
+  if (pay.amount != null) return fmt(pay.amount);
+  if (pay.min != null) return `${fmt(pay.min)}+`;
+  if (pay.max != null) return `Up to ${fmt(pay.max)}`;
   return null;
 }
 
@@ -231,6 +281,16 @@ export default function Jobs() {
   const [applications, setApplications] = useState<any[]>([]);
   const [headhuntOffers, setHeadhuntOffers] = useState<any[]>([]);
   const [savedJobs, setSavedJobs] = useState<string[]>([]);
+  const [jobSettings, setJobSettings] = useState<JobSettingsState>({
+    jobTitles: '',
+    workMode: '',
+    location: '',
+    employmentType: '',
+    allowRecruiters: true,
+    automationFlows: [],
+  });
+  const [savingJobNotifications, setSavingJobNotifications] = useState(false);
+  const [savingAutomationFlowId, setSavingAutomationFlowId] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<JobFilters>({
     search: '',
@@ -263,7 +323,7 @@ export default function Jobs() {
     } else if (activeTab === 'applications') {
       fetchMyJobsOverview();
     } else if (activeTab === 'saved') {
-      fetchSavedJobs();
+      fetchJobSettings();
     } else if (activeTab === 'offers') {
       fetchHeadhuntOffers();
     }
@@ -304,36 +364,25 @@ export default function Jobs() {
     }
   };
 
-  const fetchSavedJobs = async () => {
+  const fetchJobSettings = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/v1/professional/saved-jobs');
-      const savedIds: string[] = res.data?.data?.jobIds ?? [];
-      setSavedJobs(Array.isArray(savedIds) ? savedIds : []);
-      if (savedIds.length === 0) {
-        setJobs([]);
-        setLoading(false);
-        return;
-      }
-      const jobsPromises = savedIds.map((id: string) =>
-        (async () => {
-          const viewedJobs = JSON.parse(localStorage.getItem('viewedJobs') || '[]');
-          const isUniqueView = !viewedJobs.includes(id);
-          if (isUniqueView) {
-            viewedJobs.push(id);
-            localStorage.setItem('viewedJobs', JSON.stringify(viewedJobs));
-          }
-          return api.get(`/v1/jobs/${id}?isUniqueView=${isUniqueView}`).catch(() => null);
-        })(),
-      );
-      const jobsResponses = await Promise.all(jobsPromises);
-      const savedJobsData = jobsResponses
-        .filter((r): r is NonNullable<typeof r> => !!r?.data?.data)
-        .map((r) => r.data.data);
-      setJobs(savedJobsData);
+      const res = await api.get('/v1/professional/job-settings');
+      const data = res.data?.data || {};
+      const flows = Array.isArray(data.automationFlows) ? data.automationFlows : [];
+      setJobSettings({
+        jobTitles: Array.isArray(data.jobTitles) ? data.jobTitles.join(', ') : '',
+        workMode: data.workMode || '',
+        location: data.location || '',
+        employmentType: data.employmentType || '',
+        allowRecruiters: data.allowRecruiters !== false,
+        automationFlows: flows.length
+          ? flows.map((flow: Partial<JobAutomationFlow>) => ({ ...emptyAutomationFlow(), ...flow }))
+          : [],
+      });
     } catch (err) {
-      console.error('Failed to fetch saved jobs:', err);
-      setJobs([]);
+      console.error('Failed to fetch job settings:', err);
+      toast.error('Failed to load job settings');
     } finally {
       setLoading(false);
     }
@@ -372,6 +421,84 @@ export default function Jobs() {
       toast.error(
         err.response?.data?.message || (isCurrentlySaved ? 'Failed to unsave job' : 'Failed to save job'),
       );
+    }
+  };
+
+  const jobSettingsPayload = (settings = jobSettings) => ({
+    jobTitles: settings.jobTitles
+      .split(',')
+      .map((title) => title.trim())
+      .filter(Boolean),
+    workMode: settings.workMode,
+    location: settings.location,
+    employmentType: settings.employmentType,
+    allowRecruiters: settings.allowRecruiters,
+    automationFlows: settings.automationFlows,
+  });
+
+  const saveJobNotifications = async () => {
+    setSavingJobNotifications(true);
+    try {
+      const res = await api.put('/v1/professional/job-settings', jobSettingsPayload());
+      const data = res.data?.data;
+      if (data) {
+        setJobSettings((prev) => ({
+          ...prev,
+          jobTitles: Array.isArray(data.jobTitles) ? data.jobTitles.join(', ') : prev.jobTitles,
+          workMode: data.workMode || '',
+          location: data.location || '',
+          employmentType: data.employmentType || '',
+          allowRecruiters: data.allowRecruiters !== false,
+        }));
+      }
+      toast.success('Job preferences saved');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save job preferences');
+    } finally {
+      setSavingJobNotifications(false);
+    }
+  };
+
+  const updateAutomationFlow = (id: string, patch: Partial<JobAutomationFlow>) => {
+    setJobSettings((prev) => ({
+      ...prev,
+      automationFlows: prev.automationFlows.map((flow) =>
+        flow.id === id ? { ...flow, ...patch } : flow,
+      ),
+    }));
+  };
+
+  const addAutomationFlow = () => {
+    setJobSettings((prev) => ({
+      ...prev,
+      automationFlows: [...prev.automationFlows, emptyAutomationFlow()],
+    }));
+  };
+
+  const removeAutomationFlow = async (id: string) => {
+    const next = {
+      ...jobSettings,
+      automationFlows: jobSettings.automationFlows.filter((flow) => flow.id !== id),
+    };
+    setJobSettings(next);
+    try {
+      await api.put('/v1/professional/job-settings', jobSettingsPayload(next));
+      toast.success('Flow removed');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to remove flow');
+      fetchJobSettings();
+    }
+  };
+
+  const saveAutomationFlow = async (id: string) => {
+    setSavingAutomationFlowId(id);
+    try {
+      await api.put('/v1/professional/job-settings', jobSettingsPayload());
+      toast.success('Flow saved');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save flow');
+    } finally {
+      setSavingAutomationFlowId(null);
     }
   };
 
@@ -825,37 +952,240 @@ export default function Jobs() {
             </div>
           )}
 
-          {/* Job Settings = saved jobs */}
+          {/* Job Settings */}
           {activeTab === 'saved' && (
-            <div className="mt-6 space-y-4">
-              <p className="text-sm text-gray-600">
-                Saved roles you want to revisit. Use the bookmark on any listing to add or remove.
-              </p>
+            <div className="mt-6 space-y-5">
               {loading ? (
                 <p className="py-16 text-center text-gray-500">Loading…</p>
-              ) : jobs.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-white px-6 py-16 text-center">
-                  <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
-                    <HiBookmark className="h-10 w-10 text-gray-400" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-gray-900">Nothing saved</h3>
-                  <p className="mt-2 text-sm text-gray-500">Save jobs from Browse to see them here.</p>
-                  <button
-                    type="button"
-                    onClick={() => setTab('available')}
-                    className="mt-6 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-600"
-                  >
-                    Browse jobs
-                  </button>
-                </div>
               ) : (
-                jobs.map((job) =>
-                  renderJobCard(job, {
-                    showSave: true,
-                    onNavigate: () => navigate(`/professional/jobs/${job.id}`),
-                    applied: job.hasApplied,
-                  }),
-                )
+                <>
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+                    <h2 className="text-base font-bold text-gray-900">Job Notifications</h2>
+                    <div className="mt-6 space-y-5">
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold text-gray-800">Job Titles (keywords)</span>
+                        <input
+                          type="text"
+                          value={jobSettings.jobTitles}
+                          onChange={(e) => setJobSettings((prev) => ({ ...prev, jobTitles: e.target.value }))}
+                          placeholder="e.g., Product Engineer, Data Analyst"
+                          className={settingsInputClass}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold text-gray-800">Work Mode</span>
+                        <div className="relative">
+                          <select
+                            value={jobSettings.workMode}
+                            onChange={(e) => setJobSettings((prev) => ({ ...prev, workMode: e.target.value }))}
+                            className={settingsSelectClass}
+                          >
+                            {JOB_WORK_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <SelectChevron />
+                        </div>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold text-gray-800">Location</span>
+                        <input
+                          type="text"
+                          value={jobSettings.location}
+                          onChange={(e) => setJobSettings((prev) => ({ ...prev, location: e.target.value }))}
+                          placeholder="Country or city"
+                          className={settingsInputClass}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1.5 block text-sm font-semibold text-gray-800">Employment Type</span>
+                        <div className="relative">
+                          <select
+                            value={jobSettings.employmentType}
+                            onChange={(e) =>
+                              setJobSettings((prev) => ({ ...prev, employmentType: e.target.value }))
+                            }
+                            className={settingsSelectClass}
+                          >
+                            {JOB_EMPLOYMENT_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <SelectChevron />
+                        </div>
+                      </label>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-sm font-semibold text-gray-800">Allow recruiters to see my profile</span>
+                        <div className="relative">
+                          <select
+                            value={jobSettings.allowRecruiters ? 'yes' : 'no'}
+                            onChange={(e) =>
+                              setJobSettings((prev) => ({
+                                ...prev,
+                                allowRecruiters: e.target.value === 'yes',
+                              }))
+                            }
+                            className="cursor-pointer appearance-none rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-3 pr-9 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                          >
+                            <option value="yes">Yes</option>
+                            <option value="no">No</option>
+                          </select>
+                          <SelectChevron />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={saveJobNotifications}
+                        disabled={savingJobNotifications}
+                        className="rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingJobNotifications ? 'Saving…' : 'Save Preferences'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="text-base font-bold text-gray-900">Application Automation</h2>
+                      <button
+                        type="button"
+                        onClick={addAutomationFlow}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50"
+                      >
+                        <HiPlus className="h-4 w-4" />
+                        Add New
+                      </button>
+                    </div>
+
+                    {jobSettings.automationFlows.length > 0 ? (
+                      <div className="mt-6 space-y-4">
+                        {jobSettings.automationFlows.map((flow, index) => (
+                        <div key={flow.id} className="rounded-xl border border-gray-200 p-4 sm:p-5">
+                          <div className="mb-4 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold text-gray-900">Flow {index + 1}</h3>
+                            <button
+                              type="button"
+                              onClick={() => removeAutomationFlow(flow.id)}
+                              className="rounded-md p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                              aria-label={`Remove flow ${index + 1}`}
+                            >
+                              <HiTrash className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">Role</span>
+                              <input
+                                type="text"
+                                value={flow.role}
+                                onChange={(e) => updateAutomationFlow(flow.id, { role: e.target.value })}
+                                placeholder="Product Engineer"
+                                className={settingsInputClass}
+                              />
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">Work Mode</span>
+                              <div className="relative">
+                                <select
+                                  value={flow.workMode}
+                                  onChange={(e) => updateAutomationFlow(flow.id, { workMode: e.target.value })}
+                                  className={settingsSelectClass}
+                                >
+                                  {JOB_WORK_MODE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <SelectChevron />
+                              </div>
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">Employment Type</span>
+                              <div className="relative">
+                                <select
+                                  value={flow.employmentType}
+                                  onChange={(e) =>
+                                    updateAutomationFlow(flow.id, { employmentType: e.target.value })
+                                  }
+                                  className={settingsSelectClass}
+                                >
+                                  {JOB_EMPLOYMENT_TYPE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <SelectChevron />
+                              </div>
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">Pay Range</span>
+                              <input
+                                type="text"
+                                value={flow.payRange}
+                                onChange={(e) => updateAutomationFlow(flow.id, { payRange: e.target.value })}
+                                placeholder="$100k - $150k"
+                                className={settingsInputClass}
+                              />
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">
+                                Organisation (up to 3)
+                              </span>
+                              <input
+                                type="text"
+                                value={flow.organisations}
+                                onChange={(e) =>
+                                  updateAutomationFlow(flow.id, { organisations: e.target.value })
+                                }
+                                placeholder="Apple, Google, Meta"
+                                className={settingsInputClass}
+                              />
+                            </label>
+
+                            <label className="block">
+                              <span className="mb-1.5 block text-sm font-semibold text-gray-800">
+                                Location (up to 3)
+                              </span>
+                              <input
+                                type="text"
+                                value={flow.location}
+                                onChange={(e) => updateAutomationFlow(flow.id, { location: e.target.value })}
+                                placeholder="Lagos, London, Singapore"
+                                className={settingsInputClass}
+                              />
+                            </label>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => saveAutomationFlow(flow.id)}
+                            disabled={savingAutomationFlowId === flow.id}
+                            className="mt-4 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {savingAutomationFlowId === flow.id ? 'Saving…' : 'Save Flow'}
+                          </button>
+                        </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
               )}
             </div>
           )}

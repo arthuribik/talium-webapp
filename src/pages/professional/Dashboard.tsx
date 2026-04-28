@@ -15,6 +15,8 @@ import {
   HiBriefcase,
   HiCheckCircle,
   HiChartBar,
+  HiShieldCheck,
+  HiSparkles,
 } from 'react-icons/hi';
 
 interface DashboardStats {
@@ -39,6 +41,7 @@ export default function ProfessionalDashboard() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [verificationProgress, setVerificationProgress] = useState({
     completedVerificationSteps: 0,
     progressPct: 0,
@@ -75,6 +78,7 @@ export default function ProfessionalDashboard() {
         });
       }
       const profileData = profileRes.data?.data;
+      setProfile(profileData ?? null);
       const statusPayload = statusRes.data?.data;
       const merged = mergeVerificationStatusFromSources(statusPayload, profileData);
       const { completedVerificationSteps, progressPct } = verificationProgressFromMerged(merged);
@@ -89,9 +93,43 @@ export default function ProfessionalDashboard() {
         recentApplications: [],
       });
       setVerificationProgress({ completedVerificationSteps: 0, progressPct: 0 });
+      setProfile(null);
     } finally {
       setLoading(false);
     }
+  };
+
+  const hasStartedVerification = (profileData: any): boolean => {
+    if (!profileData) return false;
+    const hasArrayData = (...keys: string[]) =>
+      keys.some((key) => Array.isArray(profileData[key]) && profileData[key].length > 0);
+    const hasObjectData = (...keys: string[]) =>
+      keys.some((key) => {
+        const value = profileData[key];
+        return (
+          value &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          Object.values(value).some((item) => {
+            if (Array.isArray(item)) return item.length > 0;
+            if (item && typeof item === 'object') return Object.values(item).some(Boolean);
+            return Boolean(item);
+          })
+        );
+      });
+
+    return Boolean(
+      profileData.dateOfBirth ||
+        profileData.gender ||
+        profileData.nationality ||
+        profileData.idType ||
+        profileData.idNumber ||
+        profileData.idDocumentUrl ||
+        profileData.livenessSelfieUrl ||
+        profileData.identityVerification ||
+        hasArrayData('locations', 'education', 'workExperience', 'projects', 'professionalProjects', 'certifications') ||
+        hasObjectData('socialMedia', 'familyInfo', 'address'),
+    );
   };
 
   const statusBadge = (status: string) => {
@@ -169,6 +207,94 @@ export default function ProfessionalDashboard() {
   ];
 
   const { completedVerificationSteps, progressPct } = verificationProgress;
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  const profileDetails = [
+    { label: 'Full Name', value: fullName || '—' },
+    { label: 'Job Title', value: profile?.profession || '—' },
+    { label: 'Email', value: user?.email || profile?.email || '—' },
+    { label: 'Nationality', value: profile?.nationality || '—' },
+    { label: 'Phone', value: profile?.phoneNumber || '—' },
+  ];
+  const showNewAccountIntro = completedVerificationSteps === 0 && !hasStartedVerification(profile);
+
+  if (showNewAccountIntro) {
+    return (
+      <ProfessionalLayout>
+        <div className="min-h-[calc(100vh-4rem)] bg-gradient-to-br from-brand-50 via-white to-indigo-50/60 px-4 py-10 sm:px-6">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-8 text-center">
+              <p className="inline-flex items-center gap-1.5 rounded-full border border-brand-100 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700 shadow-sm">
+                <HiSparkles className="h-4 w-4" />
+                Welcome
+              </p>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 md:text-4xl">
+                Welcome, <span className="text-brand-600">{user?.firstName || 'Professional'}</span>
+              </h1>
+              <p className="mt-2 text-sm text-gray-600">
+                Your Taldium profile is ready. Start verification to activate your trusted professional identity.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-brand-100 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-brand-600">
+                  <HiUser className="h-4 w-4" />
+                  Profile details
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-100">
+                  <HiClock className="h-3.5 w-3.5" />
+                  Verification pending
+                </span>
+              </div>
+              <dl className="divide-y divide-gray-100">
+                {profileDetails.map((item) => (
+                  <div key={item.label} className="grid grid-cols-1 gap-1 py-3 sm:grid-cols-[10rem_1fr] sm:gap-4">
+                    <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">{item.label}</dt>
+                    <dd className="break-words text-sm font-medium text-gray-900 sm:text-right">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-center shadow-sm">
+                <p className="text-2xl font-bold text-brand-600">0</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Connections</p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-center shadow-sm">
+                <p className="text-2xl font-bold text-brand-600">0</p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Credentials</p>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-brand-600">
+                <HiShieldCheck className="h-4 w-4" />
+                Next steps
+              </div>
+              <p className="mt-4 text-sm text-gray-600">
+                Complete your verification profile to become discoverable and connect with organisations on the network.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Link
+                  to="/professional/verification"
+                  className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600"
+                >
+                  Complete Verification
+                </Link>
+                <Link
+                  to="/professional/jobs"
+                  className="inline-flex items-center justify-center rounded-lg border border-brand-100 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-100"
+                >
+                  Find Jobs
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ProfessionalLayout>
+    );
+  }
 
   return (
     <ProfessionalLayout>

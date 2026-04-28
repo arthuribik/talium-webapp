@@ -18,6 +18,18 @@ import {
   HiFolder,
 } from 'react-icons/hi';
 import toast from 'react-hot-toast';
+import {
+  apiWorkExperienceToWorkEntry,
+  formatWorkCompensationSummary,
+  formatWorkExperienceHeaderSubtitle,
+  formatWorkRemunerationLine,
+  formatWorkRoleDateRange,
+  workAssociatedSkillTags,
+  workLatestRoleTitleForHeader,
+  workRolesForTimelineDisplay,
+  workTenureYearsAtOrganisation,
+} from '@/utils/workExperienceDisplay';
+import { formatMoney } from '@/utils/formatMoney';
 
 type TabKey =
   | 'personal'
@@ -50,6 +62,67 @@ const SOCIAL_LABELS: Record<string, string> = {
   snapchat: 'Snapchat',
 };
 
+const EDUCATION_LEVEL_LABELS: Record<string, string> = {
+  degree: 'Degree',
+  college: 'College',
+  primary_school: 'Primary School',
+  secondary_school: 'Secondary School',
+  training_institute: 'Training Institute',
+  high_school: 'High School',
+  bachelors: "Bachelor's",
+  masters: "Master's",
+  doctorate: 'Doctorate',
+  diploma: 'Diploma',
+  certificate: 'Certificate',
+};
+
+const SCHOOL_TYPE_LABELS: Record<string, string> = {
+  university: 'University',
+  polytechnic: 'Polytechnic',
+  college: 'College',
+  training_institute: 'Training Institute',
+  secondary_school: 'Secondary School',
+  primary_school: 'Primary School',
+  bootcamp: 'Bootcamp',
+  online: 'Online',
+  other: 'Other',
+};
+
+const QUALIFICATION_LABELS: Record<string, string> = {
+  PhD: 'PhD',
+  MSc: 'MSc',
+  MBA: 'MBA',
+  BSc: 'BSc',
+  BA: 'BA',
+  HND: 'HND',
+  OND: 'OND',
+  Diploma: 'Diploma',
+  Certificate: 'Certificate',
+};
+
+const COST_FREQUENCY_LABELS: Record<string, string> = {
+  one_time: 'One-time',
+  monthly: 'Monthly',
+  quarterly: 'Quarterly',
+  annually: 'Annually',
+};
+
+const PROJECT_MONTH_SHORT = [
+  '',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
 function EmptyState({ icon: Icon, title, description }: { icon: any; title: string; description: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
@@ -74,6 +147,56 @@ function FieldRow({ label, value }: { label: string; value: React.ReactNode }) {
 function humanizeKey(s?: string | null) {
   if (!s) return null;
   return String(s).replace(/_/g, ' ');
+}
+
+function displayText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  const s = typeof v === 'string' ? v.trim() : String(v);
+  return s;
+}
+
+function mappedLabel(map: Record<string, string>, value: unknown): string | null {
+  const raw = displayText(value);
+  if (!raw) return null;
+  return map[raw] || humanizeKey(raw);
+}
+
+function verificationMethodDisplay(m: unknown): string | null {
+  const key = displayText(m).toLowerCase().replace(/-/g, '_');
+  if (!key) return null;
+  const map: Record<string, string> = {
+    self_declaration: 'Self Declaration',
+    student_email: 'Student email',
+    work_email: 'Work email',
+    upload_document: 'Uploaded document',
+    supporting_document: 'Supporting document',
+    credential_url: 'Credential URL',
+    digital_verify: 'Digital verification',
+  };
+  return map[key] || humanizeKey(key);
+}
+
+function formatAdminProjectMonthYear(month: unknown, year: unknown): string | null {
+  const mi = typeof month === 'number' ? month : month != null ? parseInt(String(month), 10) : NaN;
+  const yi = typeof year === 'number' ? year : year != null ? parseInt(String(year), 10) : NaN;
+  if (!Number.isFinite(mi) || !Number.isFinite(yi) || mi < 1 || mi > 12) return null;
+  return `${PROJECT_MONTH_SHORT[mi]} ${yi}`;
+}
+
+function formatAdminProjectTimeline(proj: any): string | null {
+  const start = formatAdminProjectMonthYear(proj?.startMonth, proj?.startYear);
+  const end = formatAdminProjectMonthYear(proj?.endMonth, proj?.endYear);
+  if (start && end) return `${start} – ${end}`;
+  if (start) return start;
+  if (end) return end;
+  return null;
+}
+
+function splitAdminChips(value: unknown): string[] {
+  return displayText(value)
+    .split(/[,;|\n]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function formatDateish(v: unknown): string | null {
@@ -1187,16 +1310,16 @@ export default function ProfessionalDetail() {
                             <div className="flex flex-wrap gap-2">
                               {edu.isDefault ? <Pill tone="yes">Default education</Pill> : null}
                               {eduSelf ? <Pill tone="yes">Self-declared</Pill> : null}
-                              {edu.verificationMethod && !eduSelf ? <Pill>{humanizeKey(edu.verificationMethod)}</Pill> : null}
+                              {edu.verificationMethod && !eduSelf ? <Pill>{verificationMethodDisplay(edu.verificationMethod)}</Pill> : null}
                               {edu.currentlyAttending ? <Pill>Currently attending</Pill> : null}
                             </div>
                           </div>
                           <div className="p-4 md:p-5 space-y-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <FieldRow label="Level of education" value={edu.levelOfEducation?.replace(/_/g, ' ')} />
+                            <FieldRow label="Level of education" value={mappedLabel(EDUCATION_LEVEL_LABELS, edu.levelOfEducation)} />
                             <FieldRow label="Program level" value={humanizeKey(edu.programLevel)} />
-                            <FieldRow label="School type" value={humanizeKey(edu.schoolType)} />
-                            <FieldRow label="Degree type" value={edu.degreeType} />
+                            <FieldRow label="School type" value={mappedLabel(SCHOOL_TYPE_LABELS, edu.schoolType)} />
+                            <FieldRow label="Qualification" value={mappedLabel(QUALIFICATION_LABELS, edu.degreeType)} />
                             <FieldRow label="Institution" value={edu.institutionName} />
                             <FieldRow label="Industry / sector" value={edu.institutionIndustry} />
                             <FieldRow
@@ -1209,11 +1332,19 @@ export default function ProfessionalDetail() {
                                   : null
                               }
                             />
+                            <FieldRow label="Verification method" value={verificationMethodDisplay(edu.verificationMethod)} />
+                            <FieldRow
+                              label="Row verification status"
+                              value={humanizeKey(String(edu.eduVerificationStatus || edu.verificationStatus || ''))}
+                            />
+                            {displayText(edu.studentVerificationEmail) ? (
+                              <FieldRow label="Student verification email" value={displayText(edu.studentVerificationEmail)} />
+                            ) : null}
                             <FieldRow
                               label="Cost of education"
                               value={
                                 edu.costOfEducation != null
-                                  ? `${edu.currency || ''} ${Number(edu.costOfEducation).toLocaleString()}`
+                                  ? formatMoney(edu.currency || 'USD', edu.costOfEducation)
                                   : null
                               }
                             />
@@ -1221,9 +1352,9 @@ export default function ProfessionalDetail() {
                               label="Pending loan"
                               value={
                                 edu.pendingLoanAmount != null
-                                  ? `${edu.loanCurrency || ''} ${Number(edu.pendingLoanAmount).toLocaleString()}${
+                                  ? `${formatMoney(edu.loanCurrency || 'USD', edu.pendingLoanAmount) || ''}${
                                       edu.loanRepaymentFrequency
-                                        ? ` · Repayment: ${humanizeKey(edu.loanRepaymentFrequency)}`
+                                        ? ` · Repayment: ${mappedLabel(COST_FREQUENCY_LABELS, edu.loanRepaymentFrequency)}`
                                         : ''
                                     }`
                                   : null
@@ -1383,21 +1514,23 @@ export default function ProfessionalDetail() {
                   ) : (
                     <div className="space-y-6">
                       {workExperience.map((exp: any) => {
+                        const workEntry = apiWorkExperienceToWorkEntry(exp);
                         const loc = exp.location && typeof exp.location === 'object' ? exp.location : {};
-                        const salaryRange =
-                          exp.salaryRange && typeof exp.salaryRange === 'object' ? exp.salaryRange : {};
-                        const sal =
-                          salaryRange.min != null || salaryRange.max != null
-                            ? `${exp.currency || ''} ${[salaryRange.min, salaryRange.max].filter((v) => v != null && v !== '').join(' – ')}`.trim()
-                            : null;
+                        const latestRoleTitle = workLatestRoleTitleForHeader(workEntry);
+                        const roleTimelineRows = workRolesForTimelineDisplay(workEntry);
+                        const primaryRoleRef = workEntry.workRoles[0];
+                        const tenureYears = workTenureYearsAtOrganisation(workEntry);
+                        const skillTags = workAssociatedSkillTags(workEntry);
                         const workSelf = isWorkSelfDeclared(exp);
                         const workEff = effectiveVerificationStatus(exp.verificationStatus, workSelf);
-                        const responsibilities = Array.isArray(exp.responsibilities)
-                          ? exp.responsibilities.filter((x: unknown) => typeof x === 'string' && String(x).trim())
-                          : [];
-                        const achievements = Array.isArray(exp.achievements)
-                          ? exp.achievements.filter((x: unknown) => typeof x === 'string' && String(x).trim())
-                          : [];
+                        const responsibilities = workEntry.responsibilitiesText
+                          .split(/\n+/)
+                          .map((x) => x.trim())
+                          .filter(Boolean);
+                        const achievements = workEntry.achievementsText
+                          .split(/\n+/)
+                          .map((x) => x.trim())
+                          .filter(Boolean);
                         const roleLoc =
                           typeof (loc as any).roleLocation === 'string'
                             ? String((loc as any).roleLocation).trim()
@@ -1413,7 +1546,7 @@ export default function ProfessionalDetail() {
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
                               <span className="text-sm font-semibold text-gray-900 truncate">
-                                {exp.organisationName || 'Work experience'}
+                                {[latestRoleTitle, exp.organisationName].filter(Boolean).join(' at ') || 'Work experience'}
                               </span>
                               <div className="flex flex-wrap gap-2">
                                 {exp.currentlyWorking ? <Pill>Currently employed</Pill> : null}
@@ -1428,21 +1561,23 @@ export default function ProfessionalDetail() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <FieldRow label="Name of organisation" value={exp.organisationName} />
                               <FieldRow label="Industry / sector" value={exp.industry} />
-                              <FieldRow label="Role / position" value={exp.role} />
+                              <FieldRow label="Latest role / position" value={latestRoleTitle || exp.role} />
+                              <FieldRow label="Header subtitle" value={formatWorkExperienceHeaderSubtitle(workEntry)} />
                               <FieldRow
                                 label="Employment type"
-                                value={humanizeKey(String(exp.employmentType || ''))}
+                                value={formatWorkExperienceHeaderSubtitle(workEntry).split(' · ')[1] || null}
                               />
-                              <FieldRow label="Work mode" value={humanizeKey(String(exp.workMode || ''))} />
-                              <FieldRow label="Start date" value={exp.startDate} />
+                              <FieldRow label="Work mode" value={formatWorkExperienceHeaderSubtitle(workEntry).split(' · ')[2] || null} />
+                              <FieldRow label="Start date" value={workEntry.startDate || exp.startDate} />
                               <FieldRow
                                 label="End date"
-                                value={exp.currentlyWorking ? 'Present' : exp.endDate || '—'}
+                                value={workEntry.workRoles[0]?.currentlyWorking ? 'Present' : workEntry.endDate || exp.endDate || '—'}
                               />
-                              <FieldRow label="Salary range" value={sal || null} />
+                              <FieldRow label="Tenure" value={tenureYears != null ? `${tenureYears.toFixed(1)} years` : null} />
+                              <FieldRow label="Remuneration" value={formatWorkRemunerationLine(workEntry)} />
                               <FieldRow
                                 label="Pay / bonus frequency"
-                                value={humanizeKey(String(exp.paymentMode || ''))}
+                                value={humanizeKey(String(exp.paymentMode || workEntry.salaryFrequency || ''))}
                               />
                               {locationLine ? (
                                 <div className="md:col-span-2">
@@ -1457,7 +1592,7 @@ export default function ProfessionalDetail() {
                                   {exp.verificationMethod ? (
                                     <FieldRow
                                       label="Method"
-                                      value={humanizeKey(String(exp.verificationMethod))}
+                                      value={verificationMethodDisplay(exp.verificationMethod)}
                                     />
                                   ) : null}
                                   {exp.workVerificationEmail ? (
@@ -1474,6 +1609,32 @@ export default function ProfessionalDetail() {
                                 </div>
                               ) : null}
                             </div>
+                            {roleTimelineRows.length > 0 ? (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-2">Roles / progression</label>
+                                <ul className="space-y-2 rounded-lg border border-gray-100 bg-white p-3">
+                                  {roleTimelineRows.map((roleRow, ri) => (
+                                    <li key={`${exp.id ?? 'work'}-role-${ri}`} className="text-sm">
+                                      <div className="font-medium text-gray-900">
+                                        {roleRow.title}
+                                        {primaryRoleRef && roleRow === primaryRoleRef ? (
+                                          <span className="ml-2 text-xs font-normal uppercase tracking-wide text-gray-400">
+                                            Primary
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <div className="text-gray-500">{formatWorkRoleDateRange(roleRow)}</div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                            {workEntry.jobDescription.trim() ? (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">Job description</label>
+                                <p className="whitespace-pre-wrap text-sm text-gray-900">{workEntry.jobDescription.trim()}</p>
+                              </div>
+                            ) : null}
                             {responsibilities.length > 0 ? (
                               <div>
                                 <label className="block text-sm font-medium text-gray-500 mb-1">Responsibilities</label>
@@ -1482,6 +1643,30 @@ export default function ProfessionalDetail() {
                                     <li key={i}>{line}</li>
                                   ))}
                                 </ul>
+                              </div>
+                            ) : null}
+                            {(workEntry.otherCompensation.length > 0 || formatWorkCompensationSummary(workEntry) !== '—') ? (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">Other compensation</label>
+                                {workEntry.otherCompensation.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {workEntry.otherCompensation.map((item) => (
+                                      <Pill key={item}>{item}</Pill>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-900">{formatWorkCompensationSummary(workEntry)}</p>
+                                )}
+                              </div>
+                            ) : null}
+                            {skillTags.length > 0 ? (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">Associated skills</label>
+                                <div className="flex flex-wrap gap-2">
+                                  {skillTags.map((skill) => (
+                                    <Pill key={skill}>{skill}</Pill>
+                                  ))}
+                                </div>
                               </div>
                             ) : null}
                             {achievements.length > 0 ? (
@@ -1566,6 +1751,7 @@ export default function ProfessionalDetail() {
                         const team = Array.isArray(proj.teamMembers) ? proj.teamMembers : [];
                         const projSelf = isProjectSelfDeclared(proj);
                         const projEff = effectiveVerificationStatus(proj.verificationStatus, projSelf);
+                        const projectTimeline = formatAdminProjectTimeline(proj);
                         return (
                           <div
                             key={proj.id}
@@ -1585,6 +1771,8 @@ export default function ProfessionalDetail() {
                             <div className="p-4 md:p-5 space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <FieldRow label="Project title" value={proj.title} />
+                              <FieldRow label="Project period" value={projectTimeline} />
+                              <FieldRow label="Verification method" value={verificationMethodDisplay(proj.verificationMethod)} />
                               <div className="md:col-span-2">
                                 <FieldRow label="Description" value={proj.description} />
                               </div>
@@ -1707,8 +1895,22 @@ export default function ProfessionalDetail() {
                               <FieldRow label="Certificate name" value={cert.name} />
                               <FieldRow label="Issued by" value={cert.issuedBy} />
                               <FieldRow label="Issued date" value={formatDateish(cert.issuedDate)} />
-                              <FieldRow label="Expiration date" value={formatDateish(cert.expirationDate)} />
+                              <FieldRow
+                                label="Expiration date"
+                                value={cert.noExpiration ? 'No expiration' : formatDateish(cert.expirationDate)}
+                              />
                               <FieldRow label="Credential ID" value={cert.credentialId} />
+                              <FieldRow label="Verification method" value={verificationMethodDisplay(cert.verificationMethod)} />
+                              {displayText(cert.associatedSkills) ? (
+                                <div className="md:col-span-2">
+                                  <label className="block text-sm font-medium text-gray-500 mb-1">Associated skills</label>
+                                  <div className="flex flex-wrap gap-2">
+                                    {splitAdminChips(cert.associatedSkills).map((skill) => (
+                                      <Pill key={skill}>{skill}</Pill>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
                               <div>
                                 <label className="block text-sm font-medium text-gray-500 mb-0.5">Reporting / credential URL</label>
                                 {cert.reportingUrl ? <DocLink href={cert.reportingUrl}>Open reporting page</DocLink> : <p className="text-gray-900">—</p>}
@@ -1853,10 +2055,13 @@ export default function ProfessionalDetail() {
           return (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm border border-gray-100 rounded-lg p-4 bg-white">
               <FieldRow label="Institution" value={edu.institutionName} />
-              <FieldRow label="Degree" value={edu.degreeType} />
+              <FieldRow label="Qualification" value={mappedLabel(QUALIFICATION_LABELS, edu.degreeType)} />
               <FieldRow label="Field of study" value={edu.fieldOfStudy} />
               <FieldRow label="Country" value={edu.country} />
-              <FieldRow label="Level" value={humanizeKey(String(edu.levelOfEducation || ''))} />
+              <FieldRow label="Level" value={mappedLabel(EDUCATION_LEVEL_LABELS, edu.levelOfEducation)} />
+              {displayText(edu.studentVerificationEmail) ? (
+                <FieldRow label="Student verification email" value={displayText(edu.studentVerificationEmail)} />
+              ) : null}
               <FieldRow
                 label="Period"
                 value={
@@ -1871,23 +2076,29 @@ export default function ProfessionalDetail() {
         {reviewModal.open && reviewModal.variant === 'verify' && reviewModal.kind === 'experience' ? (() => {
           const exp = workExperience.find((w: any) => w.id === reviewModal.entityId);
           if (!exp) return null;
+          const workEntry = apiWorkExperienceToWorkEntry(exp);
+          const latestRoleTitle = workLatestRoleTitleForHeader(workEntry);
           return (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm border border-gray-100 rounded-lg p-4 bg-white">
               <FieldRow label="Organisation" value={exp.organisationName} />
-              <FieldRow label="Role" value={exp.role} />
+              <FieldRow label="Latest role" value={latestRoleTitle || exp.role} />
               <FieldRow label="Industry" value={exp.industry} />
-              <FieldRow label="Employment type" value={humanizeKey(String(exp.employmentType || ''))} />
-              <FieldRow label="Start" value={exp.startDate} />
-              <FieldRow label="End" value={exp.currentlyWorking ? 'Present' : exp.endDate} />
+              <FieldRow label="Employment type" value={formatWorkExperienceHeaderSubtitle(workEntry).split(' · ')[1] || null} />
+              <FieldRow label="Start" value={workEntry.startDate || exp.startDate} />
+              <FieldRow label="End" value={workEntry.workRoles[0]?.currentlyWorking ? 'Present' : workEntry.endDate || exp.endDate} />
+              <FieldRow label="Remuneration" value={formatWorkRemunerationLine(workEntry)} />
             </div>
           );
         })() : null}
         {reviewModal.open && reviewModal.variant === 'verify' && reviewModal.kind === 'project' ? (() => {
           const proj = projects.find((p: any) => p.id === reviewModal.entityId);
           if (!proj) return null;
+          const projectTimeline = formatAdminProjectTimeline(proj);
           return (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm border border-gray-100 rounded-lg p-4 bg-white">
               <FieldRow label="Title" value={proj.title} />
+              <FieldRow label="Project period" value={projectTimeline} />
+              <FieldRow label="Verification method" value={verificationMethodDisplay(proj.verificationMethod)} />
               <div className="sm:col-span-2">
                 <FieldRow label="Description" value={proj.description} />
               </div>
@@ -1906,8 +2117,10 @@ export default function ProfessionalDetail() {
               <FieldRow label="Certificate name" value={cert.name} />
               <FieldRow label="Issued by" value={cert.issuedBy} />
               <FieldRow label="Issued date" value={formatDateish(cert.issuedDate)} />
-              <FieldRow label="Expiration" value={formatDateish(cert.expirationDate)} />
+              <FieldRow label="Expiration" value={cert.noExpiration ? 'No expiration' : formatDateish(cert.expirationDate)} />
               <FieldRow label="Credential ID" value={cert.credentialId} />
+              <FieldRow label="Verification method" value={verificationMethodDisplay(cert.verificationMethod)} />
+              <FieldRow label="Associated skills" value={cert.associatedSkills} />
               <FieldRow
                 label="Reporting URL"
                 value={cert.reportingUrl ? <DocLink href={cert.reportingUrl}>Open</DocLink> : null}
