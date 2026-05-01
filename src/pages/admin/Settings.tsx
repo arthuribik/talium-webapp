@@ -12,6 +12,7 @@ import {
   HiCheckCircle,
   HiX,
   HiPlus,
+  HiTrash,
 } from 'react-icons/hi';
 import { api } from '@/services/api';
 import logo from '@/assets/logo.svg';
@@ -385,6 +386,26 @@ export default function Settings() {
 
   const handleChange = (key: string, value: any) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updatePlanFeature = (index: number, value: string) => {
+    if (!editingPlan) return;
+    const features = Array.isArray(editingPlan.features) ? [...editingPlan.features] : [];
+    features[index] = value;
+    setEditingPlan({ ...editingPlan, features });
+  };
+
+  const addPlanFeature = () => {
+    if (!editingPlan) return;
+    const features = Array.isArray(editingPlan.features) ? editingPlan.features : [];
+    setEditingPlan({ ...editingPlan, features: [...features, ''] });
+  };
+
+  const removePlanFeature = (index: number) => {
+    if (!editingPlan) return;
+    const features = Array.isArray(editingPlan.features) ? editingPlan.features : [];
+    const nextFeatures = features.filter((_: string, i: number) => i !== index);
+    setEditingPlan({ ...editingPlan, features: nextFeatures.length > 0 ? nextFeatures : [''] });
   };
 
   // Load tab from URL on mount
@@ -821,7 +842,7 @@ export default function Settings() {
                               price: 0,
                               priceAnnualUsd: '',
                               entityType: 'professional',
-                              featuresText: '',
+                              features: [''],
                             });
                             setIsPlanDrawerOpen(true);
                           }}
@@ -858,7 +879,7 @@ export default function Settings() {
                                       recordId: plan.recordId,
                                       planSlug: plan.id,
                                       entityType: 'professional',
-                                      featuresText: (plan.features || []).join('\n'),
+                                      features: plan.features?.length ? plan.features : [''],
                                       priceAnnualUsd:
                                         plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
                                           ? plan.priceAnnualUsd
@@ -897,7 +918,7 @@ export default function Settings() {
                               price: 0,
                               priceAnnualUsd: '',
                               entityType: 'organisation',
-                              featuresText: '',
+                              features: [''],
                             });
                             setIsPlanDrawerOpen(true);
                           }}
@@ -934,7 +955,7 @@ export default function Settings() {
                                       recordId: plan.recordId,
                                       planSlug: plan.id,
                                       entityType: 'organisation',
-                                      featuresText: (plan.features || []).join('\n'),
+                                      features: plan.features?.length ? plan.features : [''],
                                       priceAnnualUsd:
                                         plan.priceAnnualUsd != null && plan.priceAnnualUsd !== ''
                                           ? plan.priceAnnualUsd
@@ -1170,164 +1191,238 @@ export default function Settings() {
         {/* Plan Management Side Drawer */}
         {isPlanDrawerOpen && (
           <>
-            {/* Backdrop */}
             <div
-              className="fixed inset-0 bg-black bg-opacity-50 z-40 transition-opacity"
+              className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm transition-opacity"
               onClick={() => {
                 setIsPlanDrawerOpen(false);
                 setEditingPlan(null);
               }}
             ></div>
-            {/* Drawer */}
-            <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-2xl z-50">
-              <div className="flex flex-col h-full">
-                {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    {editingPlan?.recordId ? `Edit ${editingPlan.name || 'plan'}` : 'Add plan'}
-                  </h2>
-                  <button
-                    onClick={() => {
-                      setIsPlanDrawerOpen(false);
-                      setEditingPlan(null);
-                    }}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <HiX className="w-6 h-6" />
-                  </button>
+            <div className="fixed right-0 top-0 z-50 h-full w-full max-w-3xl bg-slate-50 shadow-2xl">
+              <div className="flex h-full flex-col">
+                <div className="border-b border-slate-200 bg-white px-6 py-5 sm:px-8">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600">
+                        Billing plan
+                      </p>
+                      <h2 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">
+                        {editingPlan?.recordId ? `Edit ${editingPlan.name || 'plan'}` : 'Add plan'}
+                      </h2>
+                      <p className="mt-2 text-sm text-slate-500">
+                        Configure pricing, plan copy, and each customer-facing feature individually.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsPlanDrawerOpen(false);
+                        setEditingPlan(null);
+                      }}
+                      className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                      aria-label="Close plan drawer"
+                    >
+                      <HiX className="h-6 w-6" />
+                    </button>
+                  </div>
                 </div>
 
-                {/* Form Content */}
-                <div className="flex-1 overflow-y-auto p-6">
+                <div className="flex-1 overflow-y-auto px-6 py-6 sm:px-8">
                   {editingPlan && (
                     <div className="space-y-6">
-                      {!editingPlan.recordId ? (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Plan slug</label>
-                          <input
-                            type="text"
-                            value={editingPlan.planSlug ?? ''}
-                            onChange={(e) =>
-                              setEditingPlan({ ...editingPlan, planSlug: e.target.value })
-                            }
-                            placeholder="e.g. growth"
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                          />
-                          <p className="mt-1 text-xs text-gray-500">Lowercase identifier (URL-safe).</p>
+                      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                        <div className="mb-5">
+                          <h3 className="text-base font-semibold text-slate-950">Plan Identity</h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Basic naming and entity details shown across billing screens.
+                          </p>
                         </div>
-                      ) : (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Plan slug</label>
-                          <input
-                            type="text"
-                            value={editingPlan.planSlug || editingPlan.id || ''}
-                            readOnly
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-                          />
+                        <div className="grid gap-5 sm:grid-cols-2">
+                          {!editingPlan.recordId ? (
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Plan slug</label>
+                              <input
+                                type="text"
+                                value={editingPlan.planSlug ?? ''}
+                                onChange={(e) =>
+                                  setEditingPlan({ ...editingPlan, planSlug: e.target.value })
+                                }
+                                placeholder="e.g. growth"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                              />
+                              <p className="mt-1.5 text-xs text-slate-500">Lowercase identifier, URL-safe.</p>
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Plan slug</label>
+                              <input
+                                type="text"
+                                value={editingPlan.planSlug || editingPlan.id || ''}
+                                readOnly
+                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-500 shadow-sm"
+                              />
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Entity type</label>
+                            <input
+                              type="text"
+                              value={
+                                editingPlan.entityType === 'professional'
+                                  ? 'Professional'
+                                  : 'Organisation'
+                              }
+                              readOnly
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-500 shadow-sm"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Plan name</label>
+                            <input
+                              type="text"
+                              value={editingPlan.name}
+                              onChange={(e) => setEditingPlan({ ...editingPlan, name: e.target.value })}
+                              placeholder="e.g. Standard Plan"
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">Description</label>
+                            <textarea
+                              value={editingPlan.description}
+                              onChange={(e) =>
+                                setEditingPlan({ ...editingPlan, description: e.target.value })
+                              }
+                              rows={4}
+                              placeholder="Short explanation of who this plan is for"
+                              className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            />
+                          </div>
                         </div>
-                      )}
+                      </section>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Plan name</label>
-                        <input
-                          type="text"
-                          value={editingPlan.name}
-                          onChange={(e) => setEditingPlan({ ...editingPlan, name: e.target.value })}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
-                      </div>
+                      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                        <div className="mb-5">
+                          <h3 className="text-base font-semibold text-slate-950">Pricing</h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Monthly and annual USD prices used by the billing engine.
+                          </p>
+                        </div>
+                        <div className="grid gap-5 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">
+                              Price (USD / month)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={editingPlan.price}
+                              onChange={(e) =>
+                                setEditingPlan({ ...editingPlan, price: Number(e.target.value) })
+                              }
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            />
+                          </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                        <textarea
-                          value={editingPlan.description}
-                          onChange={(e) =>
-                            setEditingPlan({ ...editingPlan, description: e.target.value })
-                          }
-                          rows={3}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
-                      </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-700">
+                              Annual price (USD, optional)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              value={editingPlan.priceAnnualUsd === '' ? '' : editingPlan.priceAnnualUsd}
+                              onChange={(e) =>
+                                setEditingPlan({
+                                  ...editingPlan,
+                                  priceAnnualUsd: e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            />
+                          </div>
+                        </div>
+                      </section>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Price (USD / month)</label>
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={editingPlan.price}
-                          onChange={(e) =>
-                            setEditingPlan({ ...editingPlan, price: Number(e.target.value) })
-                          }
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
-                      </div>
+                      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h3 className="text-base font-semibold text-slate-950">Features</h3>
+                            <p className="mt-1 text-sm text-slate-500">
+                              Add each feature as a separate line item. Empty fields are ignored on save.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={addPlanFeature}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-100"
+                          >
+                            <HiPlus className="h-4 w-4" />
+                            Add feature
+                          </button>
+                        </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Annual price (USD, optional)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          value={editingPlan.priceAnnualUsd === '' ? '' : editingPlan.priceAnnualUsd}
-                          onChange={(e) =>
-                            setEditingPlan({
-                              ...editingPlan,
-                              priceAnnualUsd: e.target.value === '' ? '' : Number(e.target.value),
-                            })
-                          }
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
-                      </div>
+                        <div className="space-y-3">
+                          {(Array.isArray(editingPlan.features) && editingPlan.features.length > 0
+                            ? editingPlan.features
+                            : ['']
+                          ).map((feature: string, index: number) => (
+                            <div
+                              key={index}
+                              className="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                            >
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-bold text-brand-600 shadow-sm">
+                                {index + 1}
+                              </div>
+                              <input
+                                type="text"
+                                value={feature}
+                                onChange={(e) => updatePlanFeature(index, e.target.value)}
+                                placeholder="e.g. Priority support"
+                                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removePlanFeature(index)}
+                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                aria-label={`Remove feature ${index + 1}`}
+                              >
+                                <HiTrash className="h-5 w-5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    </div>
+                  )}
+                </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Entity type</label>
-                        <input
-                          type="text"
-                          value={
-                            editingPlan.entityType === 'professional'
-                              ? 'Professional'
-                              : 'Organisation'
-                          }
-                          readOnly
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Features (one per line)
-                        </label>
-                        <textarea
-                          value={editingPlan.featuresText ?? ''}
-                          onChange={(e) =>
-                            setEditingPlan({ ...editingPlan, featuresText: e.target.value })
-                          }
-                          rows={6}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        />
-                      </div>
-
-                      <div className="flex gap-3 pt-4 border-t border-gray-200">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsPlanDrawerOpen(false);
-                            setEditingPlan(null);
-                          }}
-                          className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          disabled={planSaveLoading}
-                          onClick={async () => {
-                            const features = String(editingPlan.featuresText || '')
-                              .split('\n')
-                              .map((s: string) => s.trim())
+                <div className="border-t border-slate-200 bg-white px-6 py-5 sm:px-8">
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsPlanDrawerOpen(false);
+                        setEditingPlan(null);
+                      }}
+                      className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  <button
+                    type="button"
+                    disabled={planSaveLoading || !editingPlan}
+                    onClick={async () => {
+                      if (!editingPlan) return;
+                            const features = (Array.isArray(editingPlan.features)
+                              ? editingPlan.features
+                              : []
+                            )
+                              .map((s: string) => String(s).trim())
                               .filter(Boolean);
                             const annualRaw = editingPlan.priceAnnualUsd;
                             const priceAnnualUsd =
@@ -1374,16 +1469,14 @@ export default function Settings() {
                             } finally {
                               setPlanSaveLoading(false);
                             }
-                          }}
-                          className="flex-1 px-4 py-2 bg-brand-500 text-white rounded-lg font-medium hover:bg-brand-600 transition-colors disabled:opacity-50"
-                        >
-                          {planSaveLoading ? 'Saving…' : 'Save'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    }}
+                    className="flex-1 rounded-2xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {planSaveLoading ? 'Saving…' : 'Save'}
+                  </button>
                 </div>
               </div>
+            </div>
             </div>
           </>
         )}

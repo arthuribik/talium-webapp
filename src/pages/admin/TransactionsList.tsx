@@ -33,12 +33,35 @@ interface Transaction {
   };
 }
 
+const STATUS_FILTERS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'success', label: 'Success' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'declined', label: 'Declined' },
+  { value: 'failed', label: 'Failed' },
+];
+
+const TYPE_FILTERS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'subscription', label: 'Subscription' },
+  { value: 'wallet_topup', label: 'Wallet Top-up' },
+  { value: 'credit', label: 'Credit' },
+  { value: 'debit', label: 'Debit' },
+  { value: 'addon', label: 'Add-on' },
+];
+
+function formatTransactionType(type: string): string {
+  const match = TYPE_FILTERS.find((option) => option.value === type);
+  return match ? match.label : type.replace(/_/g, ' ');
+}
+
 export default function TransactionsList() {
   const navigate = useNavigate();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -46,7 +69,7 @@ export default function TransactionsList() {
 
   useEffect(() => {
     fetchTransactions();
-  }, [page, statusFilter]);
+  }, [page, statusFilter, typeFilter]);
 
   const fetchTransactions = async () => {
     setLoading(true);
@@ -54,6 +77,9 @@ export default function TransactionsList() {
       const params: any = { page, limit };
       if (statusFilter !== 'all') {
         params.status = statusFilter;
+      }
+      if (typeFilter !== 'all') {
+        params.type = typeFilter;
       }
       const response = await api.get('/v1/admin/transactions', { params });
       setTransactions(response.data.data.transactions || []);
@@ -105,7 +131,8 @@ export default function TransactionsList() {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2">
             <HiFilter className="text-gray-400 w-5 h-5" />
             <select
               value={statusFilter}
@@ -115,10 +142,26 @@ export default function TransactionsList() {
               }}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
             >
-              <option value="all">All Status</option>
-              <option value="success">Success</option>
-              <option value="pending">Pending</option>
-              <option value="failed">Failed</option>
+              {STATUS_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            </div>
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setPage(1);
+              }}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              {TYPE_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -151,6 +194,7 @@ export default function TransactionsList() {
               onClick={() => {
                 setSearchTerm('');
                 setStatusFilter('all');
+                setTypeFilter('all');
               }}
               className="text-brand-600 hover:text-brand-700 text-sm font-medium"
             >
@@ -203,11 +247,16 @@ export default function TransactionsList() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
-                            {formatMoney(trans.currency, trans.amount)}
+                            {formatMoney(
+                              trans.currency === 'USD' && (trans as any).amountNgn ? 'NGN' : trans.currency,
+                              trans.currency === 'USD' && (trans as any).amountNgn
+                                ? (trans as any).amountNgn
+                                : trans.amount,
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500 capitalize">{trans.type}</div>
+                          <div className="text-sm text-gray-500 capitalize">{formatTransactionType(trans.type)}</div>
                           {trans.plan && (
                             <div className="text-xs text-gray-400 mt-1">
                               {trans.plan} plan {trans.billingCycle ? `(${trans.billingCycle})` : ''}
@@ -227,6 +276,11 @@ export default function TransactionsList() {
                           ) : trans.status === 'pending' ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                               Pending
+                            </span>
+                          ) : trans.status === 'declined' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                              <HiXCircle className="w-4 h-4 mr-1" />
+                              Declined
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">

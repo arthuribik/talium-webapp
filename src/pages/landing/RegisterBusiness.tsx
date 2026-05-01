@@ -1711,9 +1711,24 @@ export default function RegisterBusiness() {
 
     try {
       await api.post('/v1/auth/registration/finalize', finalizeData);
-      // Registration successful - redirect to login
       toast.success('Registration completed successfully!');
-      navigate('/login');
+      localStorage.removeItem('registrationId');
+      const country = formData.isRegistered
+        ? formData.headquartersCountry || formData.address.country
+        : formData.organisationCountry || formData.address.country;
+      const city = formData.address.city || formData.headquartersCity;
+
+      navigate(`/organization/account-active?id=${registrationId}`, {
+        state: {
+          name: orgName,
+          email: formData.organisationEmail,
+          category: formData.category,
+          industry: formData.industry,
+          location: [city, country].filter(Boolean).join(', '),
+          isRegistered: formData.isRegistered,
+          incorporationNumber: formData.incorporationNumber,
+        },
+      });
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || err.message || 'Registration failed. Please try again.';
       setLocalError(errorMessage);

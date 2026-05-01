@@ -19,6 +19,7 @@ import LandingJobDetail from '@/pages/landing/JobDetail';
 import Login from '@/pages/landing/Login';
 import Register from '@/pages/landing/Register';
 import RegisterBusiness from '@/pages/landing/RegisterBusiness';
+import OrganisationAccountActive from '@/pages/landing/OrganisationAccountActive';
 import ProfessionalSetup from '@/pages/app/ProfessionalSetup';
 import OrganisationSetup from '@/pages/app/OrganisationSetup';
 import Jobs from '@/pages/app/Jobs';
@@ -415,6 +416,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/join" element={<Register />} />
       <Route path="/register-business" element={<RegisterBusiness />} />
+      <Route path="/organization/account-active" element={<OrganisationAccountActive />} />
       <Route path="/admin/login" element={<AdminLogin />} />
       <Route path="/admin/create-super-admin" element={<CreateSuperAdmin />} />
       <Route
@@ -507,6 +509,14 @@ function AppRoutes() {
       />
       <Route
         path="/admin/transactions/:id"
+        element={
+          <AdminRoute>
+            <TransactionDetail />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/transactions/:id"
         element={
           <AdminRoute>
             <TransactionDetail />

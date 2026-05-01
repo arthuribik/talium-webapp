@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
+import { useAppSelector } from '@/store/hooks';
 import {
   HiSearch,
   HiUser,
@@ -141,6 +142,47 @@ export type ScoutResponseEntry = {
 
 const SCOUT_LISTS_STORAGE_KEY = 'taldium_org_scout_lists';
 
+const DIRECT_SCOUT_EMPLOYMENT_TYPE_OPTIONS = [
+  { value: 'full_time', label: 'Full Time' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'internship', label: 'Internship' },
+  { value: 'volunteering', label: 'Volunteering' },
+  { value: 'consultancy', label: 'Consultancy' },
+];
+
+function readScoutLists(storageKey: string | null): ScoutListEntry[] {
+  if (!storageKey) return [];
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ScoutListEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function professionMatchesScoutCriteria(profession: string | undefined, criteria: ScoutCriteria): boolean {
+  const role = (profession || '').trim().toLowerCase();
+  if (!role || role === 'not specified') return false;
+
+  const title = criteria.jobTitle.trim().toLowerCase();
+  if (!title) return true;
+
+  if (criteria.searchType === 'strict') {
+    return role === title;
+  }
+
+  const words = title.split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every((word) => role.includes(word));
+}
+
+function countProfessionMatches(professionals: Professional[], criteria: ScoutCriteria): number {
+  return professionals.filter((professional) =>
+    professionMatchesScoutCriteria(professional.profession, criteria)
+  ).length;
+}
+
 const WORK_MODE_LABELS: Record<string, string> = {
   remote: 'Remote',
   hybrid: 'Hybrid',
@@ -206,6 +248,11 @@ function scoutFormToSearchParams(form: {
 
 export default function ViewProfessionals() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAppSelector((state) => state.auth);
+  const scoutListsStorageKey = useMemo(() => {
+    const ownerId = (user as any)?.organisationId || user?.id;
+    return ownerId ? `${SCOUT_LISTS_STORAGE_KEY}:${ownerId}` : null;
+  }, [user]);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHireModal, setShowHireModal] = useState(false);
@@ -236,16 +283,7 @@ export default function ViewProfessionals() {
   const [showScoutModal, setShowScoutModal] = useState(false);
   const [scoutSearchActive, setScoutSearchActive] = useState(false);
   const [professionalsTab, setProfessionalsTab] = useState<'all' | 'scouted'>('scouted');
-  const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>(() => {
-    try {
-      const raw = localStorage.getItem(SCOUT_LISTS_STORAGE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw) as ScoutListEntry[];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>(() => readScoutLists(scoutListsStorageKey));
   const [activeScoutId, setActiveScoutId] = useState<string | null>(null);
   const [scoutViewTab, setScoutViewTab] = useState<'request' | 'response'>('request');
   const [scoutResponses, setScoutResponses] = useState<ScoutResponseEntry[]>([]);
@@ -257,6 +295,7 @@ export default function ViewProfessionals() {
   const scoutMenuPortalRef = useRef<HTMLDivElement>(null);
   const profMenuPortalRef = useRef<HTMLDivElement>(null);
   const scoutIdFromUserClickRef = useRef<string | null>(null);
+  const skipScoutListPersistRef = useRef(false);
   const [scoutForm, setScoutForm] = useState({
     jobTitle: '',
     searchType: 'strict' as 'strict' | 'fuzzy',
@@ -318,14 +357,27 @@ export default function ViewProfessionals() {
   }, [filters, page, scoutSearchActive, professionalsTab]);
 
   useEffect(() => {
+    skipScoutListPersistRef.current = true;
+    setScoutLists(readScoutLists(scoutListsStorageKey));
+    setActiveScoutId(null);
+    setScoutSearchActive(false);
+    setProfessionals([]);
+  }, [scoutListsStorageKey]);
+
+  useEffect(() => {
+    if (skipScoutListPersistRef.current) {
+      skipScoutListPersistRef.current = false;
+      return;
+    }
+    if (!scoutListsStorageKey) return;
     try {
-      localStorage.setItem(SCOUT_LISTS_STORAGE_KEY, JSON.stringify(scoutLists));
+      localStorage.setItem(scoutListsStorageKey, JSON.stringify(scoutLists));
     } catch {
       // ignore
     }
-  }, [scoutLists]);
+  }, [scoutLists, scoutListsStorageKey]);
 
-  const runScoutSearchWithCriteria = useCallback(async (criteria: ScoutCriteria) => {
+  const runScoutSearchWithCriteria = useCallback(async (criteria: ScoutCriteria, scoutId?: string) => {
     setLoading(true);
     try {
       const jobTitle = criteria.jobTitle.trim() || undefined;
@@ -343,10 +395,18 @@ export default function ViewProfessionals() {
         description: criteria.description?.trim() || undefined,
       });
       const data = res.data?.data;
-      setProfessionals(data?.professionals || []);
+      const matchedProfessionals = data?.professionals || [];
+      setProfessionals(matchedProfessionals);
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
+      setScoutLists((prev) =>
+        prev.map((entry) =>
+          entry.id === scoutId
+            ? { ...entry, peopleFound: countProfessionMatches(matchedProfessionals, criteria) }
+            : entry
+        )
+      );
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Scout search failed');
       setProfessionals([]);
@@ -368,7 +428,7 @@ export default function ViewProfessionals() {
       if (entry) {
         setActiveScoutId(scoutId);
         // Skip running search if URL was just updated by our row click (avoid double run)
-        if (scoutIdFromUserClickRef.current !== scoutId) runScoutSearchWithCriteria(entry.criteria);
+        if (scoutIdFromUserClickRef.current !== scoutId) runScoutSearchWithCriteria(entry.criteria, scoutId);
         scoutIdFromUserClickRef.current = null;
       } else setActiveScoutId(null);
     } else setActiveScoutId(null);
@@ -529,7 +589,8 @@ export default function ViewProfessionals() {
         description: scoutForm.description.trim() || undefined,
       });
       const data = res.data?.data;
-      setProfessionals(data?.professionals || []);
+      const matchedProfessionals = data?.professionals || [];
+      setProfessionals(matchedProfessionals);
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
@@ -548,7 +609,7 @@ export default function ViewProfessionals() {
         description: scoutForm.description,
       };
       const name = [scoutForm.jobTitle || 'Scout', scoutForm.location || 'Global'].filter(Boolean).join(' · ') || 'Scout list';
-      const peopleFound = (data?.professionals || []).length;
+      const peopleFound = countProfessionMatches(matchedProfessionals, criteria);
       if (editingScoutId) {
         setScoutLists((prev) =>
           prev.map((e) =>
@@ -876,7 +937,7 @@ export default function ViewProfessionals() {
                                   if (scoutActionMenuId === entry.id) return;
                                   scoutIdFromUserClickRef.current = entry.id;
                                   setActiveScoutId(entry.id);
-                                  runScoutSearchWithCriteria(entry.criteria);
+                                  runScoutSearchWithCriteria(entry.criteria, entry.id);
                                 }}
                                 className="hover:bg-brand-50 cursor-pointer"
                               >
@@ -1460,7 +1521,7 @@ export default function ViewProfessionals() {
                       <p className="text-xs text-gray-500 mt-1.5">
                         {scoutForm.searchType === 'strict'
                           ? 'Only returns candidates with the exact job title.'
-                          : 'Returns candidates whose job title contains all search words (in any order).'}
+                          : 'Returns candidates matching related tags and keywords.'}
                       </p>
                     </div>
                   </div>
@@ -1518,7 +1579,7 @@ export default function ViewProfessionals() {
                         className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       >
                         <option value="">Select work mode</option>
-                        <option value="remote">Remote</option>
+                        {/* <option value="remote">Remote</option> */}
                         <option value="hybrid">Hybrid</option>
                         <option value="on_site">On-site</option>
                         <option value="local_remote">Local Remote</option>
@@ -1533,10 +1594,11 @@ export default function ViewProfessionals() {
                         className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                       >
                         <option value="">Select employment type</option>
-                        <option value="full_time">Full Time</option>
-                        <option value="part_time">Part Time</option>
-                        <option value="contract">Contract</option>
-                        <option value="internship">Internship</option>
+                        {DIRECT_SCOUT_EMPLOYMENT_TYPE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -1697,10 +1759,7 @@ export default function ViewProfessionals() {
                         onChange={(v) => setHireForm({ ...hireForm, employmentType: v })}
                         options={[
                           { value: '', label: 'Select employment type' },
-                          { value: 'full_time', label: 'Full Time' },
-                          { value: 'part_time', label: 'Part Time' },
-                          { value: 'contract', label: 'Contract' },
-                          { value: 'internship', label: 'Internship' },
+                          ...DIRECT_SCOUT_EMPLOYMENT_TYPE_OPTIONS,
                         ]}
                         placeholder="Select employment type"
                         className="w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500"

@@ -13,6 +13,7 @@ import {
   HiArrowCircleDown,
   HiArrowCircleUp,
   HiX,
+  HiDotsVertical,
 } from 'react-icons/hi';
 import { HiBuildingOffice2 } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
@@ -25,12 +26,30 @@ type UsageSubTab = 'plan' | 'token';
 type PlanApiId = 'starter' | 'standard' | 'recruiter' | 'enterprise';
 type BillingCyclePricing = 'monthly' | 'annual';
 type TierIcon = 'bolt' | 'crown' | 'building';
-
-function formatNgnCompact(amount: number): string {
-  return formatMoney('NGN', Math.round(amount)) || '₦0';
-}
-
-const PRICING_CARDS: Array<{
+type SavedCard = {
+  id: string;
+  brand: string;
+  last4: string;
+  holderName?: string;
+  expiry?: string;
+  isDefault?: boolean;
+};
+type PendingBankPayment = {
+  reference?: string;
+  kind: 'subscription' | 'wallet_topup';
+  planId?: string;
+  billingCycle?: BillingCyclePricing;
+  ttkAmount?: number;
+  title: string;
+  description: string;
+  amountLabel: string;
+  bankDetails: {
+    bank: string;
+    accountNo: string;
+    accountName: string;
+  };
+};
+type PricingCard = {
   apiPlanId: PlanApiId;
   title: string;
   description: string;
@@ -44,7 +63,13 @@ const PRICING_CARDS: Array<{
   trial?: string;
   features: string[];
   moreFeatures: number;
-}> = [
+};
+
+function formatNgnCompact(amount: number): string {
+  return formatMoney('NGN', Math.round(amount)) || '₦0';
+}
+
+const PRICING_CARDS: PricingCard[] = [
   {
     apiPlanId: 'starter',
     title: 'Taldium Basic',
@@ -118,6 +143,64 @@ const PRICING_CARDS: Array<{
   },
 ];
 
+const PLAN_FEATURE_DETAILS: Record<PlanApiId, string[]> = {
+  starter: [
+    'View up to 50 verified candidate profiles',
+    'Create up to 10 job posts/month',
+    'Job posts expire after 14 days',
+    '20 applications per job post',
+    '2 Scout workflows (2 runs each)',
+    '200 emails/month',
+    '3 additional team members',
+    '2-month data retention',
+    'Basic calendar integration',
+    '20 interview schedules/month',
+  ],
+  standard: [
+    'View up to 5,000 verified profiles',
+    'Create up to 100 job posts',
+    'Job posts active for 2 months',
+    '100 applications per job post',
+    '20 Scout workflows (3 runs each)',
+    '500 emails/month',
+    '20 additional team members',
+    '4-month data retention',
+    'Calendar integration',
+    '100 interview schedules/month',
+  ],
+  recruiter: [
+    'View up to 10,000 verified profiles',
+    'Create up to 300 job posts',
+    'Job posts active for 6 months',
+    '300 applications per job post',
+    '50 Scout workflows (5 runs each)',
+    '1,000 emails/month',
+    '50 additional team members',
+    '8-month data retention',
+    'Calendar integration',
+    '300 interview schedules/month',
+  ],
+  enterprise: [
+    'View all verified profiles',
+    'Up to 1,000 job posts',
+    'Job posts active for 12 months',
+    '1,000 applications per job post',
+    'Unlimited Scout workflows',
+    'Custom email volume',
+    'Unlimited team members',
+    'Custom data retention',
+    'Advanced calendar integrations',
+    'Unlimited interview schedules',
+  ],
+};
+
+const TOKEN_ADD_ON_FEATURES = [
+  'Profile reverification',
+  'AML checks',
+  'Extend applicant limit',
+  'Additional emails & team members',
+];
+
 const ADD_ONS: Array<{ title: string; description: string }> = [
   { title: 'Create Job Post', description: 'Additional job posts beyond plan limit.' },
   { title: 'Extend Applicant Limit', description: 'Allow more applicants on a job post.' },
@@ -132,11 +215,34 @@ const ADD_ONS: Array<{ title: string; description: string }> = [
 
 const PLAN_ORDER: PlanApiId[] = ['starter', 'standard', 'recruiter', 'enterprise'];
 
+const DEFAULT_BANK_DETAILS = {
+  bank: 'First Bank',
+  accountNo: '3041698890',
+  accountName: 'Taldium Ltd',
+};
+
+const PLAN_USAGE_DISPLAY_ROWS: Array<{
+  key: string;
+  feature: string;
+  limit: string;
+  cap: number | null;
+}> = [
+  { key: 'jobPosts', feature: 'Job Posts', limit: '10 / month', cap: 10 },
+  { key: 'applicantsPerPost', feature: 'Applicants per Post', limit: '20', cap: 20 },
+  { key: 'emails', feature: 'Emails / month', limit: '200', cap: 200 },
+  { key: 'interviews', feature: 'Interview Schedules / month', limit: '20', cap: 20 },
+  { key: 'scoutWorkflows', feature: 'Talent Scout Workflows', limit: '2 / month', cap: 2 },
+  { key: 'teamMembers', feature: 'Team Members', limit: '3 additional', cap: 3 },
+  { key: 'dataRetention', feature: 'Data Retention', limit: '2 months', cap: null },
+  { key: 'calendarIntegration', feature: 'Calendar Integration', limit: '1', cap: 1 },
+  { key: 'verifiedProfiles', feature: 'Verified Candidate Profiles', limit: '50', cap: null },
+];
+
 function PricingTierIcon({ icon, tone }: { icon: TierIcon; tone: 'muted' | 'brand' }) {
   const box =
     tone === 'muted'
       ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-600'
-      : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700';
+      : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-100 text-brand-700';
   if (icon === 'bolt') {
     return (
       <div className={box}>
@@ -151,11 +257,11 @@ function PricingTierIcon({ icon, tone }: { icon: TierIcon; tone: 'muted' | 'bran
       </div>
     );
   }
-  return (
-    <div className={box}>
-      <HiBuildingOffice2 className="h-5 w-5" />
-    </div>
-  );
+    return (
+      <div className={box}>
+        <HiBuildingOffice2 className="h-5 w-5" />
+      </div>
+    );
 }
 
 function formatNgn(amount: number): string {
@@ -210,7 +316,7 @@ function TransactionStatusBadge({ status }: { status: string }) {
     );
   }
   return (
-    <span className="inline-flex rounded-full bg-teal-100 px-2.5 py-1 text-xs font-semibold text-teal-800">
+    <span className="inline-flex rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-800">
       Completed
     </span>
   );
@@ -228,7 +334,7 @@ function TransactionTypeCell({ type }: { type: string }) {
   }
   if (t === 'credit') {
     return (
-      <span className="inline-flex items-center gap-2 text-sm font-medium text-teal-600">
+      <span className="inline-flex items-center gap-2 text-sm font-medium text-brand-600">
         <HiArrowCircleDown className="h-5 w-5 shrink-0" />
         Credit
       </span>
@@ -255,13 +361,56 @@ function TransactionTypeCell({ type }: { type: string }) {
   }
   if (t === 'wallet_topup' || t === 'wallet-topup') {
     return (
-      <span className="inline-flex items-center gap-2 text-sm font-medium text-teal-600">
+      <span className="inline-flex items-center gap-2 text-sm font-medium text-brand-600">
         <HiArrowCircleDown className="h-5 w-5 shrink-0" />
         Wallet top-up
       </span>
     );
   }
   return <span className="text-sm capitalize text-gray-500">{type || '—'}</span>;
+}
+
+function formatCardBrand(value: string | null | undefined): string {
+  const normalized = String(value || 'card').replace(/_/g, ' ').trim();
+  if (!normalized) return 'Card';
+  if (normalized.toLowerCase() === 'visa') return 'Visa';
+  if (normalized.toLowerCase() === 'mastercard') return 'Mastercard';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function normaliseSavedCard(card: any, index: number): SavedCard | null {
+  if (!card) return null;
+  const last4 = String(card.last4 || card.lastFour || '').trim();
+  if (!last4) return null;
+  const brand = formatCardBrand(card.brand || card.type || 'card');
+  const expiry =
+    card.expiry ||
+    card.expires ||
+    (card.expMonth && card.expYear ? `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}` : undefined);
+
+  return {
+    id: String(card.id || `${brand}-${last4}-${index}`),
+    brand,
+    last4,
+    holderName: card.holderName || card.name || card.cardholderName,
+    expiry,
+    isDefault: Boolean(card.isDefault || card.default),
+  };
+}
+
+function buildPlanUsageDisplayRows(apiRows: any[] | undefined): any[] {
+  const byKey = new Map((apiRows || []).map((row: any) => [row.key, row]));
+  return PLAN_USAGE_DISPLAY_ROWS.map((row) => {
+    const apiRow = byKey.get(row.key);
+    const used = Number(apiRow?.used ?? 0);
+    return {
+      key: row.key,
+      feature: row.feature,
+      limit: row.limit,
+      used,
+      remaining: row.cap === null ? null : Math.max(0, row.cap - used),
+    };
+  });
 }
 
 function mapLegacyBillingToTransactions(rows: any[]): any[] {
@@ -338,26 +487,73 @@ export default function BillingSubscription() {
   const [historyQuery, setHistoryQuery] = useState('');
   const [fundWalletOpen, setFundWalletOpen] = useState(false);
   const [fundTokenInput, setFundTokenInput] = useState('');
+  const [manageCardsOpen, setManageCardsOpen] = useState(false);
+  const [pendingBankPayment, setPendingBankPayment] = useState<PendingBankPayment | null>(null);
+  const [selectedFeaturePlan, setSelectedFeaturePlan] = useState<PricingCard | null>(null);
+  const [confirmingBankPayment, setConfirmingBankPayment] = useState(false);
 
   const dashboard = subscription?.dashboard;
+  const savedCards = useMemo<SavedCard[]>(() => {
+    const source = dashboard?.savedCards || subscription?.savedCards || subscription?.paymentMethods || [];
+    const cards = Array.isArray(source)
+      ? source.map(normaliseSavedCard).filter((card): card is SavedCard => Boolean(card))
+      : [];
+
+    if (cards.length > 0) return cards;
+
+    const count = Number(dashboard?.savedCardsCount || 0);
+    const fallback = normaliseSavedCard(subscription?.paymentMethod, 0);
+    return count > 0 && fallback ? [{ ...fallback, isDefault: true }] : [];
+  }, [dashboard?.savedCards, dashboard?.savedCardsCount, subscription?.paymentMethod, subscription?.paymentMethods, subscription?.savedCards]);
+  const savedCardsCount = savedCards.length || Number(dashboard?.savedCardsCount || 0);
 
   const closeFundWallet = useCallback(() => {
     setFundWalletOpen(false);
   }, []);
 
+  const closeManageCards = useCallback(() => {
+    setManageCardsOpen(false);
+  }, []);
+
+  const closePendingBankPayment = useCallback(() => {
+    setPendingBankPayment(null);
+  }, []);
+
+  const closeFeaturePlan = useCallback(() => {
+    setSelectedFeaturePlan(null);
+  }, []);
+
+  const modalOpen = fundWalletOpen || manageCardsOpen || Boolean(pendingBankPayment) || Boolean(selectedFeaturePlan);
+
   useEffect(() => {
-    if (!fundWalletOpen) return;
+    if (!modalOpen) {
+      document.body.style.overflow = '';
+      return;
+    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeFundWallet();
+      if (e.key !== 'Escape') return;
+      if (pendingBankPayment) closePendingBankPayment();
+      else if (selectedFeaturePlan) closeFeaturePlan();
+      else if (manageCardsOpen) closeManageCards();
+      else if (fundWalletOpen) closeFundWallet();
     };
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      document.body.style.overflow = '';
     };
-  }, [fundWalletOpen, closeFundWallet]);
+  }, [
+    modalOpen,
+    fundWalletOpen,
+    manageCardsOpen,
+    pendingBankPayment,
+    selectedFeaturePlan,
+    closeFundWallet,
+    closeManageCards,
+    closePendingBankPayment,
+    closeFeaturePlan,
+  ]);
 
   const filteredTransactions = useMemo(() => {
     const q = historyQuery.trim().toLowerCase();
@@ -474,45 +670,72 @@ export default function BillingSubscription() {
         return;
       }
 
-      const response = await api.post('/v1/organisation/billing/subscription', {
-        plan: planId,
-        billingCycle: billingCyclePricing === 'annual' ? 'annual' : 'monthly',
+      const selectedPlan = plans.find((p) => p.id === planId);
+      const price =
+        selectedPlan?.prices?.[billingCyclePricing] ||
+        selectedPlan?.pricing?.[billingCyclePricing] ||
+        selectedPlan;
+      const amountNgn =
+        price?.amountNgn ||
+        price?.priceNgn ||
+        (billingCyclePricing === 'annual'
+          ? selectedPlan?.priceAnnualNgn
+          : selectedPlan?.priceMonthlyNgn);
+
+      setPendingBankPayment({
+        kind: 'subscription',
+        planId,
+        billingCycle: billingCyclePricing,
+        title: 'Complete Subscription Payment',
+        description: `${selectedPlan?.name || planId} plan (${billingCyclePricing})`,
+        amountLabel:
+          amountNgn != null
+            ? formatMoney('NGN', Number(amountNgn)) || `₦${amountNgn}`
+            : 'Amount shown at confirmation',
+        bankDetails: DEFAULT_BANK_DETAILS,
       });
-
-      const paymentData = response.data.data;
-
-      if (paymentData.paymentLink) {
-        window.open(paymentData.paymentLink, '_blank');
-        toast.success('Payment initiated! Redirecting to payment page…');
-      } else {
-        toast.success(`Upgraded to ${plans.find((p) => p.id === planId)?.name}!`);
-      }
-
-      await fetchSubscription();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to upgrade subscription');
     }
   };
 
-  const handleCancel = async () => {
-    if (
-      !window.confirm(
-        'Are you sure you want to cancel your subscription? You will be downgraded to Starter Plan.',
-      )
-    )
-      return;
+  const handleConfirmBankPayment = async () => {
+    if (!pendingBankPayment) return;
+    setConfirmingBankPayment(true);
     try {
-      await api.put('/v1/organisation/billing/subscription', { plan: 'starter' });
-      toast.success('Subscription cancelled. You are on Starter Plan.');
+      let reference = pendingBankPayment.reference;
+      if (!reference) {
+        if (pendingBankPayment.kind === 'subscription') {
+          const response = await api.post('/v1/organisation/billing/subscription', {
+            plan: pendingBankPayment.planId,
+            billingCycle: pendingBankPayment.billingCycle === 'annual' ? 'annual' : 'monthly',
+          });
+          reference = response.data?.data?.paymentReference;
+        } else {
+          const response = await api.post('/v1/organisation/billing/wallet/initiate', {
+            ttkAmount: pendingBankPayment.ttkAmount,
+          });
+          reference = response.data?.data?.paymentReference;
+        }
+      }
+      if (!reference) throw new Error('Payment reference could not be created');
+      await api.post(
+        `/v1/organisation/billing/payment/${encodeURIComponent(reference)}/confirm`,
+      );
+      toast.success('Payment will be verified within 24 hours.');
+      closePendingBankPayment();
       await fetchSubscription();
+      await fetchBillingHistory();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to cancel subscription');
+      toast.error(err.response?.data?.message || 'Could not confirm payment.');
+    } finally {
+      setConfirmingBankPayment(false);
     }
   };
 
   const usageRows =
     usageSubTab === 'plan'
-      ? dashboard?.planUsage || []
+      ? buildPlanUsageDisplayRows(dashboard?.planUsage)
       : dashboard?.tokenUsage || [];
 
   if (loading) {
@@ -544,7 +767,7 @@ export default function BillingSubscription() {
                 onClick={() => setMainTab(t.id)}
                 className={`border-b-2 pb-3 text-sm font-medium transition-colors ${
                   mainTab === t.id
-                    ? 'border-slate-900 text-slate-900'
+                    ? 'border-brand-600 text-brand-700'
                     : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800'
                 }`}
               >
@@ -588,9 +811,9 @@ export default function BillingSubscription() {
             )}
 
             <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-teal-800 p-6 text-white shadow-md">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-900 via-brand-800 to-brand-600 p-6 text-white shadow-md">
                 <div className="pointer-events-none absolute -right-8 -top-12 h-40 w-40 rounded-full bg-white/10" />
-                <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-32 rounded-full bg-teal-400/15" />
+                <div className="pointer-events-none absolute bottom-0 left-0 h-32 w-32 rounded-full bg-brand-300/20" />
                 <div className="relative">
                   <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-white/15">
                     <HiCreditCard className="h-5 w-5 text-white" />
@@ -624,18 +847,18 @@ export default function BillingSubscription() {
                       setFundTokenInput('');
                       setFundWalletOpen(true);
                     }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-600 to-teal-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:from-teal-700 hover:to-teal-600"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:from-brand-700 hover:to-brand-600"
                   >
                     <HiPlus className="h-5 w-5" />
                     Fund Wallet
                   </button>
                   <button
                     type="button"
-                    onClick={() => toast('Card management will be available soon.')}
+                    onClick={() => setManageCardsOpen(true)}
                     className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50"
                   >
                     <HiCreditCard className="h-5 w-5 text-gray-500" />
-                    Manage Cards ({dashboard?.savedCardsCount ?? 0})
+                    Manage Cards ({savedCardsCount})
                   </button>
                 </div>
               </div>
@@ -723,30 +946,30 @@ export default function BillingSubscription() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead>
-                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      <th className="pb-3 pr-4">Feature</th>
-                      <th className="pb-3 pr-4">Limit</th>
-                      <th className="pb-3 pr-4">Used</th>
-                      <th className="pb-3">Remaining</th>
+              <div className="overflow-x-auto rounded-2xl border border-brand-100">
+                <table className="min-w-full divide-y divide-brand-100">
+                  <thead className="bg-brand-50">
+                    <tr className="text-left text-xs font-bold uppercase tracking-wide text-brand-800">
+                      <th className="px-4 py-4 sm:px-5">Feature</th>
+                      <th className="px-4 py-4 sm:px-5">Limit</th>
+                      <th className="px-4 py-4 sm:px-5">Used</th>
+                      <th className="px-4 py-4 sm:px-5">Remaining</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 text-sm">
+                  <tbody className="divide-y divide-brand-50 bg-white text-sm">
                     {usageRows.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-8 text-center text-gray-500">
+                        <td colSpan={4} className="px-4 py-8 text-center text-gray-500 sm:px-5">
                           No usage data for this period.
                         </td>
                       </tr>
                     ) : (
                       usageRows.map((row: any) => (
                         <tr key={row.key} className="text-gray-900">
-                          <td className="py-3 pr-4 font-medium">{row.feature}</td>
-                          <td className="py-3 pr-4 text-gray-600">{row.limit}</td>
-                          <td className="py-3 pr-4 font-semibold">{row.used}</td>
-                          <td className="py-3 font-semibold">
+                          <td className="whitespace-nowrap px-4 py-4 font-medium sm:px-5">{row.feature}</td>
+                          <td className="whitespace-nowrap px-4 py-4 text-gray-700 sm:px-5">{row.limit}</td>
+                          <td className="whitespace-nowrap px-4 py-4 text-gray-900 sm:px-5">{row.used}</td>
+                          <td className="whitespace-nowrap px-4 py-4 text-gray-900 sm:px-5">
                             {row.remaining === null ? '—' : row.remaining}
                           </td>
                         </tr>
@@ -872,7 +1095,7 @@ export default function BillingSubscription() {
                           {cycle === 'annual' ? 'billed annually' : 'billed monthly'}
                         </p>
                         {card.trial ? (
-                          <p className="mt-2 text-sm font-medium text-teal-600">{card.trial}</p>
+                          <p className="mt-2 text-sm font-medium text-brand-600">{card.trial}</p>
                         ) : null}
                       </div>
                     ) : null}
@@ -890,9 +1113,9 @@ export default function BillingSubscription() {
 
                     <button
                       type="button"
-                      onClick={() => toast('Full feature list coming soon.')}
+                      onClick={() => setSelectedFeaturePlan(card)}
                       className={`mt-4 text-left text-sm font-semibold transition hover:underline ${
-                        card.iconTone === 'muted' ? 'text-gray-500' : 'text-teal-600'
+                        card.iconTone === 'muted' ? 'text-gray-500' : 'text-brand-600'
                       }`}
                     >
                       +{card.moreFeatures} more features &gt;
@@ -918,16 +1141,17 @@ export default function BillingSubscription() {
                       ) : (
                         <button
                           type="button"
+                          disabled={isDowngrade}
                           onClick={() => handleUpgrade(card.apiPlanId)}
                           className={`w-full rounded-xl py-3 text-sm font-semibold shadow-sm transition ${
                             isUpgrade
-                              ? 'bg-gradient-to-r from-teal-600 to-teal-500 text-white hover:from-teal-700 hover:to-teal-600'
+                              ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white hover:from-brand-700 hover:to-brand-600'
                               : isDowngrade
-                                ? 'border border-gray-300 bg-white text-gray-800 hover:bg-gray-50'
+                                ? 'cursor-not-allowed border border-gray-200 bg-gray-50 text-gray-400'
                                 : 'border border-gray-200 bg-white text-gray-800 hover:bg-gray-50'
                           }`}
                         >
-                          {isUpgrade ? 'Upgrade' : isDowngrade ? 'Downgrade' : 'Select plan'}
+                          {isUpgrade ? 'Upgrade' : isDowngrade ? 'Not available' : 'Select plan'}
                         </button>
                       )}
                     </div>
@@ -947,7 +1171,7 @@ export default function BillingSubscription() {
                     key={addon.title}
                     className="relative rounded-xl border border-gray-200 bg-white p-4 pr-14 shadow-sm"
                   >
-                    <span className="absolute right-3 top-3 rounded-md bg-teal-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-teal-700">
+                    <span className="absolute right-3 top-3 rounded-md bg-brand-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-brand-700">
                       TTK
                     </span>
                     <h3 className="font-semibold text-gray-900">{addon.title}</h3>
@@ -976,13 +1200,9 @@ export default function BillingSubscription() {
                 <span className="text-sm text-gray-500">No card on file</span>
               )}
               {subscription?.plan && subscription.plan !== 'starter' ? (
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  className="rounded-xl border border-red-200 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50"
-                >
-                  Cancel subscription
-                </button>
+                <span className="text-sm font-medium text-gray-500">
+                  Active paid plans can only be upgraded to a higher tier.
+                </span>
               ) : null}
             </div>
           </div>
@@ -1182,12 +1402,12 @@ export default function BillingSubscription() {
                           const showTtk = ttk != null && ttk !== 0;
                           const ttkLineClass =
                             tx.ttkColor === 'teal' || (ttk != null && ttk > 0 && !tx.ttkColor)
-                              ? 'text-sm font-semibold text-teal-600'
+                              ? 'text-sm font-semibold text-brand-600'
                               : tx.ttkColor === 'inherit'
                                 ? 'text-sm font-semibold text-gray-900'
                                 : ttk != null && ttk < 0
                                   ? 'text-sm font-semibold text-red-600'
-                                  : 'text-sm font-semibold text-teal-600';
+                                  : 'text-sm font-semibold text-brand-600';
                           return (
                             <tr key={tx.id} className="hover:bg-gray-50/80">
                               <td className="whitespace-nowrap px-4 py-3.5 text-sm font-bold text-gray-900 sm:px-5">
@@ -1231,6 +1451,115 @@ export default function BillingSubscription() {
         )}
       </div>
 
+      {selectedFeaturePlan ? (() => {
+        const card = selectedFeaturePlan;
+        const cycle = billingCyclePricing;
+        const money = cycle === 'annual' ? card.annual ?? card.monthly : card.monthly ?? card.annual;
+        const isCurrent = (subscription?.plan || 'starter') === card.apiPlanId;
+        const includedFeatures = PLAN_FEATURE_DETAILS[card.apiPlanId] || card.features;
+        return (
+          <div className="fixed inset-0 z-[100] flex justify-end" role="presentation">
+            <button
+              type="button"
+              aria-label="Close plan features drawer"
+              className="absolute inset-0 bg-black/40"
+              onClick={closeFeaturePlan}
+            />
+            <aside
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="plan-features-title"
+              className="relative z-10 flex h-full w-full max-w-xl flex-col bg-slate-50 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-5 sm:px-8">
+                <div>
+                  <h2 id="plan-features-title" className="text-2xl font-bold tracking-tight text-slate-950">
+                    {card.title} Plan
+                  </h2>
+                  <p className="mt-4 max-w-md text-base leading-7 text-slate-600">{card.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeFeaturePlan}
+                  className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white hover:text-slate-800"
+                  aria-label="Close"
+                >
+                  <HiX className="h-6 w-6" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-6 pb-6 sm:px-8">
+                <div className="rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 to-emerald-50 px-5 py-7 text-center">
+                  {card.priceMode === 'free' ? (
+                    <p className="text-4xl font-extrabold tracking-tight text-slate-950">Free</p>
+                  ) : card.priceMode === 'custom' ? (
+                    <p className="text-4xl font-extrabold tracking-tight text-slate-950">Custom</p>
+                  ) : money ? (
+                    <p>
+                      <span className="text-4xl font-extrabold tracking-tight text-slate-950">
+                        {formatNgnCompact(money.ngn)}
+                      </span>{' '}
+                      <span className="text-base font-semibold text-slate-500">(${money.usd})/mo</span>
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex justify-center">
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        isCurrent
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-white/80 text-brand-700'
+                      }`}
+                    >
+                      {isCurrent ? 'Active' : card.priceMode === 'custom' ? 'Contact Sales' : 'Available'}
+                    </span>
+                  </div>
+                  {cycle === 'annual' && card.priceMode === 'money' ? (
+                    <p className="mt-2 text-xs font-medium text-slate-500">Billed annually</p>
+                  ) : null}
+                </div>
+
+                <div className="mt-8">
+                  <h3 className="text-base font-semibold text-slate-950">What's included:</h3>
+                  <ul className="mt-5 space-y-4">
+                    {includedFeatures.map((feature) => (
+                      <li key={feature} className="flex gap-3 text-base leading-6 text-slate-800">
+                        <HiCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="mt-9 border-t border-slate-200 pt-7">
+                  <h3 className="text-base font-semibold text-slate-950">Token-based Add-ons</h3>
+                  <ul className="mt-4 space-y-3">
+                    {TOKEN_ADD_ON_FEATURES.map((feature) => (
+                      <li key={feature} className="flex items-center gap-3 text-base text-slate-500">
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-300 text-[10px] font-bold text-slate-500">
+                          T
+                        </span>
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 bg-slate-50 px-6 py-5 sm:px-8">
+                <button
+                  type="button"
+                  onClick={closeFeaturePlan}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
+            </aside>
+          </div>
+        );
+      })() : null}
+
       {fundWalletOpen ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
           <button
@@ -1265,7 +1594,7 @@ export default function BillingSubscription() {
               </button>
             </div>
 
-            <div className="mt-5 rounded-xl border border-teal-100 bg-teal-50/80 px-5 py-5 text-center">
+            <div className="mt-5 rounded-xl border border-brand-100 bg-brand-50/80 px-5 py-5 text-center">
               <p className="text-xs font-medium text-gray-500">Current Balance</p>
               <p className="mt-1">
                 <span className="text-3xl font-bold tracking-tight text-gray-900">
@@ -1291,7 +1620,7 @@ export default function BillingSubscription() {
                 const v = e.target.value.replace(/\D/g, '');
                 setFundTokenInput(v);
               }}
-              className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-gray-900 placeholder:text-gray-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
             />
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1315,29 +1644,207 @@ export default function BillingSubscription() {
                   toast.error('Enter a valid number of tokens (1 or more).');
                   return;
                 }
-                try {
-                  const res = await api.post('/v1/organisation/billing/wallet/initiate', {
-                    ttkAmount: n,
-                  });
-                  const d = res.data?.data;
-                  if (d?.paymentLink) {
-                    window.open(d.paymentLink, '_blank');
-                    toast.success('Payment initiated. Complete checkout in the new tab.');
-                  } else {
-                    toast.success('Top-up initiated.');
-                  }
-                  await fetchSubscription();
-                  await fetchBillingHistory();
-                  closeFundWallet();
-                } catch (e: any) {
-                  toast.error(e.response?.data?.message || 'Could not start wallet top-up.');
-                }
+                setPendingBankPayment({
+                  kind: 'wallet_topup',
+                  ttkAmount: n,
+                  title: 'Complete Wallet Top-Up',
+                  description: `${n} TTK wallet top-up`,
+                  amountLabel: formatMoney('NGN', Math.round(n * 35)) || `₦${Math.round(n * 35)}`,
+                  bankDetails: DEFAULT_BANK_DETAILS,
+                });
+                closeFundWallet();
               }}
-              className="mt-6 w-full rounded-xl bg-teal-600 px-4 py-3.5 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700"
+                className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3.5 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
             >
               Continue to Payment
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {pendingBankPayment ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" role="presentation">
+          <button
+            type="button"
+            aria-label="Close payment details"
+            className="absolute inset-0 bg-black/40"
+            onClick={closePendingBankPayment}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bank-payment-title"
+            className="relative z-10 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="bank-payment-title" className="text-lg font-bold text-gray-900">
+                  {pendingBankPayment.title}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Transfer the exact amount below, then confirm once payment has been made.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePendingBankPayment}
+                className="rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+                aria-label="Close"
+              >
+                <HiX className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-brand-100 bg-brand-50/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
+                Amount to Pay
+              </p>
+              <p className="mt-1 text-2xl font-bold text-gray-900">
+                {pendingBankPayment.amountLabel}
+              </p>
+              <p className="mt-1 text-sm text-gray-600">{pendingBankPayment.description}</p>
+            </div>
+
+            <div className="mt-5 space-y-3 rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-500">Bank</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {pendingBankPayment.bankDetails.bank}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-500">Account No.</span>
+                <span className="font-mono text-sm font-semibold text-gray-900">
+                  {pendingBankPayment.bankDetails.accountNo}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-gray-500">Account Name</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {pendingBankPayment.bankDetails.accountName}
+                </span>
+              </div>
+              {pendingBankPayment.reference ? (
+                <div className="border-t border-gray-100 pt-3">
+                  <span className="text-xs text-gray-500">Reference</span>
+                  <p className="mt-1 break-all font-mono text-sm font-semibold text-gray-900">
+                    {pendingBankPayment.reference}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleConfirmBankPayment}
+              disabled={confirmingBankPayment}
+              className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {confirmingBankPayment ? 'Submitting...' : "I've made payment"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {manageCardsOpen ? (
+        <div className="fixed inset-0 z-[100] flex justify-end" role="presentation">
+          <button
+            type="button"
+            aria-label="Close card drawer"
+            className="absolute inset-0 bg-black/40"
+            onClick={closeManageCards}
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manage-cards-title"
+            className="relative z-10 flex h-full w-full max-w-xl flex-col bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-6 sm:px-8">
+              <div>
+                <h2 id="manage-cards-title" className="text-2xl font-bold tracking-tight text-gray-900">
+                  Manage Cards
+                </h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  Add, remove, or set a default payment card
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeManageCards}
+                className="rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+                aria-label="Close"
+              >
+                <HiX className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-6 sm:px-8">
+              {savedCards.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 px-6 py-12 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">
+                    <HiCreditCard className="h-7 w-7 text-gray-400" />
+                  </div>
+                  <p className="mt-4 font-semibold text-gray-900">No saved cards yet</p>
+                  <p className="mt-2 text-sm text-gray-500">
+                    Add a card to make subscription renewals and wallet top-ups faster.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {savedCards.map((card) => (
+                    <div
+                      key={card.id}
+                      className={`flex items-center gap-4 rounded-2xl border bg-white p-4 ${
+                        card.isDefault ? 'border-slate-300 shadow-sm' : 'border-gray-200'
+                      }`}
+                    >
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-slate-100">
+                        <HiCreditCard className="h-7 w-7 text-slate-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-base font-semibold text-gray-900">
+                            {card.brand} •••• {card.last4}
+                          </p>
+                          {card.isDefault ? (
+                            <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-xs font-bold text-brand-700">
+                              Default
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 truncate text-sm text-slate-500">
+                          {card.holderName || 'Card holder'}
+                          {card.expiry ? ` • Expires ${card.expiry}` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toast('Card actions will be available soon.')}
+                        className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
+                        aria-label={`Manage ${card.brand} ending in ${card.last4}`}
+                      >
+                        <HiDotsVertical className="h-5 w-5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-gray-100 px-6 py-5 sm:px-8">
+              <button
+                type="button"
+                onClick={() => toast('Adding new cards will be available soon.')}
+                className="flex w-full items-center justify-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm font-semibold text-gray-900 shadow-sm transition hover:bg-gray-50"
+              >
+                <HiPlus className="h-5 w-5" />
+                Add New Card
+              </button>
+            </div>
+          </aside>
         </div>
       ) : null}
     </OrganisationLayout>

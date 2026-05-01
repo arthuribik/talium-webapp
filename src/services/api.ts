@@ -144,10 +144,20 @@ const initializeToken = () => {
 initializeToken();
 
 // List of public endpoints that don't require authentication
-// Note: Only GET requests to these endpoints are public, POST/PUT/DELETE require auth
+// Auth endpoints are public for their supported methods; other public resources are GET-only.
+const publicAuthEndpoints = [
+  '/v1/auth/login',
+  '/v1/auth/register',
+  '/v1/auth/createbusiness',
+  '/v1/auth/forgot-password',
+  '/v1/auth/reset-password',
+  '/v1/auth/verify-email',
+  '/v1/auth/send-verification-code',
+  '/v1/auth/registration',
+];
+
 const publicGetEndpoints = [
   '/v1/jobs', // GET list - for landing page (but GET /v1/jobs/:id sends token when logged in for hasApplied)
-  '/v1/auth/', // Auth endpoints
   '/v1/admin/professionals', // GET only - Public landing page endpoint
   '/v1/admin/organisations', // GET only - Public landing page endpoint
   '/v1/admin/jobs', // GET only - Public landing page endpoint
@@ -160,13 +170,13 @@ const isSingleJobGet = (url: string | undefined, method?: string): boolean => {
   return /\/v1\/jobs\/[^/]+$/.test(path);
 };
 
-// Check if an endpoint is public (only for GET requests)
+// Check if an endpoint is public
 const isPublicEndpoint = (url: string | undefined, method?: string): boolean => {
   if (!url) return false;
-  // Only GET requests are public, all other methods require auth
-  if (method && method.toUpperCase() !== 'GET') {
-    return false;
-  }
+  if (isRefreshEndpoint(url)) return false;
+  if (publicAuthEndpoints.some(endpoint => url.includes(endpoint))) return true;
+  // Only GET requests are public for non-auth endpoints, all other methods require auth
+  if (method && method.toUpperCase() !== 'GET') return false;
   // Single job GET: always send token when available (backend uses it for hasApplied)
   if (isSingleJobGet(url, method)) return false;
   return publicGetEndpoints.some(endpoint => url.includes(endpoint));

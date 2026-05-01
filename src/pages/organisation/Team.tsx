@@ -119,22 +119,23 @@ export default function Team() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleInvite = async () => {
+  const handleInvite = async (event?: React.FormEvent) => {
+    event?.preventDefault();
     if (!inviteEmail.trim()) {
       toast.error('Enter an email address');
       return;
     }
     setInviteSubmitting(true);
     try {
-      await api.post('/v1/organisation/team/invite', {
+      await api.post('/v1/organisation/team/invitations', {
         email: inviteEmail.trim(),
         role: inviteRole,
       });
-      toast.success('Invitation sent');
+      toast.success(`Invitation sent to ${inviteEmail.trim()}`);
       setShowInviteModal(false);
       setInviteEmail('');
       setInviteRole('org_member');
-      fetchTeam();
+      await fetchTeam();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to send invitation');
     } finally {
@@ -323,11 +324,12 @@ export default function Team() {
                   <HiX className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
-              <div className="space-y-4">
+              <form onSubmit={handleInvite} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <input
                     type="email"
+                    required
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
                     placeholder="e.g. colleague@company.com"
@@ -348,22 +350,23 @@ export default function Team() {
                     className="w-full focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => setShowInviteModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleInvite}
-                  disabled={inviteSubmitting}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
-                >
-                  {inviteSubmitting ? 'Sending…' : 'Send Invite'}
-                </button>
-              </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteModal(false)}
+                    className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={inviteSubmitting}
+                    className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50"
+                  >
+                    {inviteSubmitting ? 'Sending…' : 'Send Invite'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
