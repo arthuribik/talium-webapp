@@ -38,6 +38,7 @@ import JobsList from '@/pages/admin/JobsList';
 import JobDetail from '@/pages/admin/JobDetail';
 import TransactionsList from '@/pages/admin/TransactionsList';
 import TransactionDetail from '@/pages/admin/TransactionDetail';
+import AdminBilling from '@/pages/admin/Billing';
 import Settings from '@/pages/admin/Settings';
 import NotFound from '@/pages/NotFound';
 import OrganisationDashboard from '@/pages/organisation/OrganisationDashboard';
@@ -512,6 +513,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <TransactionDetail />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/billing"
+        element={
+          <AdminRoute>
+            <AdminBilling />
           </AdminRoute>
         }
       />

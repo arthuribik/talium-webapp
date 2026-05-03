@@ -9,6 +9,7 @@ import {
   HiOfficeBuilding,
   HiBriefcase,
   HiCurrencyDollar,
+  HiCreditCard,
   HiCog,
   HiSearch,
   HiChevronLeft,
@@ -42,6 +43,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     { path: '/admin/organizations', label: 'Organizations', icon: HiOfficeBuilding },
     { path: '/admin/jobs', label: 'Jobs', icon: HiBriefcase },
     { path: '/admin/transactions', label: 'Transactions', icon: HiCurrencyDollar },
+    { path: '/admin/billing', label: 'Billing', icon: HiCreditCard },
     { path: '/admin/settings', label: 'Settings', icon: HiCog },
   ];
 

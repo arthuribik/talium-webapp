@@ -183,6 +183,10 @@ function countProfessionMatches(professionals: Professional[], criteria: ScoutCr
   ).length;
 }
 
+function scoutSearchKey(scoutId: string, criteria: ScoutCriteria): string {
+  return `${scoutId}:${JSON.stringify(criteria)}`;
+}
+
 const WORK_MODE_LABELS: Record<string, string> = {
   remote: 'Remote',
   hybrid: 'Hybrid',
@@ -295,6 +299,7 @@ export default function ViewProfessionals() {
   const scoutMenuPortalRef = useRef<HTMLDivElement>(null);
   const profMenuPortalRef = useRef<HTMLDivElement>(null);
   const scoutIdFromUserClickRef = useRef<string | null>(null);
+  const lastScoutSearchKeyRef = useRef<string | null>(null);
   const skipScoutListPersistRef = useRef(false);
   const [scoutForm, setScoutForm] = useState({
     jobTitle: '',
@@ -378,6 +383,9 @@ export default function ViewProfessionals() {
   }, [scoutLists, scoutListsStorageKey]);
 
   const runScoutSearchWithCriteria = useCallback(async (criteria: ScoutCriteria, scoutId?: string) => {
+    if (scoutId) {
+      lastScoutSearchKeyRef.current = scoutSearchKey(scoutId, criteria);
+    }
     setLoading(true);
     try {
       const jobTitle = criteria.jobTitle.trim() || undefined;
@@ -400,13 +408,18 @@ export default function ViewProfessionals() {
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
-      setScoutLists((prev) =>
-        prev.map((entry) =>
-          entry.id === scoutId
-            ? { ...entry, peopleFound: countProfessionMatches(matchedProfessionals, criteria) }
-            : entry
-        )
-      );
+      const peopleFound = countProfessionMatches(matchedProfessionals, criteria);
+      setScoutLists((prev) => {
+        if (!scoutId) return prev;
+        let changed = false;
+        const next = prev.map((entry) => {
+          if (entry.id !== scoutId) return entry;
+          if (entry.peopleFound === peopleFound) return entry;
+          changed = true;
+          return { ...entry, peopleFound };
+        });
+        return changed ? next : prev;
+      });
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Scout search failed');
       setProfessionals([]);
@@ -427,11 +440,18 @@ export default function ViewProfessionals() {
       const entry = scoutLists.find((e) => e.id === scoutId);
       if (entry) {
         setActiveScoutId(scoutId);
+        const key = scoutSearchKey(scoutId, entry.criteria);
         // Skip running search if URL was just updated by our row click (avoid double run)
-        if (scoutIdFromUserClickRef.current !== scoutId) runScoutSearchWithCriteria(entry.criteria, scoutId);
+        if (scoutIdFromUserClickRef.current !== scoutId && lastScoutSearchKeyRef.current !== key) {
+          lastScoutSearchKeyRef.current = key;
+          runScoutSearchWithCriteria(entry.criteria, scoutId);
+        }
         scoutIdFromUserClickRef.current = null;
       } else setActiveScoutId(null);
-    } else setActiveScoutId(null);
+    } else {
+      setActiveScoutId(null);
+      lastScoutSearchKeyRef.current = null;
+    }
   }, [searchParams, scoutLists, runScoutSearchWithCriteria]);
 
   useEffect(() => {

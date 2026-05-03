@@ -487,6 +487,7 @@ export default function BillingSubscription() {
   const [historyQuery, setHistoryQuery] = useState('');
   const [fundWalletOpen, setFundWalletOpen] = useState(false);
   const [fundTokenInput, setFundTokenInput] = useState('');
+  const [usageLoading, setUsageLoading] = useState(false);
   const [manageCardsOpen, setManageCardsOpen] = useState(false);
   const [pendingBankPayment, setPendingBankPayment] = useState<PendingBankPayment | null>(null);
   const [selectedFeaturePlan, setSelectedFeaturePlan] = useState<PricingCard | null>(null);
@@ -586,10 +587,16 @@ export default function BillingSubscription() {
     }
   }, []);
 
-  const fetchSubscription = useCallback(async () => {
-    setLoading(true);
+  const fetchSubscription = useCallback(async (options?: { silent?: boolean }) => {
+    if (options?.silent) {
+      setUsageLoading(true);
+    } else {
+      setLoading(true);
+    }
     try {
-      const response = await api.get('/v1/organisation/billing');
+      const response = await api.get('/v1/organisation/billing', {
+        params: { period: usagePeriod },
+      });
       setSubscription(response.data.data);
     } catch (err) {
       console.error('Failed to fetch subscription:', err);
@@ -600,9 +607,13 @@ export default function BillingSubscription() {
         dashboard: null,
       });
     } finally {
-      setLoading(false);
+      if (options?.silent) {
+        setUsageLoading(false);
+      } else {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [usagePeriod]);
 
   const fetchBillingHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -636,10 +647,13 @@ export default function BillingSubscription() {
   }, []);
 
   useEffect(() => {
-    fetchSubscription();
     fetchPlans();
     fetchBillingHistory();
-  }, [fetchSubscription, fetchPlans, fetchBillingHistory]);
+  }, [fetchPlans, fetchBillingHistory]);
+
+  useEffect(() => {
+    fetchSubscription({ silent: Boolean(subscription) });
+  }, [fetchSubscription]);
 
   useEffect(() => {
     const raw = searchParams.get(BILLING_TAB_QUERY);
@@ -737,6 +751,10 @@ export default function BillingSubscription() {
     usageSubTab === 'plan'
       ? buildPlanUsageDisplayRows(dashboard?.planUsage)
       : dashboard?.tokenUsage || [];
+  const fundTokenAmount = Number(fundTokenInput);
+  const showFundSummary = fundTokenInput.trim() !== '' && Number.isFinite(fundTokenAmount) && fundTokenAmount > 0;
+  const fundAmountNgn = showFundSummary ? Math.round(fundTokenAmount * 35) : 0;
+  const fundAmountUsd = showFundSummary ? Math.round(fundTokenAmount * 0.05 * 100) / 100 : 0;
 
   if (loading) {
     return (
@@ -910,6 +928,7 @@ export default function BillingSubscription() {
                   <select
                     value={usagePeriod}
                     onChange={(e) => setUsagePeriod(e.target.value)}
+                    disabled={usageLoading}
                     className="appearance-none rounded-lg border border-gray-200 bg-gray-50 py-2 pl-3 pr-9 text-sm font-medium text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                   >
                     <option value="this_month">This Month</option>
@@ -945,6 +964,12 @@ export default function BillingSubscription() {
                   </button>
                 </div>
               </div>
+
+              {usageLoading ? (
+                <div className="mb-3 rounded-xl border border-brand-100 bg-brand-50 px-4 py-2 text-sm font-medium text-brand-700">
+                  Updating usage data...
+                </div>
+              ) : null}
 
               <div className="overflow-x-auto rounded-2xl border border-brand-100">
                 <table className="min-w-full divide-y divide-brand-100">
@@ -1561,104 +1586,149 @@ export default function BillingSubscription() {
       })() : null}
 
       {fundWalletOpen ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="presentation">
+        <div className="fixed inset-0 z-[100] flex justify-end" role="presentation">
           <button
             type="button"
-            aria-label="Close dialog"
+            aria-label="Close fund wallet drawer"
             className="absolute inset-0 bg-black/40"
             onClick={closeFundWallet}
           />
-          <div
+          <aside
             role="dialog"
             aria-modal="true"
             aria-labelledby="fund-wallet-title"
-            className="relative z-10 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            className="relative z-10 flex h-full w-full max-w-md flex-col bg-slate-50 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 id="fund-wallet-title" className="text-lg font-bold text-gray-900">
-                  Fund Your Wallet
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Purchase Taldium Tokens (TTK). 1 TTK = {formatMoney('USD', 0.05)} / {formatMoney('NGN', 35)}
+            <div className="border-b border-slate-200 bg-white px-5 py-5 sm:px-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600">
+                    Wallet Top-Up
+                  </p>
+                  <h2 id="fund-wallet-title" className="mt-1 text-xl font-bold tracking-tight text-slate-950">
+                    Fund Your Wallet
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Purchase Taldium Tokens. 1 TTK = {formatMoney('NGN', 35)} / {formatMoney('USD', 0.05)}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeFundWallet}
+                  className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                  aria-label="Close"
+                >
+                  <HiX className="h-6 w-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+              <div className="rounded-2xl border border-brand-100 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current Balance</p>
+                <p className="mt-2">
+                  <span className="text-2xl font-bold tracking-tight text-slate-950">
+                    {dashboard?.wallet?.tokenBalance ?? 0}
+                  </span>{' '}
+                  <span className="text-base font-medium text-slate-500">
+                    {dashboard?.wallet?.tokenSymbol || 'TTK'}
+                  </span>
                 </p>
               </div>
+
+              <div className="mt-6">
+                <p className="text-sm font-semibold text-slate-900">Choose a token bundle</p>
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[50, 100, 200, 500].map((n) => {
+                    const isSelected = fundTokenInput === String(n);
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setFundTokenInput(String(n))}
+                        className={`rounded-2xl border px-2 py-3 text-base font-semibold text-[12px] shadow-sm transition ${
+                          isSelected
+                            ? 'border-brand-900 bg-brand-900 text-white'
+                            : 'border-slate-200 bg-white text-slate-900 hover:border-brand-200 hover:bg-brand-50'
+                        }`}
+                      >
+                        {n} TTK
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <label htmlFor="fund-token-amount" className="block text-sm font-semibold text-slate-900">
+                  Custom token amount
+                </label>
+                <input
+                  id="fund-token-amount"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="Enter custom amount"
+                  value={fundTokenInput}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\D/g, '');
+                    setFundTokenInput(v);
+                  }}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                />
+              </div>
+
+              {showFundSummary ? (
+                <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between gap-4 pb-4">
+                    <span className="text-base font-medium text-slate-500">Tokens</span>
+                    <span className="text-base font-semibold text-slate-950">{fundTokenAmount} TTK</span>
+                  </div>
+                  <div className="space-y-4 border-t border-slate-200 pt-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-base font-medium text-slate-500">Amount (NGN)</span>
+                      <span className="text-base font-bold text-slate-950">
+                        {formatMoney('NGN', fundAmountNgn)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-base font-medium text-slate-500">Amount (USD)</span>
+                      <span className="text-base font-bold text-slate-950">
+                        {formatMoney('USD', fundAmountUsd)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="border-t border-slate-200 bg-white px-5 py-4 sm:px-6">
               <button
                 type="button"
-                onClick={closeFundWallet}
-                className="rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-800"
-                aria-label="Close"
+                onClick={async () => {
+                  const n = Number(fundTokenInput);
+                  if (!fundTokenInput.trim() || !Number.isFinite(n) || n < 1) {
+                    toast.error('Enter a valid number of tokens (1 or more).');
+                    return;
+                  }
+                  setPendingBankPayment({
+                    kind: 'wallet_topup',
+                    ttkAmount: n,
+                    title: 'Complete Wallet Top-Up',
+                    description: `${n} TTK wallet top-up`,
+                    amountLabel: formatMoney('NGN', Math.round(n * 35)) || `₦${Math.round(n * 35)}`,
+                    bankDetails: DEFAULT_BANK_DETAILS,
+                  });
+                  closeFundWallet();
+                }}
+                disabled={!showFundSummary}
+                className="w-full rounded-2xl bg-brand-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <HiX className="h-6 w-6" />
+                Continue to Payment
               </button>
             </div>
-
-            <div className="mt-5 rounded-xl border border-brand-100 bg-brand-50/80 px-5 py-5 text-center">
-              <p className="text-xs font-medium text-gray-500">Current Balance</p>
-              <p className="mt-1">
-                <span className="text-3xl font-bold tracking-tight text-gray-900">
-                  {dashboard?.wallet?.tokenBalance ?? 0}
-                </span>{' '}
-                <span className="text-base font-medium text-slate-500">
-                  {dashboard?.wallet?.tokenSymbol || 'TTK'}
-                </span>
-              </p>
-            </div>
-
-            <label htmlFor="fund-token-amount" className="mt-5 block text-sm font-medium text-gray-900">
-              Number of Tokens (TTK)
-            </label>
-            <input
-              id="fund-token-amount"
-              type="text"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="e.g. 100"
-              value={fundTokenInput}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, '');
-                setFundTokenInput(v);
-              }}
-              className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-3 text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-            />
-
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[50, 100, 200, 500].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setFundTokenInput(String(n))}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50"
-                >
-                  {n} TTK
-                </button>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={async () => {
-                const n = Number(fundTokenInput);
-                if (!fundTokenInput.trim() || !Number.isFinite(n) || n < 1) {
-                  toast.error('Enter a valid number of tokens (1 or more).');
-                  return;
-                }
-                setPendingBankPayment({
-                  kind: 'wallet_topup',
-                  ttkAmount: n,
-                  title: 'Complete Wallet Top-Up',
-                  description: `${n} TTK wallet top-up`,
-                  amountLabel: formatMoney('NGN', Math.round(n * 35)) || `₦${Math.round(n * 35)}`,
-                  bankDetails: DEFAULT_BANK_DETAILS,
-                });
-                closeFundWallet();
-              }}
-                className="mt-6 w-full rounded-xl bg-brand-600 px-4 py-3.5 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
-            >
-              Continue to Payment
-            </button>
-          </div>
+          </aside>
         </div>
       ) : null}
 

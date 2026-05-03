@@ -411,10 +411,15 @@ export default function Settings() {
   // Load tab from URL on mount
   useEffect(() => {
     const tabParam = searchParams.get('tab') as SettingsTab;
-    if (tabParam && ['general', 'users', 'verification', 'billing'].includes(tabParam)) {
+    if (tabParam === 'billing') {
+      setActiveTab('general');
+      setSearchParams({ tab: 'general' }, { replace: true });
+      return;
+    }
+    if (tabParam && ['general', 'users', 'verification'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   // Update URL when tab changes
   const handleTabChange = (tab: SettingsTab) => {
@@ -430,7 +435,6 @@ export default function Settings() {
     { id: 'general' as SettingsTab, label: 'General' },
     { id: 'users' as SettingsTab, label: 'Users' },
     { id: 'verification' as SettingsTab, label: 'Verification Providers' },
-    { id: 'billing' as SettingsTab, label: 'Billing' },
   ];
 
   const ToggleSwitch = ({ checked, onChange, label, description }: {
