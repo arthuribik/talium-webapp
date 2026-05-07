@@ -16,10 +16,10 @@ const PRO_SETTINGS_TAB_LABELS: Record<string, string> = {
 };
 
 const ORG_SETTINGS_TAB_LABELS: Record<string, string> = {
-  overview: 'Overview',
-  employees: 'Employees',
-  public: 'Public page',
-  security: 'Security',
+  general: 'General',
+  roles: 'Roles & Permissions',
+  activity: 'Activity Log',
+  integrations: 'Integrations',
 };
 
 const ADMIN_SETTINGS_TAB_LABELS: Record<string, string> = {
@@ -256,7 +256,7 @@ export function resolveRouteSeo(pathname: string, search: string): ResolvedSeo {
   }
   if (pathname === '/organization/settings') {
     return {
-      title: tabTitle(search, 'Organisation settings', ORG_SETTINGS_TAB_LABELS, 'overview'),
+      title: tabTitle(search, 'Settings', ORG_SETTINGS_TAB_LABELS, 'general'),
       noIndex: true,
       canonicalPathOnly: true,
     };

@@ -162,27 +162,6 @@ function readScoutLists(storageKey: string | null): ScoutListEntry[] {
   }
 }
 
-function professionMatchesScoutCriteria(profession: string | undefined, criteria: ScoutCriteria): boolean {
-  const role = (profession || '').trim().toLowerCase();
-  if (!role || role === 'not specified') return false;
-
-  const title = criteria.jobTitle.trim().toLowerCase();
-  if (!title) return true;
-
-  if (criteria.searchType === 'strict') {
-    return role === title;
-  }
-
-  const words = title.split(/\s+/).filter(Boolean);
-  return words.length > 0 && words.every((word) => role.includes(word));
-}
-
-function countProfessionMatches(professionals: Professional[], criteria: ScoutCriteria): number {
-  return professionals.filter((professional) =>
-    professionMatchesScoutCriteria(professional.profession, criteria)
-  ).length;
-}
-
 function scoutSearchKey(scoutId: string, criteria: ScoutCriteria): string {
   return `${scoutId}:${JSON.stringify(criteria)}`;
 }
@@ -202,52 +181,10 @@ const SALARY_PERIOD_LABELS: Record<string, string> = {
   annually: 'Annually',
 };
 
-function scoutFormFromSearchParams(searchParams: URLSearchParams) {
-  const get = (k: string) => searchParams.get(k) ?? '';
-  const benefitsParam = get('benefits').trim();
-  return {
-    jobTitle: get('jobTitle'),
-    searchType: (searchParams.get('searchType') === 'fuzzy' ? 'fuzzy' : 'strict') as 'strict' | 'fuzzy',
-    location: get('location') || 'Global',
-    domicile: get('domicile'),
-    workMode: get('workMode'),
-    employmentType: get('employmentType'),
-    currency: get('currency') || 'USD',
-    salaryMin: get('salaryMin'),
-    salaryMax: get('salaryMax'),
-    salaryPeriod: (get('salaryPeriod') === 'weekly' || get('salaryPeriod') === 'monthly' ? get('salaryPeriod') : 'annually') as 'weekly' | 'monthly' | 'annually',
-    benefits: benefitsParam ? benefitsParam.split(',').map((b) => b.trim()).filter(Boolean) : [] as string[],
-    benefitInput: '',
-    description: '',
-  };
-}
-
-function scoutFormToSearchParams(form: {
-  jobTitle: string;
-  searchType: string;
-  location: string;
-  domicile: string;
-  workMode: string;
-  employmentType: string;
-  currency: string;
-  salaryMin: string;
-  salaryMax: string;
-  salaryPeriod?: string;
-  benefits: string[];
-}) {
-  const params = new URLSearchParams();
-  if (form.jobTitle.trim()) params.set('jobTitle', form.jobTitle.trim());
-  if (form.searchType && form.searchType !== 'strict') params.set('searchType', form.searchType);
-  if (form.location && form.location !== 'Global') params.set('location', form.location);
-  if (form.domicile.trim()) params.set('domicile', form.domicile.trim());
-  if (form.workMode) params.set('workMode', form.workMode);
-  if (form.employmentType) params.set('employmentType', form.employmentType);
-  if (form.currency && form.currency !== 'USD') params.set('currency', form.currency);
-  if (form.salaryMin) params.set('salaryMin', form.salaryMin);
-  if (form.salaryMax) params.set('salaryMax', form.salaryMax);
-  if (form.salaryPeriod && form.salaryPeriod !== 'annually') params.set('salaryPeriod', form.salaryPeriod);
-  if (form.benefits.length) params.set('benefits', form.benefits.join(','));
-  return params;
+function tabFromSearchParams(params: URLSearchParams): 'all' | 'scouted' {
+  const tab = params.get('tab');
+  if (tab === 'all' || tab === 'scouted') return tab;
+  return 'scouted';
 }
 
 export default function ViewProfessionals() {
@@ -286,7 +223,10 @@ export default function ViewProfessionals() {
   const [totalPages, setTotalPages] = useState(1);
   const [showScoutModal, setShowScoutModal] = useState(false);
   const [scoutSearchActive, setScoutSearchActive] = useState(false);
-  const [professionalsTab, setProfessionalsTab] = useState<'all' | 'scouted'>('scouted');
+  /** Initialise from URL so the "write tab to URL" effect does not replace ?tab=all with scouted on first paint. */
+  const [professionalsTab, setProfessionalsTab] = useState<'all' | 'scouted'>(() =>
+    tabFromSearchParams(searchParams),
+  );
   const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>(() => readScoutLists(scoutListsStorageKey));
   const [activeScoutId, setActiveScoutId] = useState<string | null>(null);
   const [scoutViewTab, setScoutViewTab] = useState<'request' | 'response'>('request');
@@ -316,17 +256,10 @@ export default function ViewProfessionals() {
     benefitInput: '',
     description: '',
   });
-  const isFirstMount = useRef(true);
-
-  // Sync URL → scoutForm on mount and when user navigates back/forward
-  useEffect(() => {
-    const fromUrl = scoutFormFromSearchParams(searchParams);
-    setScoutForm((prev) => ({ ...prev, ...fromUrl, benefitInput: prev.benefitInput, description: prev.description }));
-  }, [searchParams]);
-
   // Write tab + scout + view to URL when they change
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
+    SCOUT_PARAM_KEYS.forEach((k) => next.delete(k));
     next.set('tab', professionalsTab);
     if (activeScoutId) {
       next.set('scout', activeScoutId);
@@ -337,21 +270,6 @@ export default function ViewProfessionals() {
     }
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
   }, [professionalsTab, activeScoutId, scoutViewTab]);
-
-  // Write scoutForm to URL whenever it changes (merge with existing params)
-  useEffect(() => {
-    if (isFirstMount.current) {
-      isFirstMount.current = false;
-      return;
-    }
-    const next = scoutFormToSearchParams(scoutForm);
-    const existing = new URLSearchParams(searchParams);
-    SCOUT_PARAM_KEYS.forEach((k) => existing.delete(k));
-    next.forEach((value, key) => existing.set(key, value));
-    if (existing.toString() !== searchParams.toString()) {
-      setSearchParams(existing, { replace: true });
-    }
-  }, [scoutForm]);
   const [scoutSearchLoading, setScoutSearchLoading] = useState(false);
   const [profileDrawerId, setProfileDrawerId] = useState<string | null>(null);
   const [profileDetail, setProfileDetail] = useState<any>(null);
@@ -359,7 +277,7 @@ export default function ViewProfessionals() {
 
   useEffect(() => {
     if (professionalsTab === 'all' && !scoutSearchActive) fetchProfessionals();
-  }, [filters, page, scoutSearchActive, professionalsTab]);
+  }, [filters, page, scoutSearchActive, professionalsTab, scoutListsStorageKey]);
 
   useEffect(() => {
     skipScoutListPersistRef.current = true;
@@ -408,7 +326,10 @@ export default function ViewProfessionals() {
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
-      const peopleFound = countProfessionMatches(matchedProfessionals, criteria);
+      const peopleFound =
+        typeof data?.pagination?.total === 'number'
+          ? data.pagination.total
+          : matchedProfessionals.length;
       setScoutLists((prev) => {
         if (!scoutId) return prev;
         let changed = false;
@@ -430,8 +351,8 @@ export default function ViewProfessionals() {
 
   // Read tab + scout + view from URL on mount and when URL changes (e.g. back/forward)
   useEffect(() => {
-    const tab = searchParams.get('tab');
-    if (tab === 'scouted' || tab === 'all') setProfessionalsTab(tab);
+    const tab = tabFromSearchParams(searchParams);
+    setProfessionalsTab(tab);
     const scoutId = searchParams.get('scout');
     const view = searchParams.get('view');
     if (view === 'request' || view === 'response') setScoutViewTab(view);
@@ -614,6 +535,10 @@ export default function ViewProfessionals() {
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
+      const peopleFoundTotal =
+        typeof data?.pagination?.total === 'number'
+          ? data.pagination.total
+          : matchedProfessionals.length;
       const criteria: ScoutCriteria = {
         jobTitle: scoutForm.jobTitle,
         searchType: scoutForm.searchType,
@@ -629,32 +554,31 @@ export default function ViewProfessionals() {
         description: scoutForm.description,
       };
       const name = [scoutForm.jobTitle || 'Scout', scoutForm.location || 'Global'].filter(Boolean).join(' · ') || 'Scout list';
-      const peopleFound = countProfessionMatches(matchedProfessionals, criteria);
       if (editingScoutId) {
         setScoutLists((prev) =>
           prev.map((e) =>
             e.id === editingScoutId
-              ? { ...e, name, peopleFound, criteria, createdAt: e.createdAt }
+              ? { ...e, name, peopleFound: peopleFoundTotal, criteria, createdAt: e.createdAt }
               : e
           )
         );
         setActiveScoutId(editingScoutId);
         setEditingScoutId(null);
         setShowScoutModal(false);
-        toast.success(`Scout list updated: ${peopleFound} professional(s) found.`);
+        toast.success(`Scout list updated: ${peopleFoundTotal} professional(s) found.`);
       } else {
         const entry: ScoutListEntry = {
           id: crypto.randomUUID(),
           name,
           createdAt: Date.now(),
-          peopleFound,
+          peopleFound: peopleFoundTotal,
           criteria,
         };
         setScoutLists((prev) => [entry, ...prev]);
         setActiveScoutId(entry.id);
         setProfessionalsTab('scouted');
         setShowScoutModal(false);
-        toast.success(`Created scout list: ${peopleFound} professional(s) found.`);
+        toast.success(`Created scout list: ${peopleFoundTotal} professional(s) found.`);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Scout search failed');
@@ -1340,79 +1264,82 @@ export default function ViewProfessionals() {
                     </div>
                   </div>
 
-                  <section className="mb-6">
-                    <h3 className="text-sm font-bold text-gray-900 mb-2">Skills</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {(profileDetail.skills && profileDetail.skills.length > 0) ? (
-                        profileDetail.skills.map((s: string, i: number) => (
+                  {profileDetail.skills?.length > 0 && (
+                    <section className="mb-6">
+                      <h3 className="text-sm font-bold text-gray-900 mb-2">Skills</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {profileDetail.skills.map((s: string, i: number) => (
                           <span key={i} className="px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-sm">
                             {s}
                           </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </div>
-                  </section>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-                  <section className="mb-6">
-                    <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
-                      <HiBriefcase className="w-4 h-4" />
-                      Work Experience
-                    </h3>
-                    {profileDetail.workExperience?.length > 0 ? (
+                  {profileDetail.workExperience?.length > 0 && (
+                    <section className="mb-6">
+                      <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <HiBriefcase className="w-4 h-4" />
+                        Work Experience
+                      </h3>
                       <ul className="space-y-3">
                         {profileDetail.workExperience.map((exp: any) => (
                           <li key={exp.id}>
-                            <p className="font-medium text-gray-900">{exp.role || exp.jobTitle}</p>
-                            <p className="text-sm text-gray-600">{exp.organisationName || exp.companyName}</p>
-                            <p className="text-xs text-gray-500">
-                              {exp.startDate} — {exp.currentlyWorking ? 'Present' : exp.endDate || '—'}
-                            </p>
+                            {(exp.role || exp.jobTitle) && (
+                              <p className="font-medium text-gray-900">{exp.role || exp.jobTitle}</p>
+                            )}
+                            {(exp.organisationName || exp.companyName) && (
+                              <p className="text-sm text-gray-600">{exp.organisationName || exp.companyName}</p>
+                            )}
+                            {(exp.startDate || exp.endDate || exp.currentlyWorking) && (
+                              <p className="text-xs text-gray-500">
+                                {exp.startDate || ''}
+                                {(exp.startDate && (exp.currentlyWorking || exp.endDate)) ? ' — ' : ''}
+                                {exp.currentlyWorking ? 'Present' : (exp.endDate || '')}
+                              </p>
+                            )}
                           </li>
                         ))}
                       </ul>
-                    ) : (
-                      <p className="text-sm text-gray-500">—</p>
-                    )}
-                  </section>
+                    </section>
+                  )}
 
-                  <section className="mb-6">
-                    <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
-                      <HiAcademicCap className="w-4 h-4" />
-                      Academic Qualifications
-                    </h3>
-                    {profileDetail.education?.length > 0 ? (
+                  {profileDetail.education?.length > 0 && (
+                    <section className="mb-6">
+                      <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                        <HiAcademicCap className="w-4 h-4" />
+                        Academic Qualifications
+                      </h3>
                       <ul className="space-y-3">
-                        {profileDetail.education.map((edu: any) => (
-                          <li key={edu.id}>
-                            <p className="font-medium text-gray-900">
-                              {[edu.degreeType, edu.fieldOfStudy].filter(Boolean).join(' ') || edu.levelOfEducation || '—'}
-                            </p>
-                            <p className="text-sm text-gray-600">{edu.institutionName}</p>
-                            <p className="text-xs text-gray-500">{edu.endDate || edu.startDate || '—'}</p>
-                          </li>
-                        ))}
+                        {profileDetail.education.map((edu: any) => {
+                          const qualification = [edu.degreeType, edu.fieldOfStudy].filter(Boolean).join(' ') || edu.levelOfEducation;
+                          return (
+                            <li key={edu.id}>
+                              {qualification && <p className="font-medium text-gray-900">{qualification}</p>}
+                              {edu.institutionName && <p className="text-sm text-gray-600">{edu.institutionName}</p>}
+                              {(edu.endDate || edu.startDate) && (
+                                <p className="text-xs text-gray-500">{edu.endDate || edu.startDate}</p>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
-                    ) : (
-                      <p className="text-sm text-gray-500">—</p>
-                    )}
-                  </section>
+                    </section>
+                  )}
 
-                  <section className="mb-8">
-                    <h3 className="text-sm font-bold text-gray-900 mb-2">Certifications</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {(profileDetail.certifications && profileDetail.certifications.length > 0) ? (
-                        profileDetail.certifications.map((c: string, i: number) => (
+                  {profileDetail.certifications?.length > 0 && (
+                    <section className="mb-8">
+                      <h3 className="text-sm font-bold text-gray-900 mb-2">Certifications</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {profileDetail.certifications.map((c: string, i: number) => (
                           <span key={i} className="px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-sm">
                             {c}
                           </span>
-                        ))
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </div>
-                  </section>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   <div className="flex gap-3">
                     <button

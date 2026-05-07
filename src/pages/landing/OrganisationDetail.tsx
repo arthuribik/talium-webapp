@@ -24,6 +24,7 @@ import toast from 'react-hot-toast';
 interface Organization {
   id: string;
   companyName: string;
+  logoUrl?: string | null;
   country: string;
   industry?: string;
   description?: string;
@@ -291,10 +292,20 @@ export default function OrganisationDetail() {
             <div className="flex flex-col lg:flex-row gap-8">
               {/* Left Side - Logo and Info */}
               <div className="flex items-start gap-6 flex-1">
-                <div className="w-24 h-24 bg-brand-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-white font-bold text-4xl">
-                    {getInitial(organization.companyName)}
-                  </span>
+                <div className="w-24 h-24 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden border border-gray-200 bg-white">
+                  {organization.logoUrl ? (
+                    <img
+                      src={organization.logoUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-brand-500">
+                      <span className="text-white font-bold text-4xl">
+                        {getInitial(organization.companyName)}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">

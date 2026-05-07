@@ -1,1643 +1,992 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
-import { 
-  HiOfficeBuilding, 
-  HiSave, 
-  HiLockClosed, 
-  HiEye, 
-  HiEyeOff,
+import toast from 'react-hot-toast';
+import {
+  HiBell,
   HiGlobe,
-  HiLink,
-  HiCalendar,
-  HiLocationMarker,
-  HiDocumentText,
-  HiPencil,
-  HiExternalLink,
-  HiCheckCircle,
+  HiLockClosed,
+  HiTrash,
   HiDotsVertical,
   HiPlus,
-  HiTrash
+  HiCalendar,
+  HiVideoCamera,
+  HiLink,
+  HiCog,
+  HiX,
 } from 'react-icons/hi';
-import { 
-  FaFacebook, 
-  FaTwitter, 
-  FaLinkedin, 
-  FaInstagram, 
-  FaYoutube,
-  FaBuilding,
-  FaGraduationCap,
-  FaChurch,
-  FaLandmark,
-  FaGlobe as FaGlobeIcon,
-  FaFlag,
-  FaUsers,
-  FaUserFriends,
-  FaHandshake,
-  FaEnvelope
-} from 'react-icons/fa';
-import toast from 'react-hot-toast';
-import { COUNTRIES } from '@/utils/countries';
-import PhoneNumberInput from '@/components/common/PhoneNumberInput';
+import {
+  HiAdjustmentsHorizontal,
+  HiShieldCheck,
+  HiPresentationChartLine,
+  HiPuzzlePiece,
+} from 'react-icons/hi2';
 
-const CATEGORIES = [
-  { id: 'company', label: 'Company', icon: FaBuilding },
-  { id: 'school', label: 'School', icon: FaGraduationCap },
-  { id: 'religious_organisation', label: 'Religious Organisation', icon: FaChurch },
-  { id: 'government_agency', label: 'Government Agency', icon: FaLandmark },
-  { id: 'international_organisation', label: 'International Organisation', icon: FaGlobeIcon },
-  { id: 'political_party', label: 'Political Party', icon: FaFlag },
-  { id: 'student_union', label: 'Student Union', icon: FaUsers },
-  { id: 'student_association', label: 'Student Association', icon: FaUserFriends },
-  { id: 'association', label: 'Association', icon: FaHandshake },
-];
+type SettingsTab = 'general' | 'roles' | 'activity' | 'integrations';
 
-const INDUSTRIES = [
-  'Technology', 'Healthcare', 'Finance', 'Education', 'Manufacturing', 'Retail',
-  'Real Estate', 'Construction', 'Transportation', 'Energy', 'Agriculture', 'Food & Beverage',
-  'Entertainment', 'Media & Communications', 'Consulting', 'Legal Services', 'Accounting',
-  'Hospitality', 'Tourism', 'Non-Profit', 'Government', 'Pharmaceuticals', 'Automotive',
-  'Aerospace', 'Telecommunications', 'Banking', 'Insurance', 'Investment', 'E-commerce',
-  'Arts & Culture', 'Research', 'Other'
-];
+const TAB_IDS: SettingsTab[] = ['general', 'roles', 'activity', 'integrations'];
 
-export default function Settings() {
+function isSettingsTab(t: string | null): t is SettingsTab {
+  return t !== null && TAB_IDS.includes(t as SettingsTab);
+}
+
+type ActivityLogType = 'success' | 'info' | 'warning' | 'error';
+
+type IntegrationItemIcon = 'calendar' | 'video' | 'link' | 'cog';
+type IntegrationSectionIcon = 'calendar' | 'video' | 'puzzle';
+
+interface IntegrationItemRow {
+  provider: string;
+  title: string;
+  description: string;
+  icon: IntegrationItemIcon;
+  connected: boolean;
+}
+
+interface IntegrationSectionRow {
+  id: string;
+  title: string;
+  subtitle: string;
+  sectionIcon: IntegrationSectionIcon;
+  items: IntegrationItemRow[];
+}
+
+interface ActivityLogEntry {
+  id: string;
+  action: string;
+  user: string;
+  details: string;
+  type: ActivityLogType;
+  timestamp: string;
+}
+
+interface SettingsRoleRow {
+  id: string;
+  kind: 'system' | 'custom';
+  roleKey: string | null;
+  name: string;
+  isSystem: boolean;
+  description: string;
+  memberCount: number;
+  permissionCount: number;
+  permissions: string[];
+}
+
+interface PermissionCatalogItem {
+  key: string;
+  label: string;
+}
+
+interface PermissionCatalogSection {
+  id: string;
+  title: string;
+  columns: 1 | 2;
+  items: PermissionCatalogItem[];
+}
+
+function Toggle({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      onClick={() => onChange(!enabled)}
+      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1e3a5f] focus-visible:ring-offset-2 ${
+        enabled ? 'bg-[#1e3a5f]' : 'bg-gray-200'
+      }`}
+    >
+      <span
+        className={`pointer-events-none absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
+          enabled ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
+
+function memberWord(n: number) {
+  return `${n} member${n === 1 ? '' : 's'}`;
+}
+
+function formatActivityTimestamp(iso: string) {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+function activityTypeBadgeClasses(type: string) {
+  switch (type) {
+    case 'success':
+      return 'bg-emerald-100 text-emerald-800';
+    case 'info':
+      return 'bg-sky-100 text-sky-800';
+    case 'warning':
+      return 'bg-amber-100 text-amber-800';
+    case 'error':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+}
+
+function activityTypeLabel(type: string) {
+  if (!type) return '—';
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+function IntegrationItemIconEl({ icon }: { icon: IntegrationItemIcon }) {
+  const cls = 'h-5 w-5 shrink-0 text-[#1e3a5f]';
+  switch (icon) {
+    case 'calendar':
+      return <HiCalendar className={cls} aria-hidden />;
+    case 'video':
+      return <HiVideoCamera className={cls} aria-hidden />;
+    case 'link':
+      return <HiLink className={cls} aria-hidden />;
+    case 'cog':
+      return <HiCog className={cls} aria-hidden />;
+    default:
+      return <HiCog className={cls} aria-hidden />;
+  }
+}
+
+function SectionHeaderIcon({ kind }: { kind: IntegrationSectionIcon }) {
+  const cls = 'h-5 w-5 shrink-0 text-[#1e3a5f]';
+  if (kind === 'calendar') return <HiCalendar className={cls} aria-hidden />;
+  if (kind === 'video') return <HiVideoCamera className={cls} aria-hidden />;
+  return <HiPuzzlePiece className={cls} aria-hidden />;
+}
+
+export default function OrganisationSettings() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get('tab') || 'overview';
-  const activeTab = tabParam === 'profile' ? 'overview' : tabParam;
-  const [profileEditMode, setProfileEditMode] = useState(false);
+  const tabParam = searchParams.get('tab');
+  const activeTab: SettingsTab = useMemo(
+    () => (isSettingsTab(tabParam) ? tabParam : 'general'),
+    [tabParam],
+  );
 
-  const [loading, setLoading] = useState(true);
-  const [employees, setEmployees] = useState<Array<{ id: string; firstName: string; lastName: string; name: string; title: string; bio?: string | null; email?: string | null; linkedInUrl?: string | null }>>([]);
-  const [employeesLoading, setEmployeesLoading] = useState(false);
-  const [employeeModalOpen, setEmployeeModalOpen] = useState(false);
-  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
-  const [employeeMenuOpen, setEmployeeMenuOpen] = useState<string | null>(null);
-  const [savingEmployee, setSavingEmployee] = useState(false);
-  const [employeeForm, setEmployeeForm] = useState({ firstName: '', lastName: '', title: '', bio: '', email: '', linkedInUrl: '' });
-  const employeeMenuRef = useRef<HTMLDivElement>(null);
-  const [saving, setSaving] = useState(false);
-  const [organization, setOrganization] = useState<any>(null);
-  const [formData, setFormData] = useState({
-    // Basic Information
-    companyName: '',
-    legalName: '',
-    otherName: '',
-    description: '',
-    
-    // Registration Status
-    isRegistered: null as boolean | null,
-    
-    // Incorporation Details (for registered)
-    countryOfIncorporation: '',
-    incorporationNumber: '',
-    
-    // Organisation Details (for non-registered)
-    organisationName: '',
-    organisationCountry: '',
-    
-    // Category
-    category: '',
-    schoolType: '',
-    religiousOrgType: '',
-    internationalOrgType: '',
-    politicalPartyCountry: '',
-    associatedSchool: '',
-    
-    // Business Details
-    industry: '',
-    companySize: '',
-    headquartersCity: '',
-    headquartersCountry: '',
-    foundedDate: '',
-    
-    // Contact & Online
-    organisationEmail: '',
-    phoneNumber: '',
-    website: '',
-    socialMedia: {
-      facebook: '',
-      twitter: '',
-      linkedin: '',
-      instagram: '',
-      youtube: '',
-    },
-    
-    // Address
-    address: {
-      buildingName: '',
-      streetNumber: '',
-      street: '',
-      city: '',
-      state: '',
-      country: '',
-      zipCode: '',
-    },
-  });
-
-  // Security form state
-  const [securityForm, setSecurityForm] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
+  const setTab = (tab: SettingsTab) => {
+    setSearchParams(tab === 'general' ? {} : { tab });
+  };
 
   useEffect(() => {
-    fetchOrganization();
+    const t = searchParams.get('tab');
+    if (t !== null && t !== '' && !isSettingsTab(t)) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [applicationAlerts, setApplicationAlerts] = useState(true);
+  const [weeklyDigest, setWeeklyDigest] = useState(false);
+  const [publicProfile, setPublicProfile] = useState(true);
+  const [twoFactor, setTwoFactor] = useState(false);
+
+  const [passwordForm, setPasswordForm] = useState({
+    current: '',
+    next: '',
+    confirm: '',
+  });
+
+  const [roles, setRoles] = useState<SettingsRoleRow[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesMenuId, setRolesMenuId] = useState<string | null>(null);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [createPerms, setCreatePerms] = useState<string[]>([]);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [permissionCatalog, setPermissionCatalog] = useState<
+    PermissionCatalogSection[]
+  >([]);
+
+  const [activityEntries, setActivityEntries] = useState<ActivityLogEntry[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityTotal, setActivityTotal] = useState(0);
+
+  const [integrationSections, setIntegrationSections] = useState<
+    IntegrationSectionRow[]
+  >([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(false);
+  const [integrationBusyProvider, setIntegrationBusyProvider] = useState<string | null>(
+    null,
+  );
+
+  const fetchRoles = useCallback(async () => {
+    setRolesLoading(true);
+    try {
+      const res = await api.get('/v1/organisation/settings/roles');
+      const data = res.data?.data;
+      setRoles(data?.roles ?? []);
+      setPermissionCatalog(
+        Array.isArray(data?.permissionCatalog) ? data.permissionCatalog : [],
+      );
+    } catch {
+      toast.error('Could not load roles');
+      setRoles([]);
+      setPermissionCatalog([]);
+    } finally {
+      setRolesLoading(false);
+    }
+  }, []);
+
+  const fetchActivity = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const res = await api.get('/v1/organisation/settings/activity', {
+        params: { page: 1, limit: 50 },
+      });
+      const d = res.data?.data;
+      setActivityEntries(d?.entries ?? []);
+      setActivityTotal(typeof d?.total === 'number' ? d.total : 0);
+    } catch {
+      toast.error('Could not load activity log');
+      setActivityEntries([]);
+      setActivityTotal(0);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  const fetchIntegrations = useCallback(async () => {
+    setIntegrationsLoading(true);
+    try {
+      const res = await api.get('/v1/organisation/settings/integrations');
+      setIntegrationSections(res.data?.data?.sections ?? []);
+    } catch {
+      toast.error('Could not load integrations');
+      setIntegrationSections([]);
+    } finally {
+      setIntegrationsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'employees') fetchEmployees();
-  }, [activeTab]);
+    if (activeTab === 'roles') {
+      void fetchRoles();
+    }
+  }, [activeTab, fetchRoles]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (employeeMenuRef.current && !employeeMenuRef.current.contains(e.target as Node)) {
-        setEmployeeMenuOpen(null);
-      }
+    if (activeTab === 'activity') {
+      void fetchActivity();
+    }
+  }, [activeTab, fetchActivity]);
+
+  useEffect(() => {
+    if (activeTab === 'integrations') {
+      void fetchIntegrations();
+    }
+  }, [activeTab, fetchIntegrations]);
+
+  useEffect(() => {
+    if (!rolesMenuId) return;
+    const close = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('[data-role-menu-root]')) setRolesMenuId(null);
     };
-    if (employeeMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [employeeMenuOpen]);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [rolesMenuId]);
 
-  const fetchOrganization = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/v1/organisation/profile');
-      const org = response.data.data;
-      if (org) {
-        setOrganization(org);
-        
-        // Pre-fill all form fields from API response
-        setFormData({
-          // Basic Information
-          companyName: org.companyName || '',
-          legalName: org.legalName || '',
-          otherName: org.otherName || '',
-          description: org.description || '',
-          
-          // Registration Status
-          isRegistered: org.isRegistered !== null && org.isRegistered !== undefined ? org.isRegistered : null,
-          
-          // Incorporation Details (for registered)
-          countryOfIncorporation: org.countryOfIncorporation || '',
-          incorporationNumber: org.incorporationNumber || '',
-          
-          // Organisation Details (for non-registered)
-          organisationName: org.organisationName || org.companyName || '',
-          organisationCountry: org.organisationCountry || '',
-          
-          // Category
-          category: org.category || '',
-          schoolType: org.schoolType || '',
-          religiousOrgType: org.religiousOrgType || '',
-          internationalOrgType: org.internationalOrgType || '',
-          politicalPartyCountry: org.politicalPartyCountry || '',
-          associatedSchool: org.associatedSchool || '',
-          
-          // Business Details
-          industry: org.industry || '',
-          companySize: org.companySize || '',
-          headquartersCity: org.headquartersCity || '',
-          headquartersCountry: org.headquartersCountry || '',
-          foundedDate: org.foundedDate || '',
-          
-          // Contact & Online
-          organisationEmail: org.user?.email || '',
-          phoneNumber: org.user?.phoneNumber || '',
-          website: org.website || '',
-          socialMedia: {
-            facebook: org.socialMedia?.facebook || '',
-            twitter: org.socialMedia?.twitter || '',
-            linkedin: org.socialMedia?.linkedin || '',
-            instagram: org.socialMedia?.instagram || '',
-            youtube: org.socialMedia?.youtube || '',
-          },
-          
-          // Address
-          address: {
-            buildingName: org.address?.buildingName || '',
-            streetNumber: org.address?.streetNumber || '',
-            street: org.address?.street || '',
-            city: org.address?.city || '',
-            state: org.address?.state || '',
-            country: org.address?.country || '',
-            zipCode: org.address?.zipCode || '',
-          },
-        });
-      }
-    } catch (err) {
-      console.error('Failed to fetch organization:', err);
-      setOrganization(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchEmployees = async () => {
-    setEmployeesLoading(true);
-    try {
-      const res = await api.get('/v1/organisation/employees');
-      setEmployees(res.data?.data?.employees ?? []);
-    } catch {
-      setEmployees([]);
-    } finally {
-      setEmployeesLoading(false);
-    }
-  };
-
-  const openAddEmployee = () => {
-    setEditingEmployeeId(null);
-    setEmployeeForm({ firstName: '', lastName: '', title: '', bio: '', email: '', linkedInUrl: '' });
-    setEmployeeModalOpen(true);
-  };
-
-  const openEditEmployee = (emp: typeof employees[0]) => {
-    setEditingEmployeeId(emp.id);
-    setEmployeeForm({
-      firstName: emp.firstName,
-      lastName: emp.lastName,
-      title: emp.title,
-      bio: emp.bio ?? '',
-      email: emp.email ?? '',
-      linkedInUrl: emp.linkedInUrl ?? '',
-    });
-    setEmployeeMenuOpen(null);
-    setEmployeeModalOpen(true);
-  };
-
-  const saveEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingEmployee(true);
-    try {
-      if (editingEmployeeId) {
-        await api.put(`/v1/organisation/employees/${editingEmployeeId}`, employeeForm);
-        toast.success('Employee updated');
-      } else {
-        await api.post('/v1/organisation/employees', employeeForm);
-        toast.success('Employee added');
-      }
-      setEmployeeModalOpen(false);
-      fetchEmployees();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message ?? 'Failed to save employee');
-    } finally {
-      setSavingEmployee(false);
-    }
-  };
-
-  const deleteEmployee = async (id: string) => {
-    if (!window.confirm('Remove this employee from the list?')) return;
-    setEmployeeMenuOpen(null);
-    try {
-      await api.delete(`/v1/organisation/employees/${id}`);
-      toast.success('Employee removed');
-      fetchEmployees();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message ?? 'Failed to remove employee');
-    }
-  };
-
-  const handleProfileSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await api.put('/v1/organisation/profile', formData);
-      toast.success('Organization profile updated successfully!');
-      await fetchOrganization();
-      setProfileEditMode(false);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update organization profile');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handlePasswordChange = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (securityForm.newPassword !== securityForm.confirmPassword) {
-      toast.error('New passwords do not match');
-      return;
-    }
-
-    if (securityForm.newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters long');
-      return;
-    }
-
-    setChangingPassword(true);
-    try {
-      // TODO: Replace with actual change password endpoint
-      toast.success('Password changed successfully!');
-      setSecurityForm({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-      });
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to change password');
-    } finally {
-      setChangingPassword(false);
-    }
-  };
-
-  const tabs = [
-    { id: 'overview', label: 'Organisation Overview', icon: HiOfficeBuilding },
-    { id: 'employees', label: 'Employees / Associates', icon: FaUsers },
-    { id: 'public', label: 'Public Page', icon: HiGlobe },
-    { id: 'security', label: 'Security', icon: HiLockClosed },
+  const tabs: { id: SettingsTab; label: string; icon: typeof HiAdjustmentsHorizontal }[] = [
+    { id: 'general', label: 'General', icon: HiAdjustmentsHorizontal },
+    { id: 'roles', label: 'Roles & Permissions', icon: HiShieldCheck },
+    { id: 'activity', label: 'Activity Log', icon: HiPresentationChartLine },
+    { id: 'integrations', label: 'Integrations', icon: HiPuzzlePiece },
   ];
 
-  const setTab = (id: string) => setSearchParams({ tab: id === 'overview' ? 'overview' : id });
+  const handleSaveChanges = () => {
+    toast.success('Changes saved');
+  };
 
-  const displayName = formData.companyName || formData.legalName || formData.organisationName || organization?.companyName || '';
-  const alsoKnownAs = formData.otherName || organization?.otherName || '';
-  const categoryLabel = CATEGORIES.find((c) => c.id === formData.category)?.label || formData.category || 'Company';
-  const onTrudiumSince = organization?.createdAt ? new Date(organization.createdAt).getFullYear() : new Date().getFullYear();
-  const locationStr = [formData.headquartersCity || formData.address?.city, formData.headquartersCountry || formData.address?.country].filter(Boolean).join(', ') || '—';
-  const physicalAddress = [
-    formData.address?.buildingName,
-    formData.address?.streetNumber,
-    formData.address?.street,
-    formData.address?.city,
-    formData.address?.state,
-    formData.address?.country,
-  ].filter(Boolean).join(', ') || '—';
-  const foundedYear = formData.foundedDate ? new Date(formData.foundedDate).getFullYear() : null;
-  const yearOfIncorporation = foundedYear || (formData.countryOfIncorporation ? new Date().getFullYear() : null);
+  const handleUpdatePassword = () => {
+    toast.success('Password updated');
+    setPasswordForm({ current: '', next: '', confirm: '' });
+  };
 
-  if (loading) {
-    return (
-      <OrganisationLayout>
-        <div className="p-6">
-          <div className="text-center text-gray-600 py-16">Loading settings...</div>
-        </div>
-      </OrganisationLayout>
+  const handleDeleteOrganisation = () => {
+    if (window.confirm('Permanently delete your organisation and all data?')) {
+      toast.error('Organisation deletion is not available in this environment.');
+    }
+  };
+
+  const openCreateRole = () => {
+    setCreateName('');
+    setCreateDescription('');
+    setCreatePerms([]);
+    setCreateOpen(true);
+  };
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCreateOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [createOpen]);
+
+  const toggleCreatePerm = (key: string) => {
+    setCreatePerms((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
     );
-  }
+  };
 
-  if (!organization) {
-    return (
-      <OrganisationLayout>
-        <div className="p-6">
-          <div className="flex flex-col items-center justify-center py-16 px-6 bg-white rounded-xl shadow-sm">
-            <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-              <HiOfficeBuilding className="w-12 h-12 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Organization Not Found</h3>
-            <p className="text-sm text-gray-500 text-center max-w-md">
-              Unable to load organization profile. Please try again later.
-            </p>
-          </div>
-        </div>
-      </OrganisationLayout>
-    );
-  }
+  const submitCreateRole = async () => {
+    const name = createName.trim();
+    const description = createDescription.trim();
+    if (!name) {
+      toast.error('Role name is required');
+      return;
+    }
+    if (createPerms.length === 0) {
+      toast.error('Select at least one permission');
+      return;
+    }
+    setCreateSaving(true);
+    try {
+      await api.post('/v1/organisation/settings/roles', {
+        name,
+        ...(description ? { description } : {}),
+        permissions: createPerms,
+      });
+      toast.success('Role created');
+      setCreateOpen(false);
+      await fetchRoles();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ?? 'Could not create role';
+      toast.error(typeof msg === 'string' ? msg : 'Could not create role');
+    } finally {
+      setCreateSaving(false);
+    }
+  };
+
+  const deleteCustomRole = async (id: string) => {
+    if (!window.confirm('Delete this role?')) return;
+    try {
+      await api.delete(`/v1/organisation/settings/roles/${id}`);
+      toast.success('Role deleted');
+      setRolesMenuId(null);
+      await fetchRoles();
+    } catch {
+      toast.error('Could not delete role');
+    }
+  };
+
+  const connectIntegration = async (provider: string) => {
+    setIntegrationBusyProvider(provider);
+    try {
+      const res = await api.post(
+        `/v1/organisation/settings/integrations/${encodeURIComponent(provider)}/connect`,
+      );
+      setIntegrationSections(res.data?.data?.sections ?? []);
+      toast.success('Integration connected');
+    } catch {
+      toast.error('Could not connect integration');
+    } finally {
+      setIntegrationBusyProvider(null);
+    }
+  };
+
+  const disconnectIntegration = async (provider: string) => {
+    setIntegrationBusyProvider(provider);
+    try {
+      const res = await api.delete(
+        `/v1/organisation/settings/integrations/${encodeURIComponent(provider)}`,
+      );
+      setIntegrationSections(res.data?.data?.sections ?? []);
+      toast.success('Integration disconnected');
+    } catch {
+      toast.error('Could not disconnect integration');
+    } finally {
+      setIntegrationBusyProvider(null);
+    }
+  };
+
+  const maxWidthClass =
+    activeTab === 'roles' ||
+    activeTab === 'activity' ||
+    activeTab === 'integrations'
+      ? 'max-w-5xl'
+      : 'max-w-3xl';
 
   return (
     <OrganisationLayout>
-      <div className="min-h-screen bg-[#F7F7F7] p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">Organisation Profile</h1>
-            <p className="text-gray-600 text-sm">Manage your organisation&apos;s public profile and team</p>
-          </div>
-          {activeTab === 'overview' && !profileEditMode && (
-            <button
-              type="button"
-              onClick={() => setProfileEditMode(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] transition-colors text-sm font-medium shrink-0"
-            >
-              <HiPencil className="w-4 h-4" />
-              Edit Profile
-            </button>
-          )}
-        </div>
+      <div className="min-h-screen bg-[#f3f4f6] p-6 pb-10">
+        <div className={`mx-auto ${maxWidthClass}`}>
+          <header className="mb-8">
+            <h1 className="text-3xl font-bold tracking-tight text-[#1e3a5f]">Settings</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Manage preferences, integrations, and view activity
+            </p>
+          </header>
 
-        {/* Tabs */}
-        <div className="bg-white rounded-t-xl border border-b-0 border-gray-200 px-4 pt-2">
-          <nav className="flex gap-1">
+          <div className="mb-6 flex flex-wrap gap-2">
             {tabs.map((tab) => {
-              const IconComponent = tab.icon;
+              const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => { setTab(tab.id); if (tab.id !== 'overview') setProfileEditMode(false); }}
-                  className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm transition-colors -mb-px ${
+                  type="button"
+                  onClick={() => setTab(tab.id)}
+                  className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'border-[#1e3a5f] text-[#1e3a5f] bg-gray-50/80'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                      ? 'border-2 border-[#1e3a5f] bg-white text-[#1e3a5f] shadow-sm'
+                      : 'border-2 border-transparent bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                   }`}
                 >
-                  <IconComponent className="w-4 h-4" />
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
                   {tab.label}
                 </button>
               );
             })}
-          </nav>
-        </div>
+          </div>
 
-        {/* Organisation Overview — view mode: five cards */}
-        {activeTab === 'overview' && !profileEditMode && (
-          <div className="space-y-6 pb-8">
-            {/* Card 1: Organisation Overview */}
-            <div className="bg-white rounded-b-xl rounded-t-none shadow-sm border border-t-0 border-gray-200 p-6">
-              <div className="flex flex-wrap items-start gap-6">
-                <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                  <HiOfficeBuilding className="w-8 h-8 text-gray-500" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">{displayName || '—'}</h2>
-                  {alsoKnownAs && (
-                    <p className="text-sm text-gray-500 mb-3">Also known as: {alsoKnownAs}</p>
-                  )}
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">
-                      {categoryLabel}
-                    </span>
-                    {formData.industry && (
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">
-                        {formData.industry}
-                      </span>
-                    )}
-                    {(organization?.verificationStatus === 'verified' || organization?.verified) && (
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
-                        <HiCheckCircle className="w-3.5 h-3.5 mr-1" />
-                        Verified
-                      </span>
-                    )}
+          {activeTab === 'general' && (
+            <div className="space-y-6">
+              <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-6 py-5">
+                  <div className="flex items-center gap-2">
+                    <HiBell className="h-5 w-5 text-[#1e3a5f]" aria-hidden />
+                    <h2 className="text-base font-bold text-gray-900">Notifications</h2>
                   </div>
-                  <p className="text-sm text-gray-500 flex items-center gap-1">
-                    <HiCalendar className="w-4 h-4 text-gray-400" />
-                    On Trudium since {onTrudiumSince}
+                  <p className="mt-1 text-sm text-gray-500">Configure how you receive updates</p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  <div className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Email Notifications</p>
+                      <p className="text-sm text-gray-500">Receive updates via email</p>
+                    </div>
+                    <Toggle enabled={emailNotifications} onChange={setEmailNotifications} />
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Application Alerts</p>
+                      <p className="text-sm text-gray-500">
+                        Get notified when someone applies to a job
+                      </p>
+                    </div>
+                    <Toggle enabled={applicationAlerts} onChange={setApplicationAlerts} />
+                  </div>
+                  <div className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Weekly Digest</p>
+                      <p className="text-sm text-gray-500">Receive a weekly summary of activity</p>
+                    </div>
+                    <Toggle enabled={weeklyDigest} onChange={setWeeklyDigest} />
+                  </div>
+                </div>
+              </section>
+
+              <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-6 py-5">
+                  <div className="flex items-center gap-2">
+                    <HiGlobe className="h-5 w-5 text-[#1e3a5f]" aria-hidden />
+                    <h2 className="text-base font-bold text-gray-900">Privacy</h2>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-4 px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Public Profile</p>
+                    <p className="text-sm text-gray-500">
+                      Allow your organisation to appear in search results
+                    </p>
+                  </div>
+                  <Toggle enabled={publicProfile} onChange={setPublicProfile} />
+                </div>
+              </section>
+
+              <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-6 py-5">
+                  <div className="flex items-center gap-2">
+                    <HiLockClosed className="h-5 w-5 text-[#1e3a5f]" aria-hidden />
+                    <h2 className="text-base font-bold text-gray-900">Security</h2>
+                  </div>
+                </div>
+                <div className="space-y-0 divide-y divide-gray-100">
+                  <div className="flex items-center justify-between gap-4 px-6 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">Two-Factor Authentication</p>
+                      <p className="text-sm text-gray-500">Add an extra layer of security</p>
+                    </div>
+                    <Toggle enabled={twoFactor} onChange={setTwoFactor} />
+                  </div>
+                  <div className="px-6 py-5">
+                    <p className="mb-3 text-sm font-bold text-gray-900">Change Password</p>
+                    <div className="space-y-3">
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        placeholder="Current password"
+                        value={passwordForm.current}
+                        onChange={(e) =>
+                          setPasswordForm((s) => ({ ...s, current: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#1e3a5f] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="New password"
+                        value={passwordForm.next}
+                        onChange={(e) =>
+                          setPasswordForm((s) => ({ ...s, next: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#1e3a5f] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder="Confirm new password"
+                        value={passwordForm.confirm}
+                        onChange={(e) =>
+                          setPasswordForm((s) => ({ ...s, confirm: e.target.value }))
+                        }
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#1e3a5f] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleUpdatePassword}
+                        className="rounded-lg border border-gray-300 bg-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-200"
+                      >
+                        Update Password
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="overflow-hidden rounded-xl border border-red-200 bg-white shadow-sm">
+                <div className="border-b border-red-100 px-6 py-5">
+                  <div className="flex items-center gap-2">
+                    <HiTrash className="h-5 w-5 text-red-600" aria-hidden />
+                    <h2 className="text-base font-bold text-red-600">Danger Zone</h2>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Delete Organisation</p>
+                    <p className="text-sm text-gray-500">
+                      Permanently delete your organisation and all data
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDeleteOrganisation}
+                    className="shrink-0 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700"
+                  >
+                    Delete Organisation
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'roles' && (
+            <div>
+              <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Roles &amp; Permissions</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Define what each role can access and manage
                   </p>
                 </div>
-              </div>
-            </div>
-
-            {/* Card 2: Incorporation Details */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Incorporation Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Incorporation Number</p>
-                  <p className="text-gray-900 font-semibold">{formData.incorporationNumber || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Country of Incorporation</p>
-                  <p className="text-gray-900 font-semibold">{formData.countryOfIncorporation || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Year of Incorporation</p>
-                  <p className="text-gray-900 font-semibold">{yearOfIncorporation ?? '—'}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 3: About */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-3">About</h3>
-              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{formData.description || '—'}</p>
-            </div>
-
-            {/* Card 4: Location & Contact */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Location & Contact</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <HiLocationMarker className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Location</p>
-                      <p className="text-gray-900 font-medium">{locationStr}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <FaEnvelope className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Email</p>
-                      <p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <HiCalendar className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Founded</p>
-                      <p className="text-gray-900 font-medium">{foundedYear ? `Founded ${foundedYear}` : '—'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <HiOfficeBuilding className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Physical Address</p>
-                      <p className="text-gray-900 font-medium">{physicalAddress}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 5: Website & Social Media */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Website & Social Media</h3>
-              <div className="flex flex-wrap gap-3">
-                {formData.website && (
-                  <a
-                    href={formData.website.startsWith('http') ? formData.website : `https://${formData.website}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
-                  >
-                    <HiGlobe className="w-4 h-4 text-gray-500" />
-                    Website
-                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {formData.socialMedia?.linkedin && (
-                  <a
-                    href={formData.socialMedia.linkedin.startsWith('http') ? formData.socialMedia.linkedin : `https://${formData.socialMedia.linkedin}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
-                  >
-                    <FaLinkedin className="w-4 h-4 text-[#0A66C2]" />
-                    LinkedIn
-                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {formData.socialMedia?.twitter && (
-                  <a
-                    href={formData.socialMedia.twitter.startsWith('http') ? formData.socialMedia.twitter : `https://${formData.socialMedia.twitter}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 transition-colors text-sm font-medium"
-                  >
-                    <FaTwitter className="w-4 h-4 text-gray-600" />
-                    Twitter / X
-                    <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {(!formData.website && !formData.socialMedia?.linkedin && !formData.socialMedia?.twitter) && (
-                  <p className="text-sm text-gray-500">No website or social links added yet.</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Organisation Overview — edit mode: form */}
-        {activeTab === 'overview' && profileEditMode && (
-          <form onSubmit={handleProfileSubmit} className="space-y-6 pb-8">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
-              <p className="text-gray-600 text-sm">Edit your organisation details below, then save.</p>
-              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setProfileEditMode(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm font-medium"
+                  onClick={openCreateRole}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#1e3a5f] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#152942]"
+                >
+                  <HiPlus className="h-5 w-5" aria-hidden />
+                  Create Role
+                </button>
+              </div>
+
+              {rolesLoading ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-12 text-center text-sm text-gray-500">
+                  Loading roles…
+                </div>
+              ) : (
+                <ul className="space-y-4">
+                  {roles.map((role) => (
+                    <li
+                      key={role.id}
+                      className="relative rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex gap-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-[#1e3a5f]">
+                          <HiShieldCheck className="h-6 w-6" aria-hidden />
+                        </div>
+                        <div className="min-w-0 flex-1 pr-10">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-bold text-gray-900">{role.name}</h3>
+                            {role.isSystem ? (
+                              <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-[#1e3a5f]">
+                                System
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-sm leading-relaxed text-gray-600">
+                            {role.description}
+                          </p>
+                          <p className="mt-2 text-xs text-gray-500">
+                            {memberWord(role.memberCount)} • {role.permissionCount} permissions
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {role.permissions.map((tag) => (
+                              <span
+                                key={`${role.id}-${tag}`}
+                                className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className="absolute right-4 top-4"
+                        {...(rolesMenuId === role.id ? { 'data-role-menu-root': '' } : {})}
+                      >
+                        <button
+                          type="button"
+                          aria-label="Role options"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRolesMenuId((id) => (id === role.id ? null : role.id));
+                          }}
+                          className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                        >
+                          <HiDotsVertical className="h-5 w-5" />
+                        </button>
+                        {rolesMenuId === role.id && (
+                          <div className="absolute right-0 z-10 mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                            {role.kind === 'custom' ? (
+                              <button
+                                type="button"
+                                className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                onClick={() => void deleteCustomRole(role.id)}
+                              >
+                                Delete role
+                              </button>
+                            ) : (
+                              <div className="px-4 py-2 text-xs text-gray-500">Built-in role</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'activity' && (
+            <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 px-6 py-5">
+                <h2 className="text-xl font-bold text-gray-900">Activity Log</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Recent actions and changes in your organisation
+                </p>
+              </div>
+              {activityLoading ? (
+                <div className="p-12 text-center text-sm text-gray-500">Loading activity…</div>
+              ) : activityEntries.length === 0 ? (
+                <div className="p-12 text-center text-sm text-gray-500">No activity yet.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50/80">
+                        <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Action
+                        </th>
+                        <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          User
+                        </th>
+                        <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Details
+                        </th>
+                        <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Type
+                        </th>
+                        <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Timestamp
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activityEntries.map((row) => (
+                        <tr
+                          key={row.id}
+                          className="border-b border-gray-100 last:border-b-0"
+                        >
+                          <td className="px-5 py-3.5 text-sm font-medium text-gray-900">
+                            {row.action}
+                          </td>
+                          <td className="px-5 py-3.5 text-sm text-gray-700">{row.user}</td>
+                          <td className="max-w-[220px] px-5 py-3.5 text-sm text-gray-600">
+                            <span className="block truncate" title={row.details}>
+                              {row.details}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${activityTypeBadgeClasses(row.type)}`}
+                            >
+                              {activityTypeLabel(row.type)}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-3.5 text-sm text-gray-600">
+                            {formatActivityTimestamp(row.timestamp)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {activityTotal > activityEntries.length ? (
+                    <p className="border-t border-gray-100 px-5 py-3 text-xs text-gray-500">
+                      Showing {activityEntries.length} of {activityTotal} entries
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === 'integrations' && (
+            <div className="space-y-6">
+              {integrationsLoading ? (
+                <div className="rounded-xl border border-gray-200 bg-white p-12 text-center text-sm text-gray-500 shadow-sm">
+                  Loading integrations…
+                </div>
+              ) : (
+                integrationSections.map((section) => (
+                  <section
+                    key={section.id}
+                    className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                  >
+                    <div className="border-b border-gray-100 px-6 py-5">
+                      <div className="flex items-center gap-2">
+                        <SectionHeaderIcon kind={section.sectionIcon} />
+                        <h2 className="text-lg font-bold text-gray-900">{section.title}</h2>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-500">{section.subtitle}</p>
+                    </div>
+                    <div className="space-y-3 p-5">
+                      {section.items.map((item) => (
+                        <div
+                          key={item.provider}
+                          className="flex flex-col gap-4 rounded-lg bg-gray-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="flex min-w-0 flex-1 gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-gray-100">
+                              <IntegrationItemIconEl icon={item.icon} />
+                            </div>
+                            <div className="min-w-0">
+                              <h3 className="text-sm font-bold text-gray-900">{item.title}</h3>
+                              <p className="mt-0.5 text-sm text-gray-600">{item.description}</p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                            {item.connected ? (
+                              <>
+                                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                                  Connected
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={integrationBusyProvider === item.provider}
+                                  onClick={() => void disconnectIntegration(item.provider)}
+                                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                  {integrationBusyProvider === item.provider
+                                    ? 'Please wait…'
+                                    : 'Disconnect'}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={integrationBusyProvider === item.provider}
+                                onClick={() => void connectIntegration(item.provider)}
+                                className="rounded-lg bg-[#1e3a5f] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#152942] disabled:opacity-50"
+                              >
+                                {integrationBusyProvider === item.provider
+                                  ? 'Connecting…'
+                                  : 'Connect'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeTab === 'general' && (
+            <div className="mt-10 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveChanges}
+                className="rounded-lg bg-[#1e3a5f] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#152942]"
+              >
+                Save Changes
+              </button>
+            </div>
+          )}
+        </div>
+
+        {createOpen && (
+          <div className="fixed inset-0 z-50" role="presentation">
+            <button
+              type="button"
+              aria-label="Close drawer"
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setCreateOpen(false)}
+            />
+            <aside
+              className="absolute inset-y-0 right-0 flex w-full max-w-lg flex-col bg-[#f5f6f8] shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="create-role-title"
+            >
+              <header className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+                <h2 id="create-role-title" className="text-lg font-bold text-gray-900">
+                  Create New Role
+                </h2>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={() => setCreateOpen(false)}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                >
+                  <HiX className="h-5 w-5" aria-hidden />
+                </button>
+              </header>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                <div className="space-y-5">
+                  <div>
+                    <label
+                      htmlFor="create-role-name"
+                      className="block text-sm font-semibold text-gray-800"
+                    >
+                      Role Name <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      id="create-role-name"
+                      value={createName}
+                      onChange={(e) => setCreateName(e.target.value)}
+                      className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-[#1e3a5f] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      placeholder="e.g. Hiring Manager"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="create-role-desc"
+                      className="block text-sm font-semibold text-gray-800"
+                    >
+                      Description
+                    </label>
+                    <textarea
+                      id="create-role-desc"
+                      value={createDescription}
+                      onChange={(e) => setCreateDescription(e.target.value)}
+                      rows={3}
+                      className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-[#1e3a5f] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                      placeholder="What can this role do?"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Permissions</p>
+                    <div className="mt-4 space-y-6">
+                      {permissionCatalog.map((section) => (
+                        <div key={section.id}>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                            {section.title}
+                          </p>
+                          <div
+                            className={
+                              section.columns === 2
+                                ? 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-3'
+                                : 'mt-3 flex flex-col gap-3'
+                            }
+                          >
+                            {section.items.map((item) => (
+                              <label
+                                key={item.key}
+                                className="flex cursor-pointer items-start gap-3 rounded-lg bg-white/60 py-0.5"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-gray-300 text-[#1e3a5f] focus:ring-[#1e3a5f]"
+                                  checked={createPerms.includes(item.key)}
+                                  onChange={() => toggleCreatePerm(item.key)}
+                                />
+                                <span className="text-sm text-gray-800">{item.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <footer className="flex shrink-0 justify-end gap-3 border-t border-gray-200 bg-white px-6 py-4">
+                <button
+                  type="button"
+                  onClick={() => setCreateOpen(false)}
+                  className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] disabled:opacity-50 text-sm font-medium flex items-center gap-2"
-                >
-                  <HiSave className="w-4 h-4" />
-                  {saving ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-            {/* Basic Information Section */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <HiOfficeBuilding className="w-5 h-5 mr-2 text-brand-600" />
-                Basic Information
-              </h2>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {formData.isRegistered ? 'Legal Name' : 'Organisation Name'} <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.isRegistered ? formData.legalName : formData.organisationName}
-                      onChange={(e) => setFormData({ 
-                        ...formData, 
-                        [formData.isRegistered ? 'legalName' : 'organisationName']: e.target.value 
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder={formData.isRegistered ? "Enter legal name" : "Enter organisation name"}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
-                    <input
-                      type="text"
-                      value={formData.companyName}
-                      onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="Enter company name"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Other Name (Also Known As)</label>
-                    <input
-                      type="text"
-                      value={formData.otherName}
-                      onChange={(e) => setFormData({ ...formData, otherName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="Trading name, acronym, or alias"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                      rows={4}
-                      required
-                      value={formData.description}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="Describe your organisation"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">{formData.description.length}/500 characters</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Contact Information Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <FaEnvelope className="w-5 h-5 mr-2 text-brand-600" />
-                Contact Information
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email Address <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={formData.organisationEmail}
-                    onChange={(e) => setFormData({ ...formData, organisationEmail: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 bg-gray-50"
-                    placeholder="organisation@example.com"
-                    readOnly
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Email cannot be changed here</p>
-                </div>
-                <div>
-                  <PhoneNumberInput
-                    value={formData.phoneNumber}
-                    onChange={(value) => setFormData({ ...formData, phoneNumber: value })}
-                    label="Phone Number"
-                    placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Registration Status Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <HiDocumentText className="w-5 h-5 mr-2 text-brand-600" />
-                Registration Status
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, isRegistered: true })}
-                  className={`p-4 rounded-lg border-2 text-left transition-all ${
-                    formData.isRegistered === true
-                      ? 'border-brand-500 bg-brand-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  disabled={createSaving}
+                  onClick={() => void submitCreateRole()}
+                  className="rounded-lg bg-[#1e3a5f] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#152942] disabled:opacity-50"
                 >
-                  <div className="font-medium text-gray-900 mb-1">Registered</div>
-                  <div className="text-sm text-gray-600">Organisation is legally registered</div>
+                  {createSaving ? 'Creating…' : 'Create Role'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, isRegistered: false })}
-                  className={`p-4 rounded-lg border-2 text-left transition-all ${
-                    formData.isRegistered === false
-                      ? 'border-brand-500 bg-brand-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="font-medium text-gray-900 mb-1">Not Registered</div>
-                  <div className="text-sm text-gray-600">Organisation is not legally registered</div>
-                </button>
-              </div>
-
-              {/* Incorporation Details (for registered) */}
-              {formData.isRegistered === true && (
-                <div className="mt-6 pt-6 border-t space-y-4">
-                  <h3 className="font-medium text-gray-900">Incorporation Details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Country of Incorporation <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        required
-                        value={formData.countryOfIncorporation}
-                        onChange={(e) => setFormData({ ...formData, countryOfIncorporation: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      >
-                        <option value="">Select country</option>
-                        {COUNTRIES.map((country) => (
-                          <option key={country} value={country}>{country}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Incorporation Number <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.incorporationNumber}
-                        onChange={(e) => setFormData({ ...formData, incorporationNumber: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="Enter incorporation number"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Organisation Details (for non-registered) */}
-              {formData.isRegistered === false && (
-                <div className="mt-6 pt-6 border-t space-y-4">
-                  <h3 className="font-medium text-gray-900">Organisation Details</h3>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Organisation Country <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      required
-                      value={formData.organisationCountry}
-                      onChange={(e) => setFormData({ ...formData, organisationCountry: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    >
-                      <option value="">Select country</option>
-                      {COUNTRIES.map((country) => (
-                        <option key={country} value={country}>{country}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Category Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <FaBuilding className="w-5 h-5 mr-2 text-brand-600" />
-                Category
-              </h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-                {CATEGORIES.map((category) => {
-                  const Icon = category.icon;
-                  const isSelected = formData.category === category.id;
-                  return (
-                    <button
-                      key={category.id}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, category: category.id })}
-                      className={`p-4 rounded-lg border-2 flex flex-col items-center transition-all ${
-                        isSelected
-                          ? 'border-brand-500 bg-brand-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <Icon className={`w-6 h-6 mb-2 ${isSelected ? 'text-brand-600' : 'text-gray-400'}`} />
-                      <span className={`text-sm font-medium ${isSelected ? 'text-brand-600' : 'text-gray-700'}`}>
-                        {category.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Conditional Category Fields */}
-              {formData.category === 'school' && (
-                <div className="mt-4 pt-4 border-t">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    School Type <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.schoolType}
-                    onChange={(e) => setFormData({ ...formData, schoolType: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select school type</option>
-                    <option value="primary">Primary School</option>
-                    <option value="secondary">Secondary School</option>
-                    <option value="high_school">High School</option>
-                    <option value="vocational">Vocational School</option>
-                    <option value="university">University</option>
-                    <option value="college">College</option>
-                    <option value="technical">Technical Institute</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              )}
-
-              {formData.category === 'religious_organisation' && (
-                <div className="mt-4 pt-4 border-t">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Religious Organisation Type <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.religiousOrgType}
-                    onChange={(e) => setFormData({ ...formData, religiousOrgType: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select type</option>
-                    <option value="church">Church</option>
-                    <option value="mosque">Mosque</option>
-                    <option value="temple">Temple</option>
-                    <option value="synagogue">Synagogue</option>
-                    <option value="gurdwara">Gurdwara</option>
-                    <option value="shrine">Shrine</option>
-                    <option value="monastery">Monastery</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              )}
-
-              {formData.category === 'international_organisation' && (
-                <div className="mt-4 pt-4 border-t">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    International Organisation Type <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.internationalOrgType}
-                    onChange={(e) => setFormData({ ...formData, internationalOrgType: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select type</option>
-                    <option value="ngo">NGO (Non-Governmental Organisation)</option>
-                    <option value="igo">IGO (Inter-Governmental Organisation)</option>
-                    <option value="multilateral">Multilateral Organisation</option>
-                    <option value="charity">Charity</option>
-                    <option value="foundation">Foundation</option>
-                    <option value="association">International Association</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              )}
-
-              {formData.category === 'political_party' && (
-                <div className="mt-4 pt-4 border-t">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Country <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.politicalPartyCountry}
-                    onChange={(e) => setFormData({ ...formData, politicalPartyCountry: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select country</option>
-                    {COUNTRIES.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {(formData.category === 'student_union' || formData.category === 'student_association') && (
-                <div className="mt-4 pt-4 border-t">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Associated School <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.associatedSchool}
-                    onChange={(e) => setFormData({ ...formData, associatedSchool: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="Enter the name of the associated school"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Business Details Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <HiOfficeBuilding className="w-5 h-5 mr-2 text-brand-600" />
-                Business Details
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Industry <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.industry}
-                    onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select industry</option>
-                    {INDUSTRIES.map((industry) => (
-                      <option key={industry} value={industry}>{industry}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Company Size</label>
-                  <select
-                    value={formData.companySize}
-                    onChange={(e) => setFormData({ ...formData, companySize: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select size</option>
-                    <option value="1-10">1-10 employees</option>
-                    <option value="11-50">11-50 employees</option>
-                    <option value="51-200">51-200 employees</option>
-                    <option value="201-500">201-500 employees</option>
-                    <option value="501-1000">501-1000 employees</option>
-                    <option value="1000+">1000+ employees</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Headquarters City <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.headquartersCity}
-                    onChange={(e) => setFormData({ ...formData, headquartersCity: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., Lagos"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Headquarters Country <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.headquartersCountry}
-                    onChange={(e) => setFormData({ ...formData, headquartersCountry: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select country</option>
-                    {COUNTRIES.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <HiCalendar className="w-4 h-4 mr-1" />
-                    Founded Date <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.foundedDate}
-                    onChange={(e) => setFormData({ ...formData, foundedDate: e.target.value })}
-                    max={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Website & Social Media Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <HiGlobe className="w-5 h-5 mr-2 text-brand-600" />
-                Website & Social Media
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <HiLink className="w-4 h-4 mr-1" />
-                    Website
-                  </label>
-                  <input
-                    type="url"
-                    value={formData.website}
-                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="https://www.example.com"
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <FaFacebook className="w-4 h-4 mr-1 text-blue-600" />
-                      Facebook
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.socialMedia.facebook}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, facebook: e.target.value }
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="https://facebook.com/yourpage"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <FaTwitter className="w-4 h-4 mr-1 text-blue-400" />
-                      Twitter
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.socialMedia.twitter}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, twitter: e.target.value }
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="https://twitter.com/yourhandle"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <FaLinkedin className="w-4 h-4 mr-1 text-blue-700" />
-                      LinkedIn
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.socialMedia.linkedin}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, linkedin: e.target.value }
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="https://linkedin.com/company/yourcompany"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <FaInstagram className="w-4 h-4 mr-1 text-pink-600" />
-                      Instagram
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.socialMedia.instagram}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, instagram: e.target.value }
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="https://instagram.com/yourhandle"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                      <FaYoutube className="w-4 h-4 mr-1 text-red-600" />
-                      YouTube
-                    </label>
-                    <input
-                      type="url"
-                      value={formData.socialMedia.youtube}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        socialMedia: { ...formData.socialMedia, youtube: e.target.value }
-                      })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="https://youtube.com/yourchannel"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Address Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <HiLocationMarker className="w-5 h-5 mr-2 text-brand-600" />
-                Address
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Building Name</label>
-                  <input
-                    type="text"
-                    value={formData.address.buildingName}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, buildingName: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., Tower 1"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Street Number</label>
-                  <input
-                    type="text"
-                    value={formData.address.streetNumber}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, streetNumber: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., 123"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Street <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.address.street}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, street: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., Victoria Island"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.address.city}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, city: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., Lagos"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">State/Province</label>
-                  <input
-                    type="text"
-                    value={formData.address.state}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, state: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., Lagos State"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Country <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.address.country}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, country: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  >
-                    <option value="">Select country</option>
-                    {COUNTRIES.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Zip/Postal Code</label>
-                  <input
-                    type="text"
-                    value={formData.address.zipCode}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      address: { ...formData.address, zipCode: e.target.value }
-                    })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="e.g., 101001"
-                  />
-                </div>
-              </div>
-            </div>
-          </form>
-        )}
-
-        {/* Employees / Associates Tab */}
-        {activeTab === 'employees' && (
-          <div className="pb-8">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">Key Employees & Associates</h2>
-                  <p className="text-gray-600 text-sm">Add bios for founders, executives, and key team members.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openAddEmployee}
-                  className="flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] text-sm font-medium shrink-0"
-                >
-                  <HiPlus className="w-4 h-4" />
-                  Add Employee
-                </button>
-              </div>
-
-              {employeesLoading ? (
-                <div className="text-center text-gray-500 py-12">Loading...</div>
-              ) : employees.length === 0 ? (
-                <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg">
-                  <p className="text-gray-500 mb-4">No key employees or associates yet.</p>
-                  <button
-                    type="button"
-                    onClick={openAddEmployee}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] text-sm font-medium"
-                  >
-                    <HiPlus className="w-4 h-4" />
-                    Add Employee
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {employees.map((emp) => (
-                    <div
-                      key={emp.id}
-                      className="border border-gray-200 rounded-xl p-6 bg-white shadow-sm"
-                    >
-                      <div className="flex flex-wrap gap-4">
-                        <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center shrink-0 text-xl font-semibold text-gray-600">
-                          {(emp.firstName || emp.name || '?')[0].toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <h3 className="text-lg font-bold text-gray-900">{emp.name || `${emp.firstName} ${emp.lastName}`.trim() || '—'}</h3>
-                              <span className="inline-flex mt-1 px-3 py-0.5 rounded-full text-xs font-medium bg-[#EFF6FF] text-[#1e3a5f]">
-                                {emp.title}
-                              </span>
-                            </div>
-                            <div className="relative shrink-0" ref={employeeMenuOpen === emp.id ? employeeMenuRef : undefined}>
-                              <button
-                                type="button"
-                                onClick={() => setEmployeeMenuOpen(employeeMenuOpen === emp.id ? null : emp.id)}
-                                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100"
-                                aria-label="Actions"
-                              >
-                                <HiDotsVertical className="w-5 h-5" />
-                              </button>
-                              {employeeMenuOpen === emp.id && (
-                                <div className="absolute right-0 top-full mt-1 w-44 py-1 bg-white rounded-lg border border-gray-200 shadow-lg z-10">
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditEmployee(emp)}
-                                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                                  >
-                                    <HiPencil className="w-4 h-4" />
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteEmployee(emp.id)}
-                                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                  >
-                                    <HiTrash className="w-4 h-4" />
-                                    Delete
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          {emp.bio && <p className="mt-3 text-gray-700 text-sm leading-relaxed">{emp.bio}</p>}
-                          <div className="mt-3 flex flex-wrap gap-4 text-sm">
-                            {emp.email && (
-                              <a href={`mailto:${emp.email}`} className="flex items-center gap-1.5 text-gray-600 hover:text-[#1e3a5f]">
-                                <FaEnvelope className="w-4 h-4" />
-                                {emp.email}
-                              </a>
-                            )}
-                            {emp.linkedInUrl && (
-                              <a
-                                href={emp.linkedInUrl.startsWith('http') ? emp.linkedInUrl : `https://${emp.linkedInUrl}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1.5 text-gray-600 hover:text-[#0A66C2]"
-                              >
-                                <FaLinkedin className="w-4 h-4" />
-                                LinkedIn
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+              </footer>
+            </aside>
           </div>
-        )}
-
-        {/* Add/Edit Employee Modal */}
-        {employeeModalOpen && (
-          <>
-            <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setEmployeeModalOpen(false)} aria-hidden />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <div className="p-6 border-b border-gray-200">
-                  <h3 className="text-lg font-bold text-gray-900">{editingEmployeeId ? 'Edit Employee' : 'Add Employee'}</h3>
-                </div>
-                <form onSubmit={saveEmployee} className="p-6 space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
-                      <input
-                        type="text"
-                        required
-                        value={employeeForm.firstName}
-                        onChange={(e) => setEmployeeForm((f) => ({ ...f, firstName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                        placeholder="John"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
-                      <input
-                        type="text"
-                        required
-                        value={employeeForm.lastName}
-                        onChange={(e) => setEmployeeForm((f) => ({ ...f, lastName: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                        placeholder="Adeyemi"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Title / Role</label>
-                    <input
-                      type="text"
-                      required
-                      value={employeeForm.title}
-                      onChange={(e) => setEmployeeForm((f) => ({ ...f, title: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                      placeholder="Founder & CEO"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
-                    <textarea
-                      rows={4}
-                      value={employeeForm.bio}
-                      onChange={(e) => setEmployeeForm((f) => ({ ...f, bio: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                      placeholder="Short background and experience..."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                    <input
-                      type="email"
-                      value={employeeForm.email}
-                      onChange={(e) => setEmployeeForm((f) => ({ ...f, email: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                      placeholder="john@company.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
-                    <input
-                      type="url"
-                      value={employeeForm.linkedInUrl}
-                      onChange={(e) => setEmployeeForm((f) => ({ ...f, linkedInUrl: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]"
-                      placeholder="https://linkedin.com/in/..."
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
-                    <button
-                      type="button"
-                      onClick={() => setEmployeeModalOpen(false)}
-                      className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={savingEmployee}
-                      className="px-4 py-2 bg-[#1e3a5f] text-white rounded-lg hover:bg-[#152942] disabled:opacity-50 flex items-center gap-2"
-                    >
-                      {savingEmployee ? 'Saving...' : editingEmployeeId ? 'Save changes' : 'Add Employee'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Public Page Tab */}
-        {activeTab === 'public' && (
-          <div className="space-y-6 pb-8">
-            <p className="text-sm text-gray-600 mb-4">This is how your organisation profile appears to the public.</p>
-            {/* Same five cards as overview view mode — reuse same layout */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex flex-wrap items-start gap-6">
-                <div className="w-14 h-14 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-                  <HiOfficeBuilding className="w-8 h-8 text-gray-500" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h2 className="text-xl font-bold text-gray-900 mb-1">{displayName || '—'}</h2>
-                  {alsoKnownAs && <p className="text-sm text-gray-500 mb-3">Also known as: {alsoKnownAs}</p>}
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">{categoryLabel}</span>
-                    {formData.industry && <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#1e3a5f] text-white">{formData.industry}</span>}
-                    {(organization?.verificationStatus === 'verified' || organization?.verified) && (
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"><HiCheckCircle className="w-3.5 h-3.5 mr-1" />Verified</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-500 flex items-center gap-1"><HiCalendar className="w-4 h-4 text-gray-400" />On Trudium since {onTrudiumSince}</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Incorporation Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Incorporation Number</p><p className="text-gray-900 font-semibold">{formData.incorporationNumber || '—'}</p></div>
-                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Country of Incorporation</p><p className="text-gray-900 font-semibold">{formData.countryOfIncorporation || '—'}</p></div>
-                <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Year of Incorporation</p><p className="text-gray-900 font-semibold">{yearOfIncorporation ?? '—'}</p></div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-3">About</h3>
-              <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{formData.description || '—'}</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Location & Contact</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <HiLocationMarker className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Location</p><p className="text-gray-900 font-medium">{locationStr}</p></div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <FaEnvelope className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Email</p><p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p></div>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <HiCalendar className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Founded</p><p className="text-gray-900 font-medium">{foundedYear ? `Founded ${foundedYear}` : '—'}</p></div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <HiOfficeBuilding className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
-                    <div><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Physical Address</p><p className="text-gray-900 font-medium">{physicalAddress}</p></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-4">Website & Social Media</h3>
-              <div className="flex flex-wrap gap-3">
-                {formData.website && (
-                  <a href={formData.website.startsWith('http') ? formData.website : `https://${formData.website}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
-                    <HiGlobe className="w-4 h-4 text-gray-500" />Website <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {formData.socialMedia?.linkedin && (
-                  <a href={formData.socialMedia.linkedin.startsWith('http') ? formData.socialMedia.linkedin : `https://${formData.socialMedia.linkedin}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
-                    <FaLinkedin className="w-4 h-4 text-[#0A66C2]" />LinkedIn <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {formData.socialMedia?.twitter && (
-                  <a href={formData.socialMedia.twitter.startsWith('http') ? formData.socialMedia.twitter : `https://${formData.socialMedia.twitter}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 hover:bg-gray-100 text-sm font-medium">
-                    <FaTwitter className="w-4 h-4 text-gray-600" />Twitter / X <HiExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                  </a>
-                )}
-                {(!formData.website && !formData.socialMedia?.linkedin && !formData.socialMedia?.twitter) && <p className="text-sm text-gray-500">No website or social links added yet.</p>}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Security Tab */}
-        {activeTab === 'security' && (
-          <form onSubmit={handlePasswordChange} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 pb-8">
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                  <HiLockClosed className="w-5 h-5 mr-2 text-brand-600" />
-                  Change Password
-                </h3>
-                <p className="text-sm text-gray-600 mb-6">
-                  Update your password to keep your account secure. Make sure to use a strong password.
-                </p>
-              </div>
-
-              <div className="space-y-4 max-w-md">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
-                  <div className="relative">
-                    <input
-                      type={showCurrentPassword ? 'text' : 'password'}
-                      required
-                      value={securityForm.currentPassword}
-                      onChange={(e) => setSecurityForm({ ...securityForm, currentPassword: e.target.value })}
-                      className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                    >
-                      {showCurrentPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-                  <div className="relative">
-                    <input
-                      type={showNewPassword ? 'text' : 'password'}
-                      required
-                      value={securityForm.newPassword}
-                      onChange={(e) => setSecurityForm({ ...securityForm, newPassword: e.target.value })}
-                      className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                    >
-                      {showNewPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Password must be at least 8 characters long
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      required
-                      value={securityForm.confirmPassword}
-                      onChange={(e) => setSecurityForm({ ...securityForm, confirmPassword: e.target.value })}
-                      className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                    >
-                      {showConfirmPassword ? <HiEyeOff className="w-5 h-5" /> : <HiEye className="w-5 h-5" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end pt-6 border-t">
-                <button
-                  type="submit"
-                  disabled={changingPassword}
-                  className="px-6 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  <HiLockClosed className="w-5 h-5 mr-2" />
-                  {changingPassword ? 'Changing...' : 'Change Password'}
-                </button>
-              </div>
-            </div>
-          </form>
         )}
       </div>
     </OrganisationLayout>

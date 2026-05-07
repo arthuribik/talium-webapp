@@ -2495,6 +2495,8 @@ export default function RegisterBusiness() {
                     ]
                   : []; // No steps shown until registration status is selected
 
+                const activeStepIndex = steps.findIndex((s) => s.step === currentStep);
+
                 return steps.map((stepInfo, index) => {
                   // Skip empty steps
                   if (stepInfo.step === 0) {
@@ -2502,9 +2504,9 @@ export default function RegisterBusiness() {
                   }
 
                   const isActive = currentStep === stepInfo.step;
-                  const isCompleted = formData.isRegistered === false
-                    ? (stepInfo.step === 7 && currentStep > 7) || (stepInfo.step === 8 && currentStep > 8) || (stepInfo.step === 5 && currentStep > 5) || (stepInfo.step === 6 && currentStep > 6)
-                    : (currentStep > stepInfo.step || (stepInfo.step === 2 && currentStep > 1 && formData.isRegistered));
+                  // Completion is based on visible step order, not numeric step ids.
+                  // This avoids marking step 5/6 as completed when currentStep is 7/8.
+                  const isCompleted = activeStepIndex > -1 && index < activeStepIndex;
                 return (
                   <div key={stepInfo.step} className="flex items-center">
                     <div className={`flex items-center ${

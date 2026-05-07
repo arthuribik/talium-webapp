@@ -79,7 +79,7 @@ export default function OrganisationAccountActive() {
       { label: 'Create your organisation account', done: true },
       { label: 'Verify your organisation email', done: true },
       {
-        label: 'Verify your registered business (RC/CAC)',
+        label: 'Verify your registered business',
         done: Boolean(details.isRegistered && details.incorporationNumber),
       },
       { label: 'Add your organisation email domain', done: false },
@@ -89,82 +89,82 @@ export default function OrganisationAccountActive() {
   );
 
   const handleGoToDashboard = () => {
-    const params = new URLSearchParams({ redirect: '/organization' });
-    if (details.email) params.set('email', details.email);
-    navigate(`/login?${params.toString()}`);
+    navigate('/organization/profile');
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-10">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.35),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(20,184,166,0.22),transparent_30%)]" />
-      <div className="absolute left-1/2 top-1/2 h-72 w-[42rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500/20 blur-3xl" />
+    <main className="min-h-screen bg-gray-50 px-4 py-10">
+      <div className="mx-auto w-full max-w-2xl">
+        <img src={logo} alt="Taldium" className="mb-8 h-10" />
 
-      <section className="relative z-10 w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 text-white shadow-2xl backdrop-blur-xl">
-        <img src={logo} alt="Taldium" className="mb-7 h-9 brightness-0 invert" />
-
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight">
-          Your organisation account is <span className="italic text-brand-200">active.</span>
-        </h1>
-
-        <div className="mt-7 rounded-2xl border border-white/10 bg-white/10 p-4">
-          <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.22em] text-brand-200">
-            Profile Information
+        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm md:p-8">
+          <h1 className="text-3xl font-semibold leading-tight tracking-tight text-gray-900">
+            Your organisation account is <span className="text-brand-600">active.</span>
+          </h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Your registration has been received successfully.
           </p>
-          <dl className="divide-y divide-white/10 text-sm">
-            <div className="flex justify-between gap-6 py-3">
-              <dt className="text-white/55">Name</dt>
-              <dd className="text-right font-semibold text-white">{displayValue(details.name)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 py-3">
-              <dt className="text-white/55">Email</dt>
-              <dd className="text-right font-semibold text-white">{displayValue(details.email)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 py-3">
-              <dt className="text-white/55">Category</dt>
-              <dd className="text-right font-semibold capitalize text-white">{formatCategory(details.category)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 py-3">
-              <dt className="text-white/55">Industry</dt>
-              <dd className="text-right font-semibold text-white">{displayValue(details.industry)}</dd>
-            </div>
-            <div className="flex justify-between gap-6 py-3">
-              <dt className="text-white/55">Location</dt>
-              <dd className="text-right font-semibold text-white">{displayValue(details.location)}</dd>
-            </div>
-          </dl>
-        </div>
 
-        <div className="mt-6">
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.22em] text-brand-200">
-            Next Steps
-          </p>
-          <div className="space-y-2.5">
-            {nextSteps.map((step) => (
-              <div
-                key={step.label}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/10 px-3.5 py-3 text-sm"
-              >
-                {step.done ? (
-                  <HiCheckCircle className="h-5 w-5 shrink-0 text-emerald-300" />
-                ) : (
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-400/20">
-                    <HiOfficeBuilding className="h-3.5 w-3.5 text-brand-200" />
-                  </span>
-                )}
-                <span className={step.done ? 'text-white/75' : 'text-white'}>{step.label}</span>
+          <div className="mt-7 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="mb-4 text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+              Profile Information
+            </p>
+            <dl className="divide-y divide-gray-200 text-sm">
+              <div className="flex justify-between gap-6 py-3">
+                <dt className="text-gray-500">Name</dt>
+                <dd className="text-right font-semibold text-gray-900">{displayValue(details.name)}</dd>
               </div>
-            ))}
+              <div className="flex justify-between gap-6 py-3">
+                <dt className="text-gray-500">Email</dt>
+                <dd className="text-right font-semibold text-gray-900">{displayValue(details.email)}</dd>
+              </div>
+              <div className="flex justify-between gap-6 py-3">
+                <dt className="text-gray-500">Category</dt>
+                <dd className="text-right font-semibold capitalize text-gray-900">{formatCategory(details.category)}</dd>
+              </div>
+              <div className="flex justify-between gap-6 py-3">
+                <dt className="text-gray-500">Industry</dt>
+                <dd className="text-right font-semibold text-gray-900">{displayValue(details.industry)}</dd>
+              </div>
+              <div className="flex justify-between gap-6 py-3">
+                <dt className="text-gray-500">Location</dt>
+                <dd className="text-right font-semibold text-gray-900">{displayValue(details.location)}</dd>
+              </div>
+            </dl>
           </div>
-        </div>
 
-        <button
-          type="button"
-          onClick={handleGoToDashboard}
-          className="mt-7 w-full rounded-xl bg-brand-500 px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-brand-950/30 transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-300"
-        >
-          Go to Dashboard
-        </button>
-      </section>
+          <div className="mt-6">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+              Next Steps
+            </p>
+            <div className="space-y-2.5">
+              {nextSteps.map((step) => (
+                <div
+                  key={step.label}
+                  className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-sm"
+                >
+                  {step.done ? (
+                    <HiCheckCircle className="h-5 w-5 shrink-0 text-green-500" />
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-50">
+                      <HiOfficeBuilding className="h-3.5 w-3.5 text-brand-600" />
+                    </span>
+                  )}
+                  <span className={step.done ? 'text-gray-600' : 'text-gray-900'}>{step.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGoToDashboard}
+            className="mt-7 w-full rounded-xl bg-brand-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-300"
+          >
+            Go to Dashboard
+          </button>
+        </section>
+      </div>
     </main>
   );
 }

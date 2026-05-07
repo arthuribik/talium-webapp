@@ -48,6 +48,7 @@ import PostJobs from '@/pages/organisation/PostJobs';
 import OrganisationJobDetail from '@/pages/organisation/JobDetail';
 import OrganisationApplicantDetail from '@/pages/organisation/ApplicantDetail';
 import OrganisationSettings from '@/pages/organisation/Settings';
+import OrganisationProfile from '@/pages/organisation/OrganisationProfile';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
 import Team from '@/pages/organisation/Team';
 import ProfessionalDashboard from '@/pages/professional/Dashboard';
@@ -708,7 +709,15 @@ function AppRoutes() {
         path="/organization/org-profile"
         element={
           <OrganisationRoute>
-            <Navigate to="/organization/settings?tab=profile" replace />
+            <Navigate to="/organization/profile" replace />
+          </OrganisationRoute>
+        }
+      />
+      <Route
+        path="/organization/profile"
+        element={
+          <OrganisationRoute>
+            <OrganisationProfile />
           </OrganisationRoute>
         }
       />
@@ -726,7 +735,8 @@ function AppRoutes() {
       <Route path="/organization/dashboard" element={<Navigate to="/organization" replace />} />
       <Route path="/organisation/professionals" element={<Navigate to="/organization/professionals" replace />} />
       <Route path="/organisation/jobs" element={<Navigate to="/organization/jobs" replace />} />
-      <Route path="/organisation/org-profile" element={<Navigate to="/organization/settings?tab=profile" replace />} />
+      <Route path="/organisation/org-profile" element={<Navigate to="/organization/profile" replace />} />
+      <Route path="/organisation/profile" element={<Navigate to="/organization/profile" replace />} />
       <Route path="/organisation/settings" element={<Navigate to="/organization/settings" replace />} />
       <Route path="/organisation/billing" element={<Navigate to="/organization/billing" replace />} />
       <Route path="/organisation/team" element={<Navigate to="/organization/team" replace />} />

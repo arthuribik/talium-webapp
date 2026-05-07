@@ -10,6 +10,7 @@ import {
   HiBriefcase,
   HiCog,
   HiCreditCard,
+  HiIdentification,
   HiSearch,
   HiChevronLeft,
   HiChevronRight,
@@ -41,6 +42,7 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
     { path: '/organization/professionals', label: 'Professionals', icon: HiUser },
     { path: '/organization/jobs', label: 'Jobs', icon: HiBriefcase },
     { path: '/organization/team', label: 'Team', icon: HiUserGroup },
+    { path: '/organization/profile', label: 'Profile', icon: HiIdentification },
     { path: '/organization/billing', label: 'Billings', icon: HiCreditCard },
     { path: '/organization/settings', label: 'Settings', icon: HiCog },
   ];
@@ -207,7 +209,7 @@ export default function OrganisationLayout({ children }: OrganisationLayoutProps
                   <button
                     onClick={() => {
                       setDropdownOpen(false);
-                      navigate('/organization/settings?tab=profile');
+                      navigate('/organization/profile');
                     }}
                     className="w-full flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                   >

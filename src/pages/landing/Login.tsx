@@ -72,7 +72,25 @@ export default function Login() {
       } else if (loggedInUser?.userType === 'PROFESSIONAL') {
         navigate('/professional');
       } else if (loggedInUser?.userType === 'ORGANISATION') {
-        navigate('/organization');
+        try {
+          const orgResponse = await api.get('/v1/organisation/profile');
+          const org = orgResponse.data?.data || {};
+          const isNewOrganisation = org.setupCompleted === false;
+          const isVerifiedOrganisation = org.verificationStatus === 'verified';
+
+          if (isNewOrganisation || !isVerifiedOrganisation) {
+            const orgId = org.id || loggedInUser?.organisationId;
+            navigate(
+              orgId
+                ? `/organization/account-active?id=${encodeURIComponent(orgId)}`
+                : '/organization/account-active',
+            );
+          } else {
+            navigate('/organization');
+          }
+        } catch {
+          navigate('/organization');
+        }
       } else if (loggedInUser?.userType === 'ADMIN') {
         navigate('/admin');
       } else {

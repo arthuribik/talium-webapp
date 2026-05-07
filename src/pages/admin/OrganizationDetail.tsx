@@ -2,7 +2,18 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '@/services/api';
 import AdminLayout from '@/components/admin/AdminLayout';
-import { HiArrowLeft, HiOfficeBuilding, HiCheckCircle, HiClock, HiDocumentText, HiGlobe, HiCalendar, HiShieldCheck, HiX } from 'react-icons/hi';
+import {
+  HiArrowLeft,
+  HiOfficeBuilding,
+  HiCheckCircle,
+  HiClock,
+  HiDocumentText,
+  HiShieldCheck,
+  HiX,
+  HiDownload,
+  HiPlay,
+  HiMinus,
+} from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
 interface RegistrationData {
@@ -68,7 +79,7 @@ interface RegistrationData {
   createdAt?: string;
 }
 
-type Tab = 'profile' | 'compliance' | 'billing' | 'team' | 'activity';
+type Tab = 'profile' | 'compliance' | 'billing' | 'invoice' | 'jobs' | 'team' | 'activity';
 
 export default function OrganizationDetail() {
   const { id } = useParams<{ id: string }>();
@@ -79,6 +90,16 @@ export default function OrganizationDetail() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('profile');
   const [updating, setUpdating] = useState(false);
+  const [showKybDrawer, setShowKybDrawer] = useState(false);
+  const [kybIncorporationNumber, setKybIncorporationNumber] = useState('');
+  const [kybCountry, setKybCountry] = useState('Nigeria — CAC');
+  const [kybChecks, setKybChecks] = useState({
+    businessRegistration: true,
+    directorshipRecords: true,
+    taxIdentification: true,
+    amlScreening: true,
+    adverseMedia: false,
+  });
 
   useEffect(() => {
     if (id) {
@@ -89,7 +110,7 @@ export default function OrganizationDetail() {
   // Load tab from URL on mount
   useEffect(() => {
     const tabParam = searchParams.get('tab') as Tab;
-    if (tabParam && ['profile', 'compliance', 'billing', 'team', 'activity'].includes(tabParam)) {
+    if (tabParam && ['profile', 'compliance', 'billing', 'invoice', 'jobs', 'team', 'activity'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -185,16 +206,6 @@ export default function OrganizationDetail() {
       other: 'Other',
     };
     return labels[category] || category;
-  };
-
-  const renderField = (label: string, value: any, showIfEmpty = false) => {
-    if (!value && !showIfEmpty) return null;
-    return (
-      <div>
-        <label className="text-sm font-medium text-gray-500 mb-1 block">{label}</label>
-        <p className="text-base text-gray-900">{value || 'N/A'}</p>
-      </div>
-    );
   };
 
   if (loading) {
@@ -316,39 +327,118 @@ export default function OrganizationDetail() {
     },
   ];
 
-  const getStatusColor = (status: string) => {
+
+  const getStatusText = (status: string) => {
     switch (status) {
       case 'passed':
-        return 'bg-green-100 text-green-800 border-green-200';
+        return 'Verified';
       case 'reviewing':
-        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'pending':
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'Pending Review';
       case 'failed':
-        return 'bg-red-100 text-red-800 border-red-200';
+        return 'Failed';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200';
+        return 'Not Run';
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusPillClass = (status: string) => {
     switch (status) {
       case 'passed':
-        return <HiCheckCircle className="w-5 h-5 text-green-600" />;
+        return 'bg-green-50 text-green-700 border-green-200';
       case 'reviewing':
-        return <HiClock className="w-5 h-5 text-yellow-600" />;
-      case 'pending':
-        return <HiClock className="w-5 h-5 text-gray-600" />;
+        return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'failed':
-        return <HiX className="w-5 h-5 text-red-600" />;
+        return 'bg-red-50 text-red-700 border-red-200';
       default:
-        return <HiClock className="w-5 h-5 text-gray-600" />;
+        return 'bg-gray-50 text-gray-600 border-gray-200';
     }
+  };
+
+  const getStatusLeadingIcon = (status: string) => {
+    if (status === 'passed') return <HiCheckCircle className="w-4 h-4 text-brand-600" />;
+    if (status === 'reviewing') return <HiClock className="w-4 h-4 text-amber-500" />;
+    if (status === 'failed') return <HiX className="w-4 h-4 text-red-500" />;
+    return <HiMinus className="w-4 h-4 text-gray-400" />;
   };
 
   const overallCompliance = complianceChecks.filter(check => check.status === 'passed').length;
   const totalChecks = complianceChecks.length;
   const compliancePercentage = Math.round((overallCompliance / totalChecks) * 100);
+  const incorporationNumber = registration?.step2?.incorporationNumber || 'Not available';
+  const incorporationCountry = registration?.step2?.countryOfIncorporation || organization?.country || '—';
+  const verificationAuthority = incorporationCountry === 'Nigeria' ? 'Corporate Affairs Commission (CAC)' : 'Registry';
+  const lastKybDate = organization?.updatedAt || registration?.updatedAt || organization?.createdAt;
+  const runByName = `${organization?.user?.firstName || ''} ${organization?.user?.lastName || ''}`.trim() || 'System';
+  const complianceChecksUi = [
+    {
+      id: 'registration',
+      title: 'CAC Business Registration',
+      status: complianceChecks.find((c) => c.id === 'registration')?.status || 'pending',
+    },
+    {
+      id: 'document_verification',
+      title: 'Directorship / Ownership Records',
+      status: complianceChecks.find((c) => c.id === 'document_verification')?.status || 'pending',
+    },
+    {
+      id: 'tax',
+      title: 'Tax Identification Number (TIN)',
+      status:
+        complianceChecks.find((c) => c.id === 'business_details')?.status === 'passed'
+          ? 'passed'
+          : 'reviewing',
+    },
+    {
+      id: 'address_verification',
+      title: 'Registered Business Address',
+      status: complianceChecks.find((c) => c.id === 'address_verification')?.status || 'pending',
+    },
+    {
+      id: 'bank',
+      title: 'Bank Account Verification',
+      status: organization?.verificationStatus === 'verified' ? 'passed' : 'pending',
+    },
+    {
+      id: 'aml',
+      title: 'AML Screening',
+      status: 'pending',
+    },
+  ];
+  const walletBalance = 0;
+  const activePlanName = '—';
+  const jobsRows: Array<{ title: string; location: string; workMode: string; status: string; applicants: number; postedAt: string }> = [];
+  const teamRows: Array<{ name: string; role: string; email: string; status: string; joinedAt: string }> = [];
+  const invoiceRows: Array<{ invoiceNo: string; description: string; amount: number; status: string; date: string }> = [];
+
+  const handleOpenKybDrawer = () => {
+    setKybIncorporationNumber(
+      incorporationNumber === 'Not available' ? '' : incorporationNumber,
+    );
+    setShowKybDrawer(true);
+  };
+
+  const kybProgressSteps = [
+    {
+      id: 'submit',
+      title: 'Submitting incorporation number',
+      description: `${kybIncorporationNumber || '—'} · ${kybCountry}`,
+    },
+    {
+      id: 'query',
+      title: 'Querying CAC registry',
+      description: 'Contacting Corporate Affairs Commission API',
+    },
+    {
+      id: 'verify',
+      title: 'Verifying directorship records',
+      description: 'Cross-referencing beneficial owner data',
+    },
+    {
+      id: 'report',
+      title: 'Compiling KYB report',
+      description: 'Generating compliance summary',
+    },
+  ];
 
   return (
     <AdminLayout>
@@ -423,6 +513,26 @@ export default function OrganizationDetail() {
               Billing
             </button>
             <button
+              onClick={() => handleTabChange('invoice')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'invoice'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Invoice
+            </button>
+            <button
+              onClick={() => handleTabChange('jobs')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'jobs'
+                  ? 'border-brand-500 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Jobs
+            </button>
+            <button
               onClick={() => handleTabChange('team')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'team'
@@ -448,402 +558,501 @@ export default function OrganizationDetail() {
 
       {/* Organisation Profile Tab */}
       {activeTab === 'profile' && (
-        <>
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Information</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Company Name</label>
-                <p className="text-gray-900">{organization.companyName}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Country</label>
-                <p className="text-gray-900">{organization.country}</p>
-              </div>
-              {organization.industry && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                Organisation Details
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 border-t border-gray-100 pt-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Industry</label>
-                  <p className="text-gray-900">{organization.industry}</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Organisation Name</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.companyName}</p>
                 </div>
-              )}
-              {organization.companySize && (
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Company Size</label>
-                  <p className="text-gray-900">{organization.companySize}</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Organisation ID</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.id}</p>
                 </div>
-              )}
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Category</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {getCategoryLabel(
+                      registration?.step3?.category || registration?.step8?.category || 'business',
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Industry</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.industry || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Registration Type</p>
+                  <p className="text-base font-semibold text-gray-900">{isRegistered ? 'Incorporated' : 'Unregistered'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Country of Operation</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.country || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Date Founded</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {registration?.step4?.foundedDate
+                      ? new Date(registration.step4.foundedDate).toLocaleDateString()
+                      : registration?.step7?.foundedDate
+                        ? new Date(registration.step7.foundedDate).toLocaleDateString()
+                        : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Website</p>
+                  <p className="text-base font-semibold text-brand-700">{organization.website || '—'}</p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Description</p>
+                <p className="text-sm text-gray-700 mt-1">
+                  {organization.description ||
+                    registration?.step4?.description ||
+                    registration?.step7?.description ||
+                    'No description provided.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                Contact Information
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 border-t border-gray-100 pt-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Primary Email</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.user?.email || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Phone</p>
+                  <p className="text-base font-semibold text-gray-900">{organization.user?.phoneNumber || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Office Address</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {[
+                      (organization.address as any)?.street || registration?.step4?.address?.street || registration?.step7?.address?.street,
+                      (organization.address as any)?.city || registration?.step4?.address?.city || registration?.step7?.address?.city,
+                      (organization.address as any)?.country || registration?.step4?.address?.country || registration?.step7?.address?.country,
+                    ]
+                      .filter(Boolean)
+                      .join(', ') || '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Admin Contact</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {`${organization.user?.firstName || ''} ${organization.user?.lastName || ''}`.trim() || '—'}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Contact Information</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium text-gray-500">Contact Email</label>
-                <p className="text-gray-900">{organization.user.email}</p>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">Account Status</h3>
+              <div className="space-y-3 border-t border-gray-100 pt-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Status</p>
+                  <span className="inline-flex items-center rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
+                    {organization.user?.status === 'ACTIVE' ? 'Active' : organization.user?.status || 'Pending'}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">KYB Compliance</p>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium border ${
+                      organization.verificationStatus === 'verified'
+                        ? 'bg-green-50 text-green-700 border-green-200'
+                        : 'bg-gray-50 text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    {organization.verificationStatus === 'verified' ? 'Verified' : 'Not Verified'}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Date Joined</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {organization.createdAt ? new Date(organization.createdAt).toLocaleDateString() : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Last Active</p>
+                  <p className="text-base font-semibold text-gray-900">
+                    {organization.updatedAt ? new Date(organization.updatedAt).toLocaleDateString() : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Current Plan</p>
+                  <p className="text-base font-semibold text-brand-700">{activePlanName}</p>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Contact Name</label>
-                <p className="text-gray-900">
-                  {organization.user.firstName} {organization.user.lastName}
-                </p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Verification Status</label>
-                <p className="text-gray-900 capitalize">{organization.verificationStatus}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Member Since</label>
-                <p className="text-gray-900">{new Date(organization.createdAt).toLocaleDateString()}</p>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">At a Glance</h3>
+              <div className="space-y-2 border-t border-gray-100 pt-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Active Jobs</span>
+                  <span className="font-semibold text-gray-900">
+                    {jobsRows.filter((job) => job.status === 'active').length}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Team Members</span>
+                  <span className="font-semibold text-gray-900">{teamRows.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Wallet Balance</span>
+                  <span className="font-semibold text-green-700">₦{walletBalance.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Total Applicants</span>
+                  <span className="font-semibold text-gray-900">
+                    {jobsRows.reduce((acc, job) => acc + job.applicants, 0)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-
-        {registration && (
-          <>
-            {/* Registration Header */}
-            <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900 mb-2 flex items-center">
-                    <HiDocumentText className="w-6 h-6 mr-2 text-brand-600" />
-                    Registration Form Data
-                  </h2>
-                  <p className="text-gray-600">Registration ID: {registration.id}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {registration.currentStep >= 6 ? (
-                    <span className="px-3 py-1 bg-green-100 text-green-800 text-sm font-semibold rounded-full flex items-center">
-                      <HiCheckCircle className="w-4 h-4 mr-1" />
-                      Completed
-                    </span>
-                  ) : (
-                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-sm font-semibold rounded-full flex items-center">
-                      <HiClock className="w-4 h-4 mr-1" />
-                      Step {registration.currentStep || 1}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Step 1: Registration Status */}
-            {registration.step1 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 1: Registration Status</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {renderField('Is Registered', registration.step1.isRegistered ? 'Yes' : 'No')}
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: Incorporation Details (Registered Flow) */}
-            {isRegistered && registration.step2 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 2: Incorporation Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {renderField('Legal Name', registration.step2.legalName)}
-                  {renderField('Country of Incorporation', registration.step2.countryOfIncorporation)}
-                  {renderField('Incorporation Number', registration.step2.incorporationNumber)}
-                </div>
-              </div>
-            )}
-
-            {/* Step 3: Category (Registered Flow) */}
-            {isRegistered && registration.step3 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 3: Category</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {renderField('Category', getCategoryLabel(registration.step3.category))}
-                  {registration.step3.schoolType && renderField('School Type', registration.step3.schoolType)}
-                  {registration.step3.religiousOrgType && renderField('Religious Organisation Type', registration.step3.religiousOrgType)}
-                  {registration.step3.internationalOrgType && renderField('International Organisation Type', registration.step3.internationalOrgType)}
-                  {registration.step3.politicalPartyCountry && renderField('Political Party Country', registration.step3.politicalPartyCountry)}
-                  {registration.step3.associatedSchool && renderField('Associated School', registration.step3.associatedSchool)}
-                </div>
-              </div>
-            )}
-
-            {/* Step 4: Description & Details (Registered Flow) */}
-            {isRegistered && registration.step4 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 4: Organisation Details</h3>
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {renderField('Description', registration.step4.description)}
-                    {renderField('Other Name (Known As)', registration.step4.otherName)}
-                    {renderField('Industry', registration.step4.industry)}
-                    {renderField('Headquarters City', registration.step4.headquartersCity)}
-                    {renderField('Headquarters Country', registration.step4.headquartersCountry)}
-                    {renderField('Founded Date', registration.step4.foundedDate ? new Date(registration.step4.foundedDate).toLocaleDateString() : null)}
-                  </div>
-                  
-                  {registration.step4.address && (
-                    <div className="border-t pt-6">
-                      <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center">
-                        <HiGlobe className="w-5 h-5 mr-2 text-brand-600" />
-                        Address
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {renderField('Building Name', registration.step4.address.buildingName)}
-                        {renderField('Street Number', registration.step4.address.streetNumber)}
-                        {renderField('Street', registration.step4.address.street)}
-                        {renderField('City', registration.step4.address.city)}
-                        {renderField('Country', registration.step4.address.country)}
-                      </div>
-                      <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                        <p className="text-sm text-gray-500 mb-1">Full Address</p>
-                        <p className="text-gray-900">
-                          {[
-                            registration.step4.address.buildingName,
-                            registration.step4.address.streetNumber,
-                            registration.step4.address.street,
-                            registration.step4.address.city,
-                            registration.step4.address.country,
-                          ]
-                            .filter(Boolean)
-                            .join(', ')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Step 5: Email Verification */}
-            {registration.step5 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 5: Email Verification</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {renderField('Organisation Email', registration.step5.organisationEmail, true)}
-                </div>
-              </div>
-            )}
-
-            {/* Step 7: Organisation Details (Non-Registered Flow) */}
-            {!isRegistered && registration.step7 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 7: Organisation Details</h3>
-                <div className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {renderField('Organisation Name', registration.step7.organisationName)}
-                    {renderField('Organisation Country', registration.step7.organisationCountry)}
-                    {renderField('Description', registration.step7.description)}
-                    {renderField('Industry', registration.step7.industry)}
-                    {renderField('Founded Date', registration.step7.foundedDate ? new Date(registration.step7.foundedDate).toLocaleDateString() : null)}
-                  </div>
-                  
-                  {registration.step7.address && (
-                    <div className="border-t pt-6">
-                      <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center">
-                        <HiGlobe className="w-5 h-5 mr-2 text-brand-600" />
-                        Address
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {renderField('Building Name', registration.step7.address.buildingName)}
-                        {renderField('Street Number', registration.step7.address.streetNumber)}
-                        {renderField('Street', registration.step7.address.street)}
-                        {renderField('City', registration.step7.address.city)}
-                        {renderField('Country', registration.step7.address.country)}
-                      </div>
-                      <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                        <p className="text-sm text-gray-500 mb-1">Full Address</p>
-                        <p className="text-gray-900">
-                          {[
-                            registration.step7.address.buildingName,
-                            registration.step7.address.streetNumber,
-                            registration.step7.address.street,
-                            registration.step7.address.city,
-                            registration.step7.address.country,
-                          ]
-                            .filter(Boolean)
-                            .join(', ')}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Step 8: Category (Non-Registered Flow) */}
-            {!isRegistered && registration.step8 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Step 8: Category</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {renderField('Category', getCategoryLabel(registration.step8.category))}
-                  {registration.step8.schoolType && renderField('School Type', registration.step8.schoolType)}
-                  {registration.step8.religiousOrgType && renderField('Religious Organisation Type', registration.step8.religiousOrgType)}
-                  {registration.step8.internationalOrgType && renderField('International Organisation Type', registration.step8.internationalOrgType)}
-                  {registration.step8.politicalPartyCountry && renderField('Political Party Country', registration.step8.politicalPartyCountry)}
-                  {registration.step8.associatedSchool && renderField('Associated School', registration.step8.associatedSchool)}
-                </div>
-              </div>
-            )}
-
-            {/* Timestamps */}
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                <HiCalendar className="w-5 h-5 mr-2 text-brand-600" />
-                Timestamps
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {registration.createdAt && renderField('Created At', new Date(registration.createdAt).toLocaleString())}
-                {registration.updatedAt && renderField('Last Updated', new Date(registration.updatedAt).toLocaleString())}
-              </div>
-            </div>
-          </>
-        )}
-        </>
       )}
 
       {/* Compliance Tab */}
       {activeTab === 'compliance' && (
         <div className="space-y-6">
-          {/* Compliance Overview Card */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center">
-                  <HiShieldCheck className="w-6 h-6 mr-2 text-brand-600" />
-                  Business Compliance
-                </h2>
-                <p className="text-gray-600">Comprehensive compliance status for {organization?.companyName}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <div className="text-4xl font-bold text-brand-600">{compliancePercentage}%</div>
-                  <div className="text-sm text-gray-500">Compliance Score</div>
-                </div>
-                {/* Toggle Verify Button */}
-                <div>
-                  {organization?.verificationStatus === 'verified' ? (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="xl:col-span-2 space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                  Incorporation Details
+                </h3>
+                <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Incorporation Number</p>
+                  <p className="text-2xl font-semibold text-gray-900 mb-2">{incorporationNumber}</p>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {incorporationCountry} · {verificationAuthority}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
+                      type="button"
                       onClick={handleToggleVerify}
                       disabled={updating}
-                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center"
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <HiX className="w-4 h-4 mr-1" />
-                      {updating ? 'Unverifying...' : 'Unverify Business'}
+                      <HiPlay className="w-4 h-4" />
+                      {updating
+                        ? 'Running...'
+                        : organization?.verificationStatus === 'verified'
+                          ? 'Update KYB Status'
+                          : 'Run KYB Check'}
                     </button>
-                  ) : (
                     <button
-                      onClick={handleToggleVerify}
-                      disabled={updating}
-                      className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center"
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
                     >
-                      <HiCheckCircle className="w-4 h-4 mr-1" />
-                      {updating ? 'Verifying...' : 'Verify Business'}
+                      <HiDocumentText className="w-4 h-4" />
+                      View Certificate
                     </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Progress Bar */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-                <span>{overallCompliance} of {totalChecks} checks passed</span>
-                <span>{compliancePercentage}% Complete</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div
-                  className={`h-3 rounded-full transition-all ${
-                    compliancePercentage === 100
-                      ? 'bg-green-500'
-                      : compliancePercentage >= 70
-                      ? 'bg-brand-500'
-                      : compliancePercentage >= 50
-                      ? 'bg-yellow-500'
-                      : 'bg-red-500'
-                  }`}
-                  style={{ width: `${compliancePercentage}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Compliance Checks Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {complianceChecks.map((check) => (
-              <div
-                key={check.id}
-                className="bg-white rounded-xl shadow-sm p-6 border-2 border-transparent hover:border-brand-200 transition-colors"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-1">{check.title}</h3>
-                    <p className="text-sm text-gray-600">{check.description}</p>
-                  </div>
-                  <div className={`ml-4 p-2 rounded-lg border ${getStatusColor(check.status)}`}>
-                    {getStatusIcon(check.status)}
                   </div>
                 </div>
+              </div>
 
-                <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium mb-4 ${getStatusColor(check.status)}`}>
-                  {check.status.charAt(0).toUpperCase() + check.status.slice(1)}
-                </div>
-
-                {/* Check Details */}
-                <div className="space-y-2 pt-4 border-t border-gray-200">
-                  {Object.entries(check.details).map(([key, value]) => {
-                    if (value === null || value === undefined || value === '') return null;
-                    if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
-                      return Object.entries(value).map(([subKey, subValue]) => {
-                        if (subValue === null || subValue === undefined || subValue === '') return null;
-                        return (
-                          <div key={`${key}-${subKey}`} className="flex justify-between text-sm">
-                            <span className="text-gray-500 capitalize">{subKey.replace(/([A-Z])/g, ' $1').trim()}:</span>
-                            <span className="text-gray-900 font-medium">{String(subValue)}</span>
-                          </div>
-                        );
-                      });
-                    }
-                    return (
-                      <div key={key} className="flex justify-between text-sm">
-                        <span className="text-gray-500 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}:</span>
-                        <span className="text-gray-900 font-medium">
-                          {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                  KYB Compliance Checks
+                </h3>
+                <div className="space-y-3">
+                  {complianceChecksUi.map((check) => (
+                    <div
+                      key={check.id}
+                      className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="w-7 h-7 rounded-md bg-white border border-gray-200 flex items-center justify-center">
+                          {getStatusLeadingIcon(check.status)}
                         </span>
+                        <p className="text-sm font-medium text-gray-800">{check.title}</p>
                       </div>
-                    );
-                  })}
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusPillClass(check.status)}`}
+                      >
+                        {getStatusText(check.status)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h4 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                  KYB Score
+                </h4>
+                <div className="text-center mb-4">
+                  <div className="text-5xl font-bold text-brand-600 leading-none">
+                    {overallCompliance}/{totalChecks}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-2">Checks Passed</p>
+                </div>
+                <div className="mb-3">
+                  <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-brand-500 rounded-full transition-all"
+                      style={{ width: `${compliancePercentage}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{compliancePercentage}% completion</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenKybDrawer}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <HiPlay className="w-4 h-4" />
+                  Run Full KYB
+                </button>
+                <button
+                  type="button"
+                  className="w-full mt-2 inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
+                >
+                  <HiDownload className="w-4 h-4" />
+                  Export KYB Report
+                </button>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h4 className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-4">
+                  Last KYB Run
+                </h4>
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <p className="text-gray-500">Date</p>
+                    <p className="font-medium text-gray-900">
+                      {lastKybDate ? new Date(lastKybDate).toLocaleDateString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Run By</p>
+                    <p className="font-medium text-gray-900">{runByName}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Registry</p>
+                    <p className="font-medium text-gray-900">{verificationAuthority} API</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Result</p>
+                    <span
+                      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusPillClass(
+                        organization?.verificationStatus === 'verified' ? 'passed' : 'reviewing',
+                      )}`}
+                    >
+                      {organization?.verificationStatus === 'verified' ? 'Passed' : 'Pending Review'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Billing Tab */}
       {activeTab === 'billing' && (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Billing Information</h2>
-          <p className="text-gray-600">Billing details and subscription information will be displayed here.</p>
-          {/* TODO: Implement billing details */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+          <p className="text-base font-medium text-gray-900">No billing data available</p>
+          <p className="text-sm text-gray-500 mt-1">Billing details will appear here after API integration.</p>
+        </div>
+      )}
+
+      {/* Invoice Tab */}
+      {activeTab === 'invoice' && (
+        invoiceRows.length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+            <p className="text-base font-medium text-gray-900">No invoices available</p>
+            <p className="text-sm text-gray-500 mt-1">Invoice history will appear here after API integration.</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">{/* invoice table */}</div>
+        )
+      )}
+
+      {/* Jobs Tab */}
+      {activeTab === 'jobs' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+          <p className="text-base font-medium text-gray-900">No jobs available</p>
+          <p className="text-sm text-gray-500 mt-1">Job postings will appear here after API integration.</p>
         </div>
       )}
 
       {/* Team Tab */}
       {activeTab === 'team' && (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Team Members</h2>
-          <p className="text-gray-600">Team members and their roles will be displayed here.</p>
-          {/* TODO: Implement team members list */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+          <p className="text-base font-medium text-gray-900">No team members available</p>
+          <p className="text-sm text-gray-500 mt-1">Team data will appear here after API integration.</p>
         </div>
       )}
 
       {/* Activity Log Tab */}
       {activeTab === 'activity' && (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Activity Log</h2>
-          <p className="text-gray-600">Recent activities and changes will be displayed here.</p>
-          {/* TODO: Implement activity log */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
+          <p className="text-base font-medium text-gray-900">No activity available</p>
+          <p className="text-sm text-gray-500 mt-1">Activity log will appear here after API integration.</p>
+        </div>
+      )}
+
+      {showKybDrawer && (
+        <div className="fixed inset-0 z-50">
+          <button
+            type="button"
+            aria-label="Close KYB drawer overlay"
+            className="absolute inset-0 bg-black/30"
+            onClick={() => setShowKybDrawer(false)}
+          />
+          <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl border-l border-gray-200 flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <p className="text-xs tracking-wider uppercase text-gray-500 font-semibold">Run Full KYB</p>
+                <h3 className="text-lg font-semibold text-gray-900">{organization?.companyName || 'Organisation'}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowKybDrawer(false)}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50"
+              >
+                <HiX className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Incorporation Number</p>
+                <p className="text-2xl font-semibold text-gray-900">{incorporationNumber}</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  {incorporationCountry} · {verificationAuthority}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs tracking-wider uppercase text-gray-500 font-semibold mb-2">
+                  Verify / Update Incorporation Number
+                </label>
+                <input
+                  type="text"
+                  value={kybIncorporationNumber}
+                  onChange={(e) => setKybIncorporationNumber(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs tracking-wider uppercase text-gray-500 font-semibold mb-2">
+                  Country of Incorporation
+                </label>
+                <select
+                  value={kybCountry}
+                  onChange={(e) => setKybCountry(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                >
+                  <option>Nigeria — CAC</option>
+                  <option>United Kingdom — Companies House</option>
+                  <option>United States — State Registry</option>
+                </select>
+              </div>
+
+              <div>
+                <p className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-2">Checks to Run</p>
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-gray-800">Business Registration Verification</span>
+                    <input
+                      type="checkbox"
+                      checked={kybChecks.businessRegistration}
+                      onChange={(e) => setKybChecks((prev) => ({ ...prev, businessRegistration: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-gray-800">Directorship Records</span>
+                    <input
+                      type="checkbox"
+                      checked={kybChecks.directorshipRecords}
+                      onChange={(e) => setKybChecks((prev) => ({ ...prev, directorshipRecords: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-gray-800">Tax Identification Number (TIN)</span>
+                    <input
+                      type="checkbox"
+                      checked={kybChecks.taxIdentification}
+                      onChange={(e) => setKybChecks((prev) => ({ ...prev, taxIdentification: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-gray-800">AML / Sanctions Screening</span>
+                    <input
+                      type="checkbox"
+                      checked={kybChecks.amlScreening}
+                      onChange={(e) => setKybChecks((prev) => ({ ...prev, amlScreening: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+                    <span className="text-gray-800">Adverse Media Check</span>
+                    <input
+                      type="checkbox"
+                      checked={kybChecks.adverseMedia}
+                      onChange={(e) => setKybChecks((prev) => ({ ...prev, adverseMedia: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs tracking-wider uppercase text-gray-500 font-semibold mb-2">KYB Progress</p>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                  {kybProgressSteps.map((step) => (
+                    <div key={step.id} className="flex items-start gap-3">
+                      <span className="mt-0.5 w-6 h-6 rounded-full bg-green-100 border border-green-200 flex items-center justify-center">
+                        <HiCheckCircle className="w-4 h-4 text-green-600" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{step.title}</p>
+                        <p className="text-xs text-gray-500">{step.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowKybDrawer(false)}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowKybDrawer(false)}
+                className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
+              >
+                View Report
+              </button>
+            </div>
+          </aside>
         </div>
       )}
       </div>
