@@ -14,6 +14,8 @@ export interface User {
   firstName: string;
   lastName: string;
   userType: 'ADMIN' | 'ORGANISATION' | 'PROFESSIONAL';
+  /** Set for ADMIN logins (platform role). */
+  adminRole?: string | null;
   adminProfile?: any;
   organisation?: any;
   professional?: any;

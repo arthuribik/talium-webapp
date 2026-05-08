@@ -11,6 +11,7 @@ import {
   HiCurrencyDollar,
   HiCreditCard,
   HiCog,
+  HiUsers,
   HiSearch,
   HiChevronLeft,
   HiChevronRight,
@@ -39,6 +40,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
   const navItems = [
     { path: '/admin', label: 'Dashboard', icon: HiHome },
+    { path: '/admin/team', label: 'Team', icon: HiUsers },
     { path: '/admin/professionals', label: 'Professionals', icon: HiUser },
     { path: '/admin/organizations', label: 'Organizations', icon: HiOfficeBuilding },
     { path: '/admin/jobs', label: 'Jobs', icon: HiBriefcase },

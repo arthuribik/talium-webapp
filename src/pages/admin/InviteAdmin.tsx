@@ -113,9 +113,9 @@ export default function InviteAdmin() {
                 onChange={handleChange}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"
               >
-                <option value="admin">Admin</option>
-                <option value="support">Support</option>
-                <option value="auditor">Auditor</option>
+                <option value="admin">Operations</option>
+                <option value="support">Support Agent</option>
+                <option value="auditor">Finance</option>
               </select>
               <p className="mt-1 text-sm text-gray-500">
                 Note: Only super admins can invite other admins. Super admin role cannot be assigned via invitation.

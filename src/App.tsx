@@ -25,6 +25,7 @@ import OrganisationSetup from '@/pages/app/OrganisationSetup';
 import Jobs from '@/pages/app/Jobs';
 import CreateJob from '@/pages/app/CreateJob';
 import AdminLogin from '@/pages/admin/AdminLogin';
+import AcceptAdminInvite from '@/pages/admin/AcceptAdminInvite';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 import InviteAdmin from '@/pages/admin/InviteAdmin';
@@ -40,6 +41,8 @@ import TransactionsList from '@/pages/admin/TransactionsList';
 import TransactionDetail from '@/pages/admin/TransactionDetail';
 import AdminBilling from '@/pages/admin/Billing';
 import Settings from '@/pages/admin/Settings';
+import AdminTeam from '@/pages/admin/Team';
+import TeamMemberDetail from '@/pages/admin/TeamMemberDetail';
 import NotFound from '@/pages/NotFound';
 import OrganisationDashboard from '@/pages/organisation/OrganisationDashboard';
 import ViewProfessionals from '@/pages/organisation/ViewProfessionals';
@@ -420,6 +423,7 @@ function AppRoutes() {
       <Route path="/register-business" element={<RegisterBusiness />} />
       <Route path="/organization/account-active" element={<OrganisationAccountActive />} />
       <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/admin/accept-invite" element={<AcceptAdminInvite />} />
       <Route path="/admin/create-super-admin" element={<CreateSuperAdmin />} />
       <Route
         path="/admin"
@@ -434,6 +438,22 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <InviteAdmin />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/team"
+        element={
+          <AdminRoute>
+            <AdminTeam />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/team/:userId"
+        element={
+          <AdminRoute>
+            <TeamMemberDetail />
           </AdminRoute>
         }
       />
