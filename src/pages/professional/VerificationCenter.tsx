@@ -76,6 +76,45 @@ function resolvedNationalityFromApi(data: {
   if (fromSignupCountry && COUNTRIES.includes(fromSignupCountry)) return fromSignupCountry;
   return '';
 }
+
+/** Map Professional / IdentityVerification dateOfBirth from the API to `YYYY-MM-DD` (safe for inputs + display). */
+function parseProfileDateOfBirthToIsoDate(raw: unknown): string {
+  if (raw == null || raw === '') return '';
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (!t) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+    const d = new Date(t);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return '';
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const day = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return '';
+}
+
+function resolveGenderFromProfilePayload(gender: unknown, previous: string): string {
+  if (typeof gender === 'string') return gender.trim();
+  if (gender === null) return '';
+  return previous;
+}
+
 import {
   DEFAULT_PHONE_DIAL_VALUE,
   buildE164FromDialAndNational,
@@ -2072,22 +2111,25 @@ export default function VerificationCenter() {
       }
       if (data) {
         const addressData = data.address && typeof data.address === 'object' ? data.address : {};
-        setPersonal((p) => ({
+        const iv = (data as { identityVerification?: { dateOfBirth?: unknown } | null }).identityVerification;
+        setPersonal((p) => {
+          const dobFromApi = parseProfileDateOfBirthToIsoDate(data.dateOfBirth ?? iv?.dateOfBirth);
+          const dob = dobFromApi || parseProfileDateOfBirthToIsoDate(p.dateOfBirth) || '';
+          return {
           ...p,
           middleName: data.middleName ?? p.middleName ?? '',
-          gender: data.gender ?? p.gender ?? '',
+          gender: resolveGenderFromProfilePayload(data.gender, p.gender),
           nationality: resolvedNationalityFromApi(data),
           country: data.country || '',
-          dateOfBirth: data.dateOfBirth
-            ? new Date(data.dateOfBirth).toISOString().split('T')[0]
-            : '',
+          dateOfBirth: dob,
           address: addressData.address ?? data.address ?? p.address ?? '',
           city: addressData.city ?? data.city ?? p.city ?? '',
           state: addressData.state ?? data.state ?? p.state ?? '',
           idType: data.idType || '',
           idNumber: data.idNumber || '',
           idDocumentUrl: data.idDocumentUrl || '',
-        }));
+        };
+        });
         if (Array.isArray(data.locations) && data.locations.length > 0) {
           const len = data.locations.length;
           setLocationsList(data.locations.map((loc: any, i: number) => mapApiLocationToEntry(loc, i, len)));
@@ -4933,31 +4975,100 @@ export default function VerificationCenter() {
                           </span>
                         )}
                       </div>
-                      <div
-                        className={
-                          verifyPersonalModalOpen
-                            ? ''
-                            : 'min-h-[120px] flex flex-col items-center justify-center gap-3 text-center px-4 py-6'
-                        }
-                      >
+                      <div className={verifyPersonalModalOpen ? '' : 'px-0 pt-1'}>
                         {!verifyPersonalModalOpen && (
-                          <>
-                            <p className="text-sm text-gray-600">Choose how to verify your identity to continue.</p>
-                            <button
-                              type="button"
-                              onClick={() => setVerifyPersonalModalOpen(true)}
-                              className="text-sm font-semibold text-brand-600 hover:text-brand-700"
-                            >
-                              Open verification options
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
-                              className="text-xs text-gray-500 hover:text-gray-800"
-                            >
-                              Edit personal data
-                            </button>
-                          </>
+                          <div className="space-y-6">
+                            <div className="space-y-5 text-sm">
+                              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-10 md:gap-y-0">
+                                <div>
+                                  <p className="text-gray-500">First Name:</p>
+                                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-medium text-gray-900">
+                                    {personal.firstName?.trim() || '—'}
+                                    {personalShowsAsVerified && !!personal.firstName?.trim() && (
+                                      <HiCheckCircle
+                                        className="h-4 w-4 shrink-0 text-emerald-600"
+                                        aria-hidden
+                                      />
+                                    )}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Last Name:</p>
+                                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-medium text-gray-900">
+                                    {personal.lastName?.trim() || '—'}
+                                    {personalShowsAsVerified && !!personal.lastName?.trim() && (
+                                      <HiCheckCircle
+                                        className="h-4 w-4 shrink-0 text-emerald-600"
+                                        aria-hidden
+                                      />
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-10 md:gap-y-0">
+                                <div>
+                                  <p className="text-gray-500">Other Names:</p>
+                                  <p className="mt-0.5 font-medium text-gray-900">
+                                    {personal.middleName?.trim() || '—'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Nationality:</p>
+                                  <p className="mt-0.5 font-medium text-gray-900">
+                                    {personal.nationality?.trim() || '—'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-x-10 md:gap-y-0">
+                                <div>
+                                  <p className="text-gray-500">Date of Birth:</p>
+                                  <p className="mt-0.5 flex flex-wrap items-baseline gap-2 font-medium text-gray-900">
+                                    <span>
+                                      {personal.dateOfBirth?.trim()
+                                        ? (() => {
+                                            const t = personal.dateOfBirth.trim();
+                                            if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+                                            const d = new Date(t);
+                                            if (Number.isNaN(d.getTime())) return t;
+                                            const y = d.getFullYear();
+                                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                                            const day = String(d.getDate()).padStart(2, '0');
+                                            return `${y}-${m}-${day}`;
+                                          })()
+                                        : '—'}
+                                    </span>
+                                    {personalAgeYears != null && (
+                                      <span className="font-normal text-gray-500">
+                                        ({personalAgeYears} yrs)
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Gender:</p>
+                                  <p className="mt-0.5 font-medium text-gray-900">
+                                    {personal.gender?.trim() || '—'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-100 pt-4">
+                              <button
+                                type="button"
+                                onClick={() => setVerifyPersonalModalOpen(true)}
+                                className="text-sm font-semibold text-brand-600 hover:text-brand-700"
+                              >
+                                Open verification options
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSectionEditMode((prev) => ({ ...prev, personal: true }))}
+                                className="text-xs text-gray-500 hover:text-gray-800"
+                              >
+                                Edit personal data
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </section>

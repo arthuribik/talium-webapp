@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
-import { useAppSelector } from '@/store/hooks';
 import {
   HiSearch,
   HiUser,
@@ -111,7 +110,7 @@ const SCOUT_PARAM_KEYS = [
 
 export type ScoutCriteria = {
   jobTitle: string;
-  searchType: 'strict' | 'fuzzy';
+  searchType: 'strict' | 'fuzzy' | 'partial';
   location: string;
   domicile: string;
   workMode: string;
@@ -140,8 +139,6 @@ export type ScoutResponseEntry = {
   respondedAt?: string;
 };
 
-const SCOUT_LISTS_STORAGE_KEY = 'taldium_org_scout_lists';
-
 const DIRECT_SCOUT_EMPLOYMENT_TYPE_OPTIONS = [
   { value: 'full_time', label: 'Full Time' },
   { value: 'contract', label: 'Contract' },
@@ -150,20 +147,29 @@ const DIRECT_SCOUT_EMPLOYMENT_TYPE_OPTIONS = [
   { value: 'consultancy', label: 'Consultancy' },
 ];
 
-function readScoutLists(storageKey: string | null): ScoutListEntry[] {
-  if (!storageKey) return [];
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as ScoutListEntry[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function scoutSearchKey(scoutId: string, criteria: ScoutCriteria): string {
-  return `${scoutId}:${JSON.stringify(criteria)}`;
+function normalizeCriteriaFromApi(raw: unknown): ScoutCriteria {
+  const c = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const benefits = Array.isArray(c.benefits) ? (c.benefits as unknown[]).map(String) : [];
+  const stRaw = String(c.searchType ?? 'strict');
+  const searchType: ScoutCriteria['searchType'] =
+    stRaw === 'fuzzy' ? 'fuzzy' : stRaw === 'partial' ? 'partial' : 'strict';
+  const sp = c.salaryPeriod;
+  const salaryPeriod =
+    sp === 'weekly' || sp === 'monthly' || sp === 'annually' ? sp : 'annually';
+  return {
+    jobTitle: String(c.jobTitle ?? ''),
+    searchType,
+    location: String(c.location ?? 'Global'),
+    domicile: String(c.domicile ?? ''),
+    workMode: String(c.workMode ?? ''),
+    employmentType: String(c.employmentType ?? ''),
+    currency: String(c.currency ?? 'USD'),
+    salaryMin: c.salaryMin != null && c.salaryMin !== '' ? String(c.salaryMin) : '',
+    salaryMax: c.salaryMax != null && c.salaryMax !== '' ? String(c.salaryMax) : '',
+    salaryPeriod,
+    benefits,
+    description: String(c.description ?? ''),
+  };
 }
 
 const WORK_MODE_LABELS: Record<string, string> = {
@@ -189,11 +195,6 @@ function tabFromSearchParams(params: URLSearchParams): 'all' | 'scouted' {
 
 export default function ViewProfessionals() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAppSelector((state) => state.auth);
-  const scoutListsStorageKey = useMemo(() => {
-    const ownerId = (user as any)?.organisationId || user?.id;
-    return ownerId ? `${SCOUT_LISTS_STORAGE_KEY}:${ownerId}` : null;
-  }, [user]);
   const [professionals, setProfessionals] = useState<Professional[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHireModal, setShowHireModal] = useState(false);
@@ -227,7 +228,7 @@ export default function ViewProfessionals() {
   const [professionalsTab, setProfessionalsTab] = useState<'all' | 'scouted'>(() =>
     tabFromSearchParams(searchParams),
   );
-  const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>(() => readScoutLists(scoutListsStorageKey));
+  const [scoutLists, setScoutLists] = useState<ScoutListEntry[]>([]);
   const [activeScoutId, setActiveScoutId] = useState<string | null>(null);
   const [scoutViewTab, setScoutViewTab] = useState<'request' | 'response'>('request');
   const [scoutResponses, setScoutResponses] = useState<ScoutResponseEntry[]>([]);
@@ -238,9 +239,7 @@ export default function ViewProfessionals() {
   const [profMenuPosition, setProfMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const scoutMenuPortalRef = useRef<HTMLDivElement>(null);
   const profMenuPortalRef = useRef<HTMLDivElement>(null);
-  const scoutIdFromUserClickRef = useRef<string | null>(null);
-  const lastScoutSearchKeyRef = useRef<string | null>(null);
-  const skipScoutListPersistRef = useRef(false);
+  const skipNextScoutDetailFetchRef = useRef(false);
   const [scoutForm, setScoutForm] = useState({
     jobTitle: '',
     searchType: 'strict' as 'strict' | 'fuzzy',
@@ -277,103 +276,82 @@ export default function ViewProfessionals() {
 
   useEffect(() => {
     if (professionalsTab === 'all' && !scoutSearchActive) fetchProfessionals();
-  }, [filters, page, scoutSearchActive, professionalsTab, scoutListsStorageKey]);
+  }, [filters, page, scoutSearchActive, professionalsTab]);
 
-  useEffect(() => {
-    skipScoutListPersistRef.current = true;
-    setScoutLists(readScoutLists(scoutListsStorageKey));
-    setActiveScoutId(null);
-    setScoutSearchActive(false);
-    setProfessionals([]);
-  }, [scoutListsStorageKey]);
-
-  useEffect(() => {
-    if (skipScoutListPersistRef.current) {
-      skipScoutListPersistRef.current = false;
-      return;
-    }
-    if (!scoutListsStorageKey) return;
+  const fetchScoutLists = useCallback(async () => {
     try {
-      localStorage.setItem(scoutListsStorageKey, JSON.stringify(scoutLists));
+      const res = await api.get('/v1/organisation/professionals/scouts');
+      const rows = res.data?.data?.scouts ?? [];
+      setScoutLists(
+        rows.map((r: { id: string; name: string; matchCount?: number; criteria?: unknown; createdAt: number | string }) => ({
+          id: r.id,
+          name: r.name,
+          createdAt: typeof r.createdAt === 'number' ? r.createdAt : new Date(r.createdAt).getTime(),
+          peopleFound: r.matchCount ?? 0,
+          criteria: normalizeCriteriaFromApi(r.criteria),
+        })),
+      );
     } catch {
-      // ignore
-    }
-  }, [scoutLists, scoutListsStorageKey]);
-
-  const runScoutSearchWithCriteria = useCallback(async (criteria: ScoutCriteria, scoutId?: string) => {
-    if (scoutId) {
-      lastScoutSearchKeyRef.current = scoutSearchKey(scoutId, criteria);
-    }
-    setLoading(true);
-    try {
-      const jobTitle = criteria.jobTitle.trim() || undefined;
-      const res = await api.post('/v1/organisation/professionals/scout-search', {
-        jobTitle,
-        searchType: criteria.searchType,
-        location: criteria.location || undefined,
-        domicile: criteria.domicile.trim() || undefined,
-        workMode: criteria.workMode || undefined,
-        employmentType: criteria.employmentType || undefined,
-        currency: criteria.currency || undefined,
-        salaryMin: criteria.salaryMin ? Number(criteria.salaryMin) : undefined,
-        salaryMax: criteria.salaryMax ? Number(criteria.salaryMax) : undefined,
-        benefits: criteria.benefits?.length ? criteria.benefits : undefined,
-        description: criteria.description?.trim() || undefined,
-      });
-      const data = res.data?.data;
-      const matchedProfessionals = data?.professionals || [];
-      setProfessionals(matchedProfessionals);
-      setTotalPages(data?.pagination?.totalPages || 1);
-      setPage(1);
-      setScoutSearchActive(true);
-      const peopleFound =
-        typeof data?.pagination?.total === 'number'
-          ? data.pagination.total
-          : matchedProfessionals.length;
-      setScoutLists((prev) => {
-        if (!scoutId) return prev;
-        let changed = false;
-        const next = prev.map((entry) => {
-          if (entry.id !== scoutId) return entry;
-          if (entry.peopleFound === peopleFound) return entry;
-          changed = true;
-          return { ...entry, peopleFound };
-        });
-        return changed ? next : prev;
-      });
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Scout search failed');
-      setProfessionals([]);
-    } finally {
-      setLoading(false);
+      toast.error('Failed to load scout lists');
+      setScoutLists([]);
     }
   }, []);
 
-  // Read tab + scout + view from URL on mount and when URL changes (e.g. back/forward)
+  useEffect(() => {
+    if (professionalsTab === 'scouted') void fetchScoutLists();
+  }, [professionalsTab, fetchScoutLists]);
+
+  // Read tab + scout + view from URL; load scout matches from API (single GET per scout id)
   useEffect(() => {
     const tab = tabFromSearchParams(searchParams);
     setProfessionalsTab(tab);
     const scoutId = searchParams.get('scout');
     const view = searchParams.get('view');
     if (view === 'request' || view === 'response') setScoutViewTab(view);
-    else if (scoutId) setScoutViewTab('request'); // default to Request when opening scout link without view=
-    if (scoutId) {
-      const entry = scoutLists.find((e) => e.id === scoutId);
-      if (entry) {
-        setActiveScoutId(scoutId);
-        const key = scoutSearchKey(scoutId, entry.criteria);
-        // Skip running search if URL was just updated by our row click (avoid double run)
-        if (scoutIdFromUserClickRef.current !== scoutId && lastScoutSearchKeyRef.current !== key) {
-          lastScoutSearchKeyRef.current = key;
-          runScoutSearchWithCriteria(entry.criteria, scoutId);
-        }
-        scoutIdFromUserClickRef.current = null;
-      } else setActiveScoutId(null);
-    } else {
+    else if (scoutId) setScoutViewTab('request');
+
+    if (tab !== 'scouted') {
       setActiveScoutId(null);
-      lastScoutSearchKeyRef.current = null;
+      return;
     }
-  }, [searchParams, scoutLists, runScoutSearchWithCriteria]);
+
+    if (!scoutId) {
+      setActiveScoutId(null);
+      return;
+    }
+
+    setActiveScoutId(scoutId);
+
+    if (skipNextScoutDetailFetchRef.current) {
+      skipNextScoutDetailFetchRef.current = false;
+      return;
+    }
+
+    const ac = new AbortController();
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await api.get(`/v1/organisation/professionals/scouts/${scoutId}`, {
+          signal: ac.signal,
+        });
+        const d = res.data?.data;
+        if (!d) return;
+        setProfessionals(d.professionals || []);
+        setTotalPages(d.pagination?.totalPages || 1);
+        setPage(1);
+        setScoutSearchActive(true);
+      } catch (err: unknown) {
+        const ax = err as { name?: string; code?: string; message?: string };
+        if (ax?.name === 'CanceledError' || ax?.code === 'ERR_CANCELED' || ax?.message === 'canceled') return;
+        toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load scout list');
+        setProfessionals([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    return () => ac.abort();
+  }, [searchParams]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -513,73 +491,51 @@ export default function ViewProfessionals() {
   };
 
   const handleScoutSearchSubmit = async () => {
+    const wasEditing = !!editingScoutId;
+    const scoutIdBeingEdited = editingScoutId;
     const jobTitle = scoutForm.jobTitle.trim() || undefined;
+    const name = [scoutForm.jobTitle || 'Scout', scoutForm.location || 'Global'].filter(Boolean).join(' · ') || 'Scout list';
+    const payload = {
+      jobTitle,
+      searchType: scoutForm.searchType,
+      location: scoutForm.location || undefined,
+      domicile: scoutForm.domicile.trim() || undefined,
+      workMode: scoutForm.workMode || undefined,
+      employmentType: scoutForm.employmentType || undefined,
+      currency: scoutForm.currency || undefined,
+      salaryMin: scoutForm.salaryMin ? Number(scoutForm.salaryMin) : undefined,
+      salaryMax: scoutForm.salaryMax ? Number(scoutForm.salaryMax) : undefined,
+      benefits: scoutForm.benefits.length ? scoutForm.benefits : undefined,
+      description: scoutForm.description.trim() || undefined,
+      salaryPeriod: scoutForm.salaryPeriod,
+      name,
+    };
     setScoutSearchLoading(true);
     try {
-      const res = await api.post('/v1/organisation/professionals/scout-search', {
-        jobTitle,
-        searchType: scoutForm.searchType,
-        location: scoutForm.location || undefined,
-        domicile: scoutForm.domicile.trim() || undefined,
-        workMode: scoutForm.workMode || undefined,
-        employmentType: scoutForm.employmentType || undefined,
-        currency: scoutForm.currency || undefined,
-        salaryMin: scoutForm.salaryMin ? Number(scoutForm.salaryMin) : undefined,
-        salaryMax: scoutForm.salaryMax ? Number(scoutForm.salaryMax) : undefined,
-        benefits: scoutForm.benefits.length ? scoutForm.benefits : undefined,
-        description: scoutForm.description.trim() || undefined,
-      });
+      const res = wasEditing && scoutIdBeingEdited
+        ? await api.patch(`/v1/organisation/professionals/scouts/${scoutIdBeingEdited}`, payload)
+        : await api.post('/v1/organisation/professionals/scout-search', payload);
       const data = res.data?.data;
       const matchedProfessionals = data?.professionals || [];
+      const scoutMeta = data?.scout as { id?: string } | undefined;
+      const scoutId = scoutMeta?.id ?? (wasEditing ? scoutIdBeingEdited : undefined);
       setProfessionals(matchedProfessionals);
       setTotalPages(data?.pagination?.totalPages || 1);
       setPage(1);
       setScoutSearchActive(true);
-      const peopleFoundTotal =
-        typeof data?.pagination?.total === 'number'
-          ? data.pagination.total
-          : matchedProfessionals.length;
-      const criteria: ScoutCriteria = {
-        jobTitle: scoutForm.jobTitle,
-        searchType: scoutForm.searchType,
-        location: scoutForm.location,
-        domicile: scoutForm.domicile,
-        workMode: scoutForm.workMode,
-        employmentType: scoutForm.employmentType,
-        currency: scoutForm.currency,
-        salaryMin: scoutForm.salaryMin,
-        salaryMax: scoutForm.salaryMax,
-        salaryPeriod: scoutForm.salaryPeriod,
-        benefits: [...scoutForm.benefits],
-        description: scoutForm.description,
-      };
-      const name = [scoutForm.jobTitle || 'Scout', scoutForm.location || 'Global'].filter(Boolean).join(' · ') || 'Scout list';
-      if (editingScoutId) {
-        setScoutLists((prev) =>
-          prev.map((e) =>
-            e.id === editingScoutId
-              ? { ...e, name, peopleFound: peopleFoundTotal, criteria, createdAt: e.createdAt }
-              : e
-          )
-        );
-        setActiveScoutId(editingScoutId);
-        setEditingScoutId(null);
-        setShowScoutModal(false);
-        toast.success(`Scout list updated: ${peopleFoundTotal} professional(s) found.`);
-      } else {
-        const entry: ScoutListEntry = {
-          id: crypto.randomUUID(),
-          name,
-          createdAt: Date.now(),
-          peopleFound: peopleFoundTotal,
-          criteria,
-        };
-        setScoutLists((prev) => [entry, ...prev]);
-        setActiveScoutId(entry.id);
+      await fetchScoutLists();
+      if (scoutId) {
+        skipNextScoutDetailFetchRef.current = true;
+        setActiveScoutId(scoutId);
         setProfessionalsTab('scouted');
-        setShowScoutModal(false);
-        toast.success(`Created scout list: ${peopleFoundTotal} professional(s) found.`);
       }
+      setEditingScoutId(null);
+      setShowScoutModal(false);
+      toast.success(
+        wasEditing
+          ? `Scout list updated: ${matchedProfessionals.length} professional(s) found.`
+          : `Created scout list: ${matchedProfessionals.length} professional(s) found.`,
+      );
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Scout search failed');
     } finally {
@@ -879,9 +835,7 @@ export default function ViewProfessionals() {
                                 key={entry.id}
                                 onClick={() => {
                                   if (scoutActionMenuId === entry.id) return;
-                                  scoutIdFromUserClickRef.current = entry.id;
                                   setActiveScoutId(entry.id);
-                                  runScoutSearchWithCriteria(entry.criteria, entry.id);
                                 }}
                                 className="hover:bg-brand-50 cursor-pointer"
                               >
@@ -932,11 +886,13 @@ export default function ViewProfessionals() {
               <button
                 type="button"
                 onClick={() => {
+                  const c = entry.criteria;
                   setScoutForm({
-                    ...entry.criteria,
-                    salaryPeriod: entry.criteria.salaryPeriod ?? 'annually',
+                    ...c,
+                    searchType: c.searchType === 'fuzzy' ? 'fuzzy' : 'strict',
+                    salaryPeriod: c.salaryPeriod ?? 'annually',
                     benefitInput: '',
-                    description: entry.criteria.description ?? '',
+                    description: c.description ?? '',
                   });
                   setEditingScoutId(entry.id);
                   setShowScoutModal(true);
@@ -949,9 +905,18 @@ export default function ViewProfessionals() {
               <button
                 type="button"
                 onClick={() => {
-                  setScoutLists((prev) => prev.filter((e) => e.id !== entry.id));
-                  if (activeScoutId === entry.id) setActiveScoutId(null);
-                  setScoutActionMenuId(null);
+                  void (async () => {
+                    try {
+                      await api.delete(`/v1/organisation/professionals/scouts/${entry.id}`);
+                      if (activeScoutId === entry.id) setActiveScoutId(null);
+                      await fetchScoutLists();
+                      toast.success('Scout list removed');
+                    } catch (err: any) {
+                      toast.error(err.response?.data?.message || 'Failed to remove scout list');
+                    } finally {
+                      setScoutActionMenuId(null);
+                    }
+                  })();
                 }}
                 className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
               >
