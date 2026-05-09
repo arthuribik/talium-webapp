@@ -68,7 +68,6 @@ interface MemberDetail {
   activityLog: {
     items: ActivityLogEntry[];
     total: number;
-    isPlaceholder?: boolean;
   };
   activitySummary?: {
     verificationsReviewed: number;
@@ -77,7 +76,6 @@ interface MemberDetail {
     kybChecksRun: number;
     profilesEdited: number;
     logins30d: number;
-    isPlaceholder?: boolean;
   };
   sessionInfo: {
     activeSessions: number;
@@ -333,11 +331,6 @@ function ProfileTabBody({
 
         <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Session info</h2>
-          {member.sessionInfo?.isPlaceholder && (
-            <p className="mt-2 text-xs text-gray-400">
-              Sample values until session tracking is connected.
-            </p>
-          )}
           <dl className="mt-4 space-y-3 text-sm">
             <div>
               <dt className="text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -393,40 +386,43 @@ function ActivityTabBody({
     logins30d: 0,
   };
 
+  const hasActivity =
+    (member.activityLog.total ?? 0) > 0 || member.activityLog.items.length > 0;
+
+  if (!hasActivity) {
+    return (
+      <div className="rounded-xl border border-dashed border-gray-300 bg-white px-8 py-16 text-center shadow-sm">
+        <p className="text-base font-semibold text-gray-900">No activity yet</p>
+        <p className="mt-3 mx-auto max-w-md text-sm text-gray-500 leading-relaxed">
+          There are no verification or review actions tied to this administrator in the database yet.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
           Admin activity log
         </h2>
-        {member.activityLog.isPlaceholder && (
-          <p className="mt-2 text-xs text-gray-400">
-            Sample entries until admin activity is persisted to the database.
-          </p>
-        )}
-        {member.activityLog.items.length === 0 ? (
-          <p className="mt-6 text-center text-sm text-gray-500 py-8">
-            No activity has been recorded for this member yet.
-          </p>
-        ) : (
-          <ul className="mt-6 space-y-0 divide-y divide-gray-100">
-            {member.activityLog.items.map((entry) => {
-              const level = (entry.level ?? 'info') as ActivityLevel;
-              return (
-                <li key={entry.id} className="flex gap-3 py-4 first:pt-0">
-                  <span
-                    className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${activityDotClass(level)}`}
-                    aria-hidden
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900 leading-snug">{entry.title}</p>
-                    <p className="mt-1 text-xs text-gray-500">{formatActivityTimestamp(entry.at)}</p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <ul className="mt-6 space-y-0 divide-y divide-gray-100">
+          {member.activityLog.items.map((entry) => {
+            const level = (entry.level ?? 'info') as ActivityLevel;
+            return (
+              <li key={entry.id} className="flex gap-3 py-4 first:pt-0">
+                <span
+                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${activityDotClass(level)}`}
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900 leading-snug">{entry.title}</p>
+                  <p className="mt-1 text-xs text-gray-500">{formatActivityTimestamp(entry.at)}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <div className="space-y-6">
@@ -434,9 +430,6 @@ function ActivityTabBody({
           <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Activity summary
           </h2>
-          {summary?.isPlaceholder && (
-            <p className="mt-2 text-xs text-gray-400">Illustrative totals for this preview.</p>
-          )}
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex justify-between gap-4">
               <dt className="text-gray-600">Verifications reviewed</dt>
