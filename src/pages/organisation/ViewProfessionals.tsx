@@ -193,6 +193,36 @@ function tabFromSearchParams(params: URLSearchParams): 'all' | 'scouted' {
   return 'scouted';
 }
 
+type HireFormState = {
+  jobTitle: string;
+  employmentType: string;
+  workMode: string;
+  roleLocationOffice: string;
+  description: string;
+};
+
+const EMPTY_HIRE_FORM: HireFormState = {
+  jobTitle: '',
+  employmentType: '',
+  workMode: '',
+  roleLocationOffice: '',
+  description: '',
+};
+
+function hireFormFromScoutCriteria(criteria: ScoutCriteria | null): HireFormState {
+  if (!criteria) return { ...EMPTY_HIRE_FORM };
+  const office =
+    criteria.domicile?.trim() ||
+    (criteria.location && criteria.location !== 'Global' ? criteria.location : '');
+  return {
+    jobTitle: criteria.jobTitle?.trim() || '',
+    employmentType: criteria.employmentType || '',
+    workMode: criteria.workMode || '',
+    roleLocationOffice: office,
+    description: criteria.description || '',
+  };
+}
+
 export default function ViewProfessionals() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [professionals, setProfessionals] = useState<Professional[]>([]);
@@ -203,13 +233,7 @@ export default function ViewProfessionals() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const actionMenuRef = useRef<HTMLDivElement>(null);
-  const [hireForm, setHireForm] = useState({
-    jobTitle: '',
-    employmentType: '',
-    workMode: '',
-    roleLocationOffice: '',
-    description: '',
-  });
+  const [hireForm, setHireForm] = useState<HireFormState>({ ...EMPTY_HIRE_FORM });
   const [orgProfile, setOrgProfile] = useState<{ companyName?: string; industry?: string } | null>(null);
   const [messageForm, setMessageForm] = useState({ subject: '', message: '', jobTitle: '' });
   const [filters, setFilters] = useState<SearchFilters>({
@@ -479,15 +503,49 @@ export default function ViewProfessionals() {
     setProfileDetail(null);
   };
 
-  const handleScout = (professional: Professional) => {
-    setActionMenuId(null);
+  const resolveScoutCriteriaForSend = (): ScoutCriteria | null => {
+    if (activeScoutId) {
+      const entry = scoutLists.find((e) => e.id === activeScoutId);
+      if (entry) return entry.criteria;
+    }
+    const hasCriteria =
+      scoutForm.jobTitle.trim() ||
+      scoutForm.workMode ||
+      scoutForm.employmentType ||
+      scoutForm.domicile.trim() ||
+      scoutForm.description.trim();
+    if (scoutSearchActive && hasCriteria) {
+      return {
+        jobTitle: scoutForm.jobTitle,
+        searchType: scoutForm.searchType,
+        location: scoutForm.location,
+        domicile: scoutForm.domicile,
+        workMode: scoutForm.workMode,
+        employmentType: scoutForm.employmentType,
+        currency: scoutForm.currency,
+        salaryMin: scoutForm.salaryMin,
+        salaryMax: scoutForm.salaryMax,
+        salaryPeriod: scoutForm.salaryPeriod,
+        benefits: scoutForm.benefits,
+        description: scoutForm.description,
+      };
+    }
+    return null;
+  };
+
+  const openSendScoutModal = (professional: Professional | null) => {
     setSelectedProfessional(professional);
-    setHireForm({ jobTitle: '', employmentType: '', workMode: '', roleLocationOffice: '', description: '' });
+    setHireForm(hireFormFromScoutCriteria(resolveScoutCriteriaForSend()));
     setShowHireModal(true);
     api.get('/v1/organisation/profile').then((r) => {
       const o = r.data?.data;
       if (o) setOrgProfile({ companyName: o.companyName, industry: o.industry });
     }).catch(() => setOrgProfile(null));
+  };
+
+  const handleScout = (professional: Professional) => {
+    setActionMenuId(null);
+    openSendScoutModal(professional);
   };
 
   const handleScoutSearchSubmit = async () => {
@@ -609,7 +667,7 @@ export default function ViewProfessionals() {
       }
       setShowHireModal(false);
       setSelectedProfessional(null);
-      setHireForm({ jobTitle: '', employmentType: '', workMode: '', roleLocationOffice: '', description: '' });
+      setHireForm({ ...EMPTY_HIRE_FORM });
       fetchProfessionals();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to send scout request');
@@ -988,14 +1046,7 @@ export default function ViewProfessionals() {
             </span>
             <button
               type="button"
-              onClick={() => {
-                setSelectedProfessional(null);
-                setShowHireModal(true);
-                api.get('/v1/organisation/profile').then((r) => {
-                  const o = r.data?.data;
-                  if (o) setOrgProfile({ companyName: o.companyName, industry: o.industry });
-                }).catch(() => setOrgProfile(null));
-              }}
+              onClick={() => openSendScoutModal(null)}
               className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
             >
               <HiPaperAirplane className="w-5 h-5" />
@@ -1320,14 +1371,8 @@ export default function ViewProfessionals() {
                           yearsOfExperience: profileDetail.yearsOfExperience ?? 0,
                           verificationStatus: profileDetail.verificationStatus || { percentage: 0, status: '' },
                         };
-                        setSelectedProfessional(pro);
-                        setHireForm({ jobTitle: '', employmentType: '', workMode: '', roleLocationOffice: '', description: '' });
                         closeProfileDrawer();
-                        setShowHireModal(true);
-                        api.get('/v1/organisation/profile').then((r) => {
-                          const o = r.data?.data;
-                          if (o) setOrgProfile({ companyName: o.companyName, industry: o.industry });
-                        }).catch(() => setOrgProfile(null));
+                        openSendScoutModal(pro);
                       }}
                       className="flex-1 flex items-center justify-center gap-2 py-3 bg-brand-500 text-white rounded-lg hover:bg-brand-600 font-medium"
                     >

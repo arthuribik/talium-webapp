@@ -54,6 +54,7 @@ import OrganisationSettings from '@/pages/organisation/Settings';
 import OrganisationProfile from '@/pages/organisation/OrganisationProfile';
 import BillingSubscription from '@/pages/organisation/BillingSubscription';
 import Team from '@/pages/organisation/Team';
+import OrganisationTeamMemberDetail from '@/pages/organisation/OrganisationTeamMemberDetail';
 import ProfessionalDashboard from '@/pages/professional/Dashboard';
 import ProfessionalJobs from '@/pages/professional/Jobs';
 import ProfessionalJobDetail from '@/pages/professional/JobDetail';
@@ -714,6 +715,14 @@ function AppRoutes() {
         element={
           <OrganisationRoute>
             <Team />
+          </OrganisationRoute>
+        }
+      />
+      <Route
+        path="/organization/team/:userId"
+        element={
+          <OrganisationRoute>
+            <OrganisationTeamMemberDetail />
           </OrganisationRoute>
         }
       />

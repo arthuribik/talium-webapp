@@ -21,6 +21,7 @@ import {
   HiShieldCheck,
   HiInformationCircle,
   HiAtSymbol,
+  HiPhone,
   HiX,
   HiCheckCircle,
   HiUserGroup,
@@ -133,6 +134,8 @@ export default function OrganisationProfile() {
     // Contact & Online
     organisationEmail: '',
     phoneNumber: '',
+    supportEmail: '',
+    officialEmailDomain: '',
     website: '',
     socialMedia: {
       facebook: '',
@@ -230,6 +233,12 @@ export default function OrganisationProfile() {
           // Contact & Online
           organisationEmail: org.user?.email || '',
           phoneNumber: org.user?.phoneNumber || '',
+          supportEmail: org.supportEmail || org.user?.email || '',
+          officialEmailDomain:
+            org.officialEmailDomain ||
+            (org.user?.email?.includes('@')
+              ? `@${org.user.email.split('@').pop()}`
+              : ''),
           website: org.website || '',
           socialMedia: {
             facebook: org.socialMedia?.facebook || '',
@@ -504,16 +513,15 @@ export default function OrganisationProfile() {
   const yearOfIncorporation = foundedYear || (formData.countryOfIncorporation ? new Date().getFullYear() : null);
 
   const kybVerified = organization?.verificationStatus === 'verified' || organization?.verified;
+  const kybFieldsLocked = kybVerified;
+  const lockedFieldClass = kybFieldsLocked
+    ? 'bg-gray-50 text-gray-700 cursor-not-allowed'
+    : '';
   const kybReview =
     organization?.verificationStatus === 'under_review' ||
     String(organization?.verificationStatus || '').toLowerCase() === 'pending_review';
   const kybStatusHeader =
     kybVerified ? 'Verified' : kybReview ? 'Under review' : 'Unverified';
-  const officialEmailDomain =
-    formData.organisationEmail?.includes('@')
-      ? `@${formData.organisationEmail.split('@').pop()}`
-      : '';
-
   if (loading) {
     return (
       <OrganisationLayout>
@@ -778,6 +786,13 @@ export default function OrganisationProfile() {
                       <p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p>
                     </div>
                   </div>
+                  <div className="flex items-start gap-3">
+                    <HiPhone className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Phone</p>
+                      <p className="text-gray-900 font-medium">{formData.phoneNumber || '—'}</p>
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
@@ -847,7 +862,7 @@ export default function OrganisationProfile() {
                   <FaEnvelope className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Support Email</p>
-                    <p className="text-gray-900 font-medium">{formData.organisationEmail || '—'}</p>
+                    <p className="text-gray-900 font-medium">{formData.supportEmail || '—'}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -856,7 +871,7 @@ export default function OrganisationProfile() {
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">
                       Official Email Domain
                     </p>
-                    <p className="text-gray-900 font-medium">{officialEmailDomain || '—'}</p>
+                    <p className="text-gray-900 font-medium">{formData.officialEmailDomain || '—'}</p>
                   </div>
                 </div>
               </div>
@@ -867,6 +882,11 @@ export default function OrganisationProfile() {
         {/* Organisation Overview — edit mode: form */}
         {activeTab === 'overview' && profileEditMode && (
           <form onSubmit={handleProfileSubmit} className="space-y-6 pb-8">
+            {kybFieldsLocked && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Organisation name, incorporation details, year founded, phone number, and address are locked after KYB verification.
+              </div>
+            )}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex items-center justify-between">
               <p className="text-gray-600 text-sm">Edit your organisation details below, then save.</p>
               <div className="flex items-center gap-2">
@@ -902,22 +922,27 @@ export default function OrganisationProfile() {
                     <input
                       type="text"
                       required
+                      readOnly={kybFieldsLocked}
                       value={formData.isRegistered ? formData.legalName : formData.organisationName}
                       onChange={(e) => setFormData({ 
                         ...formData, 
                         [formData.isRegistered ? 'legalName' : 'organisationName']: e.target.value 
                       })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                       placeholder={formData.isRegistered ? "Enter legal name" : "Enter organisation name"}
                     />
+                    {kybFieldsLocked && (
+                      <p className="text-xs text-gray-500 mt-1">Locked after KYB verification</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
                     <input
                       type="text"
+                      readOnly={kybFieldsLocked}
                       value={formData.companyName}
                       onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                       placeholder="Enter company name"
                     />
                   </div>
@@ -977,7 +1002,11 @@ export default function OrganisationProfile() {
                     onChange={(value) => setFormData({ ...formData, phoneNumber: value })}
                     label="Phone Number"
                     placeholder="Enter phone number"
+                    disabled={kybFieldsLocked}
                   />
+                  {kybFieldsLocked && (
+                    <p className="text-xs text-gray-500 mt-1">Locked after KYB verification</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -991,24 +1020,26 @@ export default function OrganisationProfile() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, isRegistered: true })}
+                  disabled={kybFieldsLocked}
+                  onClick={() => !kybFieldsLocked && setFormData({ ...formData, isRegistered: true })}
                   className={`p-4 rounded-lg border-2 text-left transition-all ${
                     formData.isRegistered === true
                       ? 'border-brand-500 bg-brand-50'
                       : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  } ${kybFieldsLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   <div className="font-medium text-gray-900 mb-1">Registered</div>
                   <div className="text-sm text-gray-600">Organisation is legally registered</div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, isRegistered: false })}
+                  disabled={kybFieldsLocked}
+                  onClick={() => !kybFieldsLocked && setFormData({ ...formData, isRegistered: false })}
                   className={`p-4 rounded-lg border-2 text-left transition-all ${
                     formData.isRegistered === false
                       ? 'border-brand-500 bg-brand-50'
                       : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                  } ${kybFieldsLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   <div className="font-medium text-gray-900 mb-1">Not Registered</div>
                   <div className="text-sm text-gray-600">Organisation is not legally registered</div>
@@ -1026,9 +1057,10 @@ export default function OrganisationProfile() {
                       </label>
                       <select
                         required
+                        disabled={kybFieldsLocked}
                         value={formData.countryOfIncorporation}
                         onChange={(e) => setFormData({ ...formData, countryOfIncorporation: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                       >
                         <option value="">Select country</option>
                         {COUNTRIES.map((country) => (
@@ -1043,9 +1075,10 @@ export default function OrganisationProfile() {
                       <input
                         type="text"
                         required
+                        readOnly={kybFieldsLocked}
                         value={formData.incorporationNumber}
                         onChange={(e) => setFormData({ ...formData, incorporationNumber: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                         placeholder="Enter incorporation number"
                       />
                     </div>
@@ -1063,9 +1096,10 @@ export default function OrganisationProfile() {
                     </label>
                     <select
                       required
+                      disabled={kybFieldsLocked}
                       value={formData.organisationCountry}
                       onChange={(e) => setFormData({ ...formData, organisationCountry: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     >
                       <option value="">Select country</option>
                       {COUNTRIES.map((country) => (
@@ -1291,11 +1325,15 @@ export default function OrganisationProfile() {
                   <input
                     type="date"
                     required
+                    readOnly={kybFieldsLocked}
                     value={formData.foundedDate}
                     onChange={(e) => setFormData({ ...formData, foundedDate: e.target.value })}
                     max={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                   />
+                  {kybFieldsLocked && (
+                    <p className="text-xs text-gray-500 mt-1">Locked after KYB verification</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1319,6 +1357,42 @@ export default function OrganisationProfile() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                     placeholder="https://www.example.com"
                   />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <FaEnvelope className="w-4 h-4 mr-1 text-gray-500" />
+                      Support Email
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.supportEmail}
+                      onChange={(e) => setFormData({ ...formData, supportEmail: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      placeholder="support@example.com"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Public email for support and enquiries
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                      <HiAtSymbol className="w-4 h-4 mr-1 text-gray-500" />
+                      Official Email Domain
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.officialEmailDomain}
+                      onChange={(e) =>
+                        setFormData({ ...formData, officialEmailDomain: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      placeholder="@example.com"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Your organisation&apos;s official email domain (e.g. @company.com)
+                    </p>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -1411,17 +1485,21 @@ export default function OrganisationProfile() {
                 <HiLocationMarker className="w-5 h-5 mr-2 text-brand-600" />
                 Address
               </h2>
+              {kybFieldsLocked && (
+                <p className="text-xs text-gray-500 mb-4">Address is locked after KYB verification.</p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Building Name</label>
                   <input
                     type="text"
+                    readOnly={kybFieldsLocked}
                     value={formData.address.buildingName}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, buildingName: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., Tower 1"
                   />
                 </div>
@@ -1429,12 +1507,13 @@ export default function OrganisationProfile() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Street Number</label>
                   <input
                     type="text"
+                    readOnly={kybFieldsLocked}
                     value={formData.address.streetNumber}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, streetNumber: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., 123"
                   />
                 </div>
@@ -1445,12 +1524,13 @@ export default function OrganisationProfile() {
                   <input
                     type="text"
                     required
+                    readOnly={kybFieldsLocked}
                     value={formData.address.street}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, street: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., Victoria Island"
                   />
                 </div>
@@ -1461,12 +1541,13 @@ export default function OrganisationProfile() {
                   <input
                     type="text"
                     required
+                    readOnly={kybFieldsLocked}
                     value={formData.address.city}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, city: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., Lagos"
                   />
                 </div>
@@ -1474,12 +1555,13 @@ export default function OrganisationProfile() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">State/Province</label>
                   <input
                     type="text"
+                    readOnly={kybFieldsLocked}
                     value={formData.address.state}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, state: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., Lagos State"
                   />
                 </div>
@@ -1489,12 +1571,13 @@ export default function OrganisationProfile() {
                   </label>
                   <select
                     required
+                    disabled={kybFieldsLocked}
                     value={formData.address.country}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, country: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                   >
                     <option value="">Select country</option>
                     {COUNTRIES.map((country) => (
@@ -1506,12 +1589,13 @@ export default function OrganisationProfile() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Zip/Postal Code</label>
                   <input
                     type="text"
+                    readOnly={kybFieldsLocked}
                     value={formData.address.zipCode}
                     onChange={(e) => setFormData({
                       ...formData,
                       address: { ...formData.address, zipCode: e.target.value }
                     })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 ${lockedFieldClass}`}
                     placeholder="e.g., 101001"
                   />
                 </div>

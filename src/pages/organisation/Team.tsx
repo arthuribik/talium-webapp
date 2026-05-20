@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import OrganisationLayout from '@/components/organisation/OrganisationLayout';
 import { api } from '@/services/api';
 import { HiUserAdd, HiX, HiDotsVertical } from 'react-icons/hi';
@@ -21,6 +22,15 @@ interface TeamMember {
   role: string;
   joined: string;
   lastActive: string;
+}
+
+interface PendingInvitation {
+  id: string;
+  email: string;
+  role: string;
+  status: 'pending';
+  invitedAt: string;
+  expiresAt: string;
 }
 
 function formatRole(role: string): string {
@@ -62,9 +72,11 @@ function getInitial(name: string, email: string): string {
 }
 
 export default function Team() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<TeamStats | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('org_member');
@@ -84,6 +96,7 @@ export default function Team() {
       ]);
       const statsData = statsRes.data?.data;
       const membersData = membersRes.data?.data?.members || [];
+      const invitationsData = membersRes.data?.data?.invitations || [];
       setStats({
         totalMembers: statsData?.totalMembers ?? 0,
         admins: statsData?.admins ?? 0,
@@ -95,11 +108,19 @@ export default function Team() {
         joined: m.joined ? new Date(m.joined).toISOString() : '',
         lastActive: m.lastActive ? new Date(m.lastActive).toISOString() : '',
       })));
+      setInvitations(
+        invitationsData.map((inv: PendingInvitation) => ({
+          ...inv,
+          invitedAt: inv.invitedAt ? new Date(inv.invitedAt).toISOString() : '',
+          expiresAt: inv.expiresAt ? new Date(inv.expiresAt).toISOString() : '',
+        })),
+      );
     } catch (err) {
       console.error(err);
       toast.error('Failed to load team');
       setStats(null);
       setMembers([]);
+      setInvitations([]);
     } finally {
       setLoading(false);
     }
@@ -127,11 +148,19 @@ export default function Team() {
     }
     setInviteSubmitting(true);
     try {
-      await api.post('/v1/organisation/team/invitations', {
+      const res = await api.post('/v1/organisation/team/invitations', {
         email: inviteEmail.trim(),
         role: inviteRole,
       });
-      toast.success(`Invitation sent to ${inviteEmail.trim()}`);
+      const emailSent = res.data?.data?.emailSent !== false;
+      if (emailSent) {
+        toast.success(`Invitation sent to ${inviteEmail.trim()}`);
+      } else {
+        toast.success(
+          `Invitation saved for ${inviteEmail.trim()}. Email could not be sent — use Resend on the pending list.`,
+          { duration: 6000 },
+        );
+      }
       setShowInviteModal(false);
       setInviteEmail('');
       setInviteRole('org_member');
@@ -154,6 +183,26 @@ export default function Team() {
       fetchTeam();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update role');
+    }
+  };
+
+  const handleResendInvite = async (invitationId: string, email: string) => {
+    try {
+      await api.post(`/v1/organisation/team/invitations/${invitationId}/resend`);
+      toast.success(`Invitation resent to ${email}`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to resend invitation');
+    }
+  };
+
+  const handleCancelInvite = async (invitationId: string, email: string) => {
+    if (!window.confirm(`Cancel invitation for ${email}?`)) return;
+    try {
+      await api.delete(`/v1/organisation/team/invitations/${invitationId}`);
+      toast.success('Invitation cancelled');
+      await fetchTeam();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to cancel invitation');
     }
   };
 
@@ -226,6 +275,65 @@ export default function Team() {
               </div>
             </div>
 
+            {invitations.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
+                <h2 className="text-lg font-bold text-gray-900 px-6 py-4 border-b border-gray-200">
+                  Pending Invitations
+                </h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="text-left text-sm font-medium text-gray-700 px-6 py-3">Email</th>
+                        <th className="text-left text-sm font-medium text-gray-700 px-6 py-3">Role</th>
+                        <th className="text-left text-sm font-medium text-gray-700 px-6 py-3">Invited</th>
+                        <th className="text-left text-sm font-medium text-gray-700 px-6 py-3">Expires</th>
+                        <th className="text-right text-sm font-medium text-gray-700 px-6 py-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invitations.map((inv) => (
+                        <tr key={inv.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                          <td className="px-6 py-4 text-sm text-gray-900">{inv.email}</td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex px-2.5 py-1 rounded-md text-xs font-medium ${roleTagClass(inv.role)}`}
+                            >
+                              {formatRole(inv.role)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {inv.invitedAt ? formatDate(inv.invitedAt) : '—'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {inv.expiresAt ? formatDate(inv.expiresAt) : '—'}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleResendInvite(inv.id, inv.email)}
+                                className="px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50 rounded-lg"
+                              >
+                                Resend
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelInvite(inv.id, inv.email)}
+                                className="px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <h2 className="text-lg font-bold text-gray-900 px-6 py-4 border-b border-gray-200">
                 Team Members
@@ -243,7 +351,21 @@ export default function Team() {
                   </thead>
                   <tbody>
                     {members.map((member) => (
-                      <tr key={member.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <tr
+                        key={member.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
+                          navigate(`/organization/team/${encodeURIComponent(member.userId)}`)
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            navigate(`/organization/team/${encodeURIComponent(member.userId)}`);
+                          }
+                        }}
+                        className="border-b border-gray-100 hover:bg-gray-50/50 cursor-pointer"
+                      >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-semibold text-sm shrink-0">
@@ -268,9 +390,10 @@ export default function Team() {
                         <td className="px-6 py-4 text-sm text-gray-700">
                           {member.lastActive ? formatDate(member.lastActive) : '—'}
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="relative inline-block" ref={actionMenuId === member.id ? actionMenuRef : undefined}>
                             <button
+                              type="button"
                               onClick={() => setActionMenuId(actionMenuId === member.id ? null : member.id)}
                               className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
                             >

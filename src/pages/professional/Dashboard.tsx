@@ -208,12 +208,20 @@ export default function ProfessionalDashboard() {
 
   const { completedVerificationSteps, progressPct } = verificationProgress;
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+  const profileNationality =
+    profile?.nationality?.trim() ||
+    profile?.country?.trim() ||
+    profile?.identityVerification?.nationality?.trim() ||
+    '';
+  const profilePhone =
+    profile?.phoneNumber?.trim() || profile?.user?.phoneNumber?.trim() || user?.phoneNumber?.trim() || '';
+
   const profileDetails = [
     { label: 'Full Name', value: fullName || '—' },
     { label: 'Job Title', value: profile?.profession || '—' },
-    { label: 'Email', value: user?.email || profile?.email || '—' },
-    { label: 'Nationality', value: profile?.nationality || '—' },
-    { label: 'Phone', value: profile?.phoneNumber || '—' },
+    { label: 'Email', value: user?.email || profile?.email || profile?.user?.email || '—' },
+    { label: 'Nationality', value: profileNationality || '—' },
+    { label: 'Phone', value: profilePhone || '—' },
   ];
   const showNewAccountIntro = completedVerificationSteps === 0 && !hasStartedVerification(profile);
 

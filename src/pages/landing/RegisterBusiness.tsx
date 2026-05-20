@@ -766,10 +766,15 @@ export default function RegisterBusiness() {
         setLocalError('Please verify your email address before continuing');
         return;
       }
+      if (!phoneNumber.trim()) {
+        setLocalError('Please enter a phone number');
+        return;
+      }
       // Save step 5 data (this will create ID if needed)
       try {
         await saveStepData(5, {
           organisationEmail: formData.organisationEmail,
+          phoneNumber: phoneNumber,
         });
         setCurrentStep(6);
       } catch (error) {
@@ -1620,7 +1625,7 @@ export default function RegisterBusiness() {
           <button
             type="button"
             onClick={handleNext}
-            disabled={loading || savingStep || !formData.organisationEmail.trim() || !formData.emailVerified}
+            disabled={loading || savingStep || !formData.organisationEmail.trim() || !formData.emailVerified || !phoneNumber.trim()}
             className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {savingStep ? 'Saving...' : 'Continue'}

@@ -1226,12 +1226,12 @@ export default function Jobs() {
                           </span>
                         </div>
                         {offer.message ? (
-                          <p className="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm text-gray-700">
+                          <p className="mt-4 rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm text-gray-700 whitespace-pre-line">
                             {offer.message}
                           </p>
                         ) : null}
                         <div className="mt-4 flex flex-wrap gap-2">
-                          {offer.jobId ? (
+                          {offer.jobId && !offer.isDirectScout ? (
                             <button
                               type="button"
                               onClick={() => navigate(`/professional/jobs/${offer.jobId}`)}

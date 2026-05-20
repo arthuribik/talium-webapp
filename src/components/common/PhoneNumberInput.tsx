@@ -216,6 +216,7 @@ interface PhoneNumberInputProps {
   placeholder?: string;
   className?: string;
   error?: string;
+  disabled?: boolean;
 }
 
 export default function PhoneNumberInput({
@@ -226,6 +227,7 @@ export default function PhoneNumberInput({
   placeholder = 'Enter phone number',
   className = '',
   error,
+  disabled = false,
 }: PhoneNumberInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -340,8 +342,9 @@ export default function PhoneNumberInput({
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className={`flex items-center gap-2 px-3 py-3 border rounded-lg focus:outline-none focus:ring-2 bg-white hover:bg-gray-50 transition-colors min-w-[140px] ${
+            disabled={disabled}
+            onClick={() => !disabled && setIsOpen(!isOpen)}
+            className={`flex items-center gap-2 px-3 py-3 border rounded-lg focus:outline-none focus:ring-2 bg-white hover:bg-gray-50 transition-colors min-w-[140px] disabled:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 ${
               error
                 ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
                 : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
@@ -419,7 +422,9 @@ export default function PhoneNumberInput({
             value={displayNumber}
             onChange={handleNumberChange}
             placeholder={placeholder}
-            className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 ${
+            disabled={disabled}
+            readOnly={disabled}
+            className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 disabled:bg-gray-50 disabled:cursor-not-allowed ${
               error
                 ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
                 : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'
