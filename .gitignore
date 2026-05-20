@@ -1,0 +1,5 @@
+node_modules
+
+# Use pnpm only (see package.json "packageManager")
+package-lock.json
+yarn.lock
